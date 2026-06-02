@@ -1,4 +1,4 @@
-package srv.scrt.vwr.logs
+package srv.scrt.vwr.util.logs
 
 
 /**

@@ -31,7 +31,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun BaseScaffoldSimple(
     modifier: Modifier = Modifier,
-    title: String = "ConnecTreat",
+    title: String = "SCRTVWR",
     subtitle: String = "",
     hasNavigationIcon: Boolean = true,
     onNavigationClick: () -> Unit = { },

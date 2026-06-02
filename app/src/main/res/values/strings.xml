@@ -1,3 +1,9 @@
 <resources>
     <string name="app_name">SCRTVWR</string>
+    <string name="home">Home</string>
+    <string name="directory">Directory</string>
+    <string name="history">History</string>
+    <string name="bookmarks">Bookmarks</string>
+    <string name="hello_name">Hello %1$s!</string>
+    <string name="preview_name">Android</string>
 </resources>
