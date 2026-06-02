@@ -1,4 +1,4 @@
-package com.srv.altruism.util.logs
+package srv.scrt.vwr.logs
 
 
 /**
