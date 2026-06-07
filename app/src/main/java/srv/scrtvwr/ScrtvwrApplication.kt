@@ -1,17 +1,15 @@
 package srv.scrtvwr
 
 import android.app.Application
-import android.util.Log
+import srv.scrtvwr.util.logs.CustomLogger
+import timber.log.Timber
 
 class ScrtvwrApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         if (BuildConfig.DEBUG) {
-            Log.d(TAG, "SCRTVWR application started")
+            Timber.plant(CustomLogger())
         }
-    }
-
-    private companion object {
-        const val TAG = "SCRTVWR"
+        Timber.d("SCRTVWR application started")
     }
 }

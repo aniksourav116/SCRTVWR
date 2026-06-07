@@ -2,9 +2,10 @@ package srv.scrtvwr
 
 import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Dashboard
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,7 +22,7 @@ class DashboardViewModel : ViewModel() {
 }
 
 data class DashboardUiState(
-    val currentDestination: AppDestination = AppDestination.DASHBOARD,
+    val currentDestination: AppDestination = AppDestination.STORAGE,
     val destinations: List<AppDestination> = AppDestination.entries,
 )
 
@@ -29,7 +30,8 @@ enum class AppDestination(
     @param:StringRes val label: Int,
     val icon: ImageVector,
 ) {
-    DASHBOARD(R.string.dashboard, Icons.Default.Dashboard),
-    LIBRARY(R.string.library, Icons.Default.VideoLibrary),
-    SETTINGS(R.string.settings, Icons.Default.Settings),
+    STORAGE(R.string.storage, Icons.Default.Storage),
+    DIRECTORY(R.string.directory, Icons.Default.Folder),
+    HISTORY(R.string.history, Icons.Default.History),
+    OTHERS(R.string.others, Icons.Default.MoreHoriz),
 }

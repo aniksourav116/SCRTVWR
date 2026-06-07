@@ -76,9 +76,10 @@ private fun DashboardPanel(
     modifier: Modifier = Modifier,
 ) {
     val message = when (destination) {
-        AppDestination.DASHBOARD -> R.string.dashboard_welcome
-        AppDestination.LIBRARY -> R.string.library_hint
-        AppDestination.SETTINGS -> R.string.settings_hint
+        AppDestination.STORAGE -> R.string.storage_hint
+        AppDestination.DIRECTORY -> R.string.directory_hint
+        AppDestination.HISTORY -> R.string.history_hint
+        AppDestination.OTHERS -> R.string.others_hint
     }
 
     Column(
