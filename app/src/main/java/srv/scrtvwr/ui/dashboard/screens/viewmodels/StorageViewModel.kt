@@ -1,6 +1,7 @@
 package srv.scrtvwr.ui.dashboard.screens.viewmodels
 
 import android.app.Application
+import android.content.Intent
 import android.os.Build
 import android.os.Environment
 import android.os.storage.StorageManager
@@ -33,7 +34,7 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
             if (totalBytes <= 0L) return@mapNotNull null
 
             StorageDevice(
-                id = volume.uuid ?: if (volume.isPrimary) "primary" else directory.absolutePath,
+                id = volume.deviceId(directory),
                 name = volume.getDescription(context),
                 type = volume.deviceType(context),
                 totalBytes = totalBytes,
@@ -46,6 +47,21 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
             devices = volumes,
             lastChecked = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date()),
         )
+    }
+
+    fun createOpenDirectoryIntent(deviceId: String): Intent {
+        val context = getApplication<Application>()
+        val storageManager = context.getSystemService(StorageManager::class.java)
+        val volume = storageManager.storageVolumes.firstOrNull { volume ->
+            val directory = volume.directory(context, storageManager) ?: return@firstOrNull false
+            volume.deviceId(directory) == deviceId
+        }
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && volume != null) {
+            volume.createOpenDocumentTreeIntent().applyDirectoryAccessFlags()
+        } else {
+            Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).applyDirectoryAccessFlags()
+        }
     }
 }
 
@@ -93,4 +109,16 @@ private fun StorageVolume.deviceType(context: Application): String {
     } else {
         "Removable storage"
     }
+}
+
+private fun StorageVolume.deviceId(directory: File): String =
+    uuid ?: if (isPrimary) "primary" else directory.absolutePath
+
+private fun Intent.applyDirectoryAccessFlags(): Intent = apply {
+    addFlags(
+        Intent.FLAG_GRANT_READ_URI_PERMISSION or
+            Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+            Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+            Intent.FLAG_GRANT_PREFIX_URI_PERMISSION,
+    )
 }

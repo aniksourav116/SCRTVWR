@@ -9,6 +9,7 @@ import android.os.Environment
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -59,6 +60,9 @@ fun Storage(
     val allFilesAccessLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { viewModel.refresh() }
+    val openDirectoryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { viewModel.refresh() }
 
     LaunchedEffect(Unit) {
         when {
@@ -81,13 +85,21 @@ fun Storage(
         }
     }
 
-    StorageScreen(uiState, viewModel::refresh, modifier)
+    StorageScreen(
+        uiState = uiState,
+        onRefresh = viewModel::refresh,
+        onOpenDevice = { device ->
+            openDirectoryLauncher.launch(viewModel.createOpenDirectoryIntent(device.id))
+        },
+        modifier = modifier,
+    )
 }
 
 @Composable
 fun StorageScreen(
     uiState: StorageUiState,
     onRefresh: () -> Unit,
+    onOpenDevice: (StorageDevice) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -115,7 +127,10 @@ fun StorageScreen(
         }
 
         items(uiState.devices, key = StorageDevice::id) { device ->
-            StorageDeviceCard(device)
+            StorageDeviceCard(
+                device = device,
+                onClick = { onOpenDevice(device) },
+            )
         }
 
         item {
@@ -134,8 +149,15 @@ fun StorageScreen(
 }
 
 @Composable
-private fun StorageDeviceCard(device: StorageDevice) {
-    ElevatedCard(Modifier.fillMaxWidth()) {
+private fun StorageDeviceCard(
+    device: StorageDevice,
+    onClick: () -> Unit,
+) {
+    ElevatedCard(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+    ) {
         Column(
             Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -161,6 +183,11 @@ private fun StorageDeviceCard(device: StorageDevice) {
             Text(
                 "${formatBytes(device.availableBytes)} available",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "Tap to open directory",
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.labelLarge,
             )
         }
     }
@@ -203,7 +230,8 @@ fun StorageScreenPreview() {
                 ),
                 lastChecked = "Oct 27, 2023 10:00 AM"
             ),
-            onRefresh = {}
+            onRefresh = {},
+            onOpenDevice = {},
         )
     }
 }
