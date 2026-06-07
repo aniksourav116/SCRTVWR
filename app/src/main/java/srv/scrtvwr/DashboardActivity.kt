@@ -102,7 +102,10 @@ fun ScrtvwrApp(viewModel: DashboardViewModel = viewModel()) {
                 modifier = modifier.fillMaxSize(),
             ) { page ->
                 when (destinations[page]) {
-                    AppDestination.STORAGE -> Storage(Modifier.fillMaxSize())
+                    AppDestination.STORAGE -> Storage(
+                        modifier = Modifier.fillMaxSize(),
+                        onOpenDirectory = viewModel::openDirectoryFromStorage,
+                    )
                     AppDestination.DIRECTORY -> Directory(
                         modifier = Modifier.fillMaxSize(),
                         targetDirectoryPath = state.pendingDirectoryPath,

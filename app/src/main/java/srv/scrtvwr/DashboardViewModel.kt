@@ -21,6 +21,14 @@ class DashboardViewModel : ViewModel() {
     }
 
     fun openDirectoryFromHistory(path: String) {
+        openDirectory(path)
+    }
+
+    fun openDirectoryFromStorage(path: String) {
+        openDirectory(path)
+    }
+
+    private fun openDirectory(path: String) {
         _uiState.update {
             it.copy(
                 currentDestination = AppDestination.DIRECTORY,

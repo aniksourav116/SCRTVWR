@@ -50,6 +50,7 @@ import java.text.DecimalFormat
 @Composable
 fun Storage(
     modifier: Modifier = Modifier,
+    onOpenDirectory: (String) -> Unit = {},
     viewModel: StorageViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -60,10 +61,6 @@ fun Storage(
     val allFilesAccessLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { viewModel.refresh() }
-    val openDirectoryLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { viewModel.refresh() }
-
     LaunchedEffect(Unit) {
         when {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
@@ -89,7 +86,7 @@ fun Storage(
         uiState = uiState,
         onRefresh = viewModel::refresh,
         onOpenDevice = { device ->
-            openDirectoryLauncher.launch(viewModel.createOpenDirectoryIntent(device.id))
+            onOpenDirectory(device.rootPath)
         },
         modifier = modifier,
     )
@@ -215,6 +212,7 @@ fun StorageScreenPreview() {
                         id = "primary",
                         name = "Internal shared storage",
                         type = "Device storage",
+                        rootPath = "/storage/emulated/0",
                         totalBytes = 256_000_000_000,
                         availableBytes = 136_000_000_000,
                         isRemovable = false,
@@ -223,6 +221,7 @@ fun StorageScreenPreview() {
                         id = "sd-card",
                         name = "SD card",
                         type = "Removable storage",
+                        rootPath = "/storage/1234-5678",
                         totalBytes = 64_000_000_000,
                         availableBytes = 20_000_000_000,
                         isRemovable = true,

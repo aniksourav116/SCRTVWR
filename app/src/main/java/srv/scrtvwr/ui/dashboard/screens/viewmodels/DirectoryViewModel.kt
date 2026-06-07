@@ -17,36 +17,44 @@ import srv.scrtvwr.ui.sort.fileComparator
 import java.io.File
 
 class DirectoryViewModel(application: Application) : AndroidViewModel(application) {
-    private val rootDirectory = Environment.getExternalStorageDirectory()
+    private val defaultRootDirectory = Environment.getExternalStorageDirectory()
     private val preferences = ScrtvwrPreferences(application)
     private val initialDirectory = preferences.getLastDirectory()
         ?.let(::File)
-        ?.takeIf { it.isBrowsableDirectory(rootDirectory) }
-        ?: rootDirectory
+        ?.takeIf { it.exists() && it.isDirectory }
+        ?: defaultRootDirectory
+    private val rootDirectory = MutableStateFlow(
+        if (initialDirectory.isSameOrChildOf(defaultRootDirectory)) {
+            defaultRootDirectory
+        } else {
+            initialDirectory
+        },
+    )
     private val _currentDirectory = MutableStateFlow(initialDirectory)
     val currentDirectory: StateFlow<File> = _currentDirectory
 
     private val searchQuery = MutableStateFlow("")
     private val viewMode = MutableStateFlow(DirectoryViewMode.List)
     private val sortOrder = MutableStateFlow(preferences.getDirectorySortOrder())
-    private val recentDirectories = MutableStateFlow(preferences.getRecentDirectories().validDirectories(rootDirectory))
-    private val lastMediaSession = MutableStateFlow(preferences.getLastMediaSession()?.takeIfValid(rootDirectory))
+    private val recentDirectories = MutableStateFlow(preferences.getRecentDirectories().validDirectories())
+    private val lastMediaSession = MutableStateFlow(preferences.getLastMediaSession()?.takeIfValid())
 
     val uiState: StateFlow<DirectoryUiState> = combine(
         combine(
+            rootDirectory,
             _currentDirectory,
             searchQuery,
             viewMode,
             sortOrder,
-        ) { currentDirectory, query, mode, order ->
+        ) { root, currentDirectory, query, mode, order ->
             DirectoryUiState(
-                rootDirectory = rootDirectory,
+                rootDirectory = root,
                 currentDirectory = currentDirectory,
                 searchQuery = query,
                 entries = currentDirectory.fileExplorerEntries(query, order),
                 viewMode = mode,
                 sortOrder = order,
-                canNavigateUp = currentDirectory.isDifferentDirectory(rootDirectory),
+                canNavigateUp = currentDirectory.isDifferentDirectory(root),
             )
         },
         recentDirectories,
@@ -60,7 +68,7 @@ class DirectoryViewModel(application: Application) : AndroidViewModel(applicatio
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = DirectoryUiState(
-            rootDirectory = rootDirectory,
+            rootDirectory = rootDirectory.value,
             currentDirectory = initialDirectory,
             entries = initialDirectory.fileExplorerEntries(sortOrder = sortOrder.value),
             sortOrder = sortOrder.value,
@@ -94,7 +102,10 @@ class DirectoryViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun openDirectoryPath(path: String) {
         val directory = File(path)
-        if (!directory.isBrowsableDirectory(rootDirectory)) return
+        if (!directory.exists() || !directory.isDirectory) return
+        if (!directory.isSameOrChildOf(rootDirectory.value)) {
+            rootDirectory.value = directory
+        }
 
         _currentDirectory.value = directory
         searchQuery.value = ""
@@ -103,7 +114,7 @@ class DirectoryViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun navigateUp() {
         val parentDirectory = _currentDirectory.value.parentFile ?: return
-        if (parentDirectory.isSameOrChildOf(rootDirectory)) {
+        if (parentDirectory.isSameOrChildOf(rootDirectory.value)) {
             _currentDirectory.value = parentDirectory
             searchQuery.value = ""
             rememberDirectory(parentDirectory)
@@ -111,14 +122,14 @@ class DirectoryViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun refresh() {
-        recentDirectories.value = preferences.getRecentDirectories().validDirectories(rootDirectory)
-        lastMediaSession.value = preferences.getLastMediaSession()?.takeIfValid(rootDirectory)
+        recentDirectories.value = preferences.getRecentDirectories().validDirectories()
+        lastMediaSession.value = preferences.getLastMediaSession()?.takeIfValid()
         _currentDirectory.update { it }
     }
 
     private fun rememberDirectory(directory: File) {
         preferences.rememberDirectory(directory.absolutePath)
-        recentDirectories.value = preferences.getRecentDirectories().validDirectories(rootDirectory)
+        recentDirectories.value = preferences.getRecentDirectories().validDirectories()
     }
 }
 
@@ -186,15 +197,13 @@ private fun File.isSameOrChildOf(root: File): Boolean {
     return filePath == rootPath || filePath.startsWith("$rootPath${File.separator}")
 }
 
-private fun File.isBrowsableDirectory(root: File): Boolean =
-    exists() && isDirectory && isSameOrChildOf(root)
+private fun List<String>.validDirectories(): List<String> =
+    filter { File(it).exists() && File(it).isDirectory }
 
-private fun List<String>.validDirectories(root: File): List<String> =
-    filter { File(it).isBrowsableDirectory(root) }
-
-private fun LastMediaSession.takeIfValid(root: File): LastMediaSession? =
+private fun LastMediaSession.takeIfValid(): LastMediaSession? =
     takeIf {
-        File(directoryPath).isBrowsableDirectory(root) &&
+        File(directoryPath).exists() &&
+            File(directoryPath).isDirectory &&
             (mediaPath == null || File(mediaPath).exists())
     }
 
