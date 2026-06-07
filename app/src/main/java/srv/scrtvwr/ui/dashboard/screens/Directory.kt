@@ -51,7 +51,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
 import androidx.lifecycle.viewmodel.compose.viewModel
 import srv.scrtvwr.MediaViewerActivity
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryEntry
@@ -81,7 +80,6 @@ fun Directory(
                 Intent(context, MediaViewerActivity::class.java).apply {
                     putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, uiState.currentDirectory.absolutePath)
                     putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, entry.path)
-                    data = File(entry.path).toUri()
                 },
             )
         },

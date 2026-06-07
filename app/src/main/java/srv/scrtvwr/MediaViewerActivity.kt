@@ -48,7 +48,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -65,17 +64,16 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import srv.scrtvwr.ui.media.MediaViewerItem
+import srv.scrtvwr.ui.media.MediaViewerType
+import srv.scrtvwr.ui.media.MediaViewerUiState
+import srv.scrtvwr.ui.media.MediaViewerViewModel
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
-import java.io.File
 
 class MediaViewerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -117,6 +115,10 @@ private fun MediaViewerRoute(
     MediaViewerScreen(
         uiState = uiState,
         onPageChanged = viewModel::selectPage,
+        onFitClick = viewModel::toggleFillFrame,
+        onRotateClick = viewModel::rotateClockwise,
+        onFlipClick = viewModel::toggleFlip,
+        onBookmarkClick = viewModel::toggleBookmark,
         onBack = onBack,
     )
 }
@@ -126,6 +128,10 @@ private fun MediaViewerRoute(
 private fun MediaViewerScreen(
     uiState: MediaViewerUiState,
     onPageChanged: (Int) -> Unit,
+    onFitClick: () -> Unit,
+    onRotateClick: () -> Unit,
+    onFlipClick: () -> Unit,
+    onBookmarkClick: () -> Unit,
     onBack: () -> Unit,
 ) {
     val pagerState = rememberPagerState(
@@ -133,10 +139,6 @@ private fun MediaViewerScreen(
         pageCount = { uiState.items.size.coerceAtLeast(1) },
     )
     val coroutineScope = rememberCoroutineScope()
-    var fillFrame by remember { mutableStateOf(false) }
-    var flipped by remember { mutableStateOf(false) }
-    var bookmarked by remember { mutableStateOf(false) }
-    var rotation by remember { mutableIntStateOf(0) }
     var menuExpanded by remember { mutableStateOf(false) }
     var verticalDrag by remember { mutableFloatStateOf(0f) }
 
@@ -173,7 +175,7 @@ private fun MediaViewerScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { fillFrame = !fillFrame }) {
+                    IconButton(onClick = onFitClick) {
                         Icon(Icons.Default.OpenInFull, contentDescription = "Toggle full view")
                     }
                     Box {
@@ -185,23 +187,23 @@ private fun MediaViewerScreen(
                             onDismissRequest = { menuExpanded = false },
                         ) {
                             DropdownMenuItem(
-                                text = { Text(if (fillFrame) "Fit to screen" else "Fill screen") },
+                                text = { Text(if (uiState.fillFrame) "Fit to screen" else "Fill screen") },
                                 onClick = {
-                                    fillFrame = !fillFrame
+                                    onFitClick()
                                     menuExpanded = false
                                 },
                             )
                             DropdownMenuItem(
                                 text = { Text("Rotate 90") },
                                 onClick = {
-                                    rotation = (rotation + 90) % 360
+                                    onRotateClick()
                                     menuExpanded = false
                                 },
                             )
                             DropdownMenuItem(
-                                text = { Text(if (bookmarked) "Remove bookmark" else "Bookmark") },
+                                text = { Text(if (uiState.bookmarked) "Remove bookmark" else "Bookmark") },
                                 onClick = {
-                                    bookmarked = !bookmarked
+                                    onBookmarkClick()
                                     menuExpanded = false
                                 },
                             )
@@ -225,13 +227,13 @@ private fun MediaViewerScreen(
                 .background(Color.Black),
         ) {
             ViewerOptionsRow(
-                fillFrame = fillFrame,
-                flipped = flipped,
-                bookmarked = bookmarked,
-                onFitClick = { fillFrame = !fillFrame },
-                onRotateClick = { rotation = (rotation + 90) % 360 },
-                onFlipClick = { flipped = !flipped },
-                onBookmarkClick = { bookmarked = !bookmarked },
+                fillFrame = uiState.fillFrame,
+                flipped = uiState.flipped,
+                bookmarked = uiState.bookmarked,
+                onFitClick = onFitClick,
+                onRotateClick = onRotateClick,
+                onFlipClick = onFlipClick,
+                onBookmarkClick = onBookmarkClick,
             )
 
             HorizontalPager(
@@ -263,9 +265,9 @@ private fun MediaViewerScreen(
                 uiState.items.getOrNull(page)?.let { item ->
                     MediaPage(
                         item = item,
-                        fillFrame = fillFrame,
-                        rotation = rotation,
-                        flipped = flipped,
+                        fillFrame = uiState.fillFrame,
+                        rotation = uiState.rotation,
+                        flipped = uiState.flipped,
                     )
                 } ?: EmptyViewerMessage()
             }
@@ -413,81 +415,6 @@ private fun ViewerTimeline(
             modifier = Modifier.height(28.dp),
         )
     }
-}
-
-class MediaViewerViewModel : ViewModel() {
-    private val _uiState = MutableStateFlow(MediaViewerUiState())
-    val uiState = _uiState.asStateFlow()
-
-    fun load(directoryPath: String?, selectedPath: String?) {
-        val directory = directoryPath?.let(::File)
-        val selected = selectedPath?.let(::File)
-        val sourceDirectory = when {
-            directory?.isDirectory == true -> directory
-            selected?.parentFile?.isDirectory == true -> selected.parentFile
-            else -> null
-        }
-
-        val items = sourceDirectory
-            ?.mediaViewerItems()
-            ?.ifEmpty { selected?.toMediaViewerItem()?.let(::listOf).orEmpty() }
-            ?: selected?.toMediaViewerItem()?.let(::listOf).orEmpty()
-        val selectedIndex = items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
-
-        _uiState.update {
-            MediaViewerUiState(
-                items = items,
-                initialPage = selectedIndex,
-                selectedPage = selectedIndex,
-            )
-        }
-    }
-
-    fun selectPage(page: Int) {
-        _uiState.update { it.copy(selectedPage = page) }
-    }
-}
-
-data class MediaViewerUiState(
-    val items: List<MediaViewerItem> = emptyList(),
-    val initialPage: Int = 0,
-    val selectedPage: Int = 0,
-)
-
-data class MediaViewerItem(
-    val name: String,
-    val path: String,
-    val type: MediaViewerType,
-    val lastModifiedMillis: Long,
-)
-
-enum class MediaViewerType {
-    Image,
-    Video,
-}
-
-private fun File.mediaViewerItems(): List<MediaViewerItem> =
-    runCatching {
-        listFiles()
-            ?.asSequence()
-            ?.filter { it.isFile }
-            ?.mapNotNull { it.toMediaViewerItem() }
-            ?.sortedBy { it.name.lowercase() }
-            ?.toList()
-    }.getOrNull().orEmpty()
-
-private fun File.toMediaViewerItem(): MediaViewerItem? {
-    val type = when (extension.lowercase()) {
-        "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif" -> MediaViewerType.Image
-        "mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v" -> MediaViewerType.Video
-        else -> return null
-    }
-    return MediaViewerItem(
-        name = name.ifBlank { absolutePath },
-        path = absolutePath,
-        type = type,
-        lastModifiedMillis = lastModified(),
-    )
 }
 
 private suspend fun loadImagePreview(path: String): Bitmap? = withContext(Dispatchers.IO) {
