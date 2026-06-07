@@ -1,3 +1,10 @@
 <resources>
     <string name="app_name">SCRTVWR</string>
+    <string name="dashboard">Dashboard</string>
+    <string name="library">Library</string>
+    <string name="settings">Settings</string>
+    <string name="dashboard_welcome">Your screen viewing workspace is ready.</string>
+    <string name="dashboard_hint">Add your viewing and library features here.</string>
+    <string name="library_hint">Library content will appear here.</string>
+    <string name="settings_hint">Application preferences will appear here.</string>
 </resources>
