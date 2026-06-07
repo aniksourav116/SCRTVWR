@@ -86,6 +86,7 @@ import srv.scrtvwr.ui.media.MediaViewerType
 import srv.scrtvwr.ui.media.MediaViewerUiState
 import srv.scrtvwr.ui.media.MediaViewerViewModel
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
+import kotlin.time.Duration.Companion.milliseconds
 
 class MediaViewerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -184,7 +185,7 @@ private fun MediaViewerScreen(
 
     LaunchedEffect(uiState.isSlideShowRunning, uiState.slideShowStayMillis, uiState.items.size) {
         while (uiState.isSlideShowRunning && uiState.items.isNotEmpty()) {
-            delay(uiState.slideShowStayMillis)
+            delay(uiState.slideShowStayMillis.milliseconds)
             val nextPage = pagerState.currentPage + 1
             if (nextPage >= uiState.items.size) {
                 onSlideShowStop()
