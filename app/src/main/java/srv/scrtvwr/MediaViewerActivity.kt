@@ -161,8 +161,14 @@ private fun MediaViewerScreen(
     val coroutineScope = rememberCoroutineScope()
     var menuExpanded by remember { mutableStateOf(false) }
     var slideShowDialogVisible by remember { mutableStateOf(false) }
-    var slideShowStayText by remember { mutableStateOf("50") }
+    var slideShowStayText by remember { mutableStateOf(uiState.slideShowStayMillis.toString()) }
     var verticalDrag by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(slideShowDialogVisible, uiState.slideShowStayMillis) {
+        if (slideShowDialogVisible) {
+            slideShowStayText = uiState.slideShowStayMillis.toString()
+        }
+    }
 
     LaunchedEffect(uiState.initialPage, uiState.pageCount) {
         if (uiState.items.isNotEmpty()) {

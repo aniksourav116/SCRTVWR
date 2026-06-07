@@ -1,13 +1,18 @@
 package srv.scrtvwr.ui.media
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import srv.scrtvwr.preferences.ScrtvwrPreferences
 import java.io.File
 
-class MediaViewerViewModel : ViewModel() {
-    private val _uiState = MutableStateFlow(MediaViewerUiState())
+class MediaViewerViewModel(application: Application) : AndroidViewModel(application) {
+    private val preferences = ScrtvwrPreferences(application)
+    private val _uiState = MutableStateFlow(
+        MediaViewerUiState(slideShowStayMillis = preferences.getSlideShowStayMillis()),
+    )
     val uiState = _uiState.asStateFlow()
 
     fun load(directoryPath: String?, selectedPath: String?) {
@@ -39,14 +44,21 @@ class MediaViewerViewModel : ViewModel() {
                 nextDirectory = nextDirectory,
                 initialPage = selectedIndex,
                 selectedPage = selectedIndex,
+                slideShowStayMillis = preferences.getSlideShowStayMillis(),
             )
         }
+        rememberMediaSession(sourceDirectory?.absolutePath ?: directoryPath, items.getOrNull(selectedIndex)?.path ?: selectedPath)
     }
 
     fun selectPage(page: Int) {
         _uiState.update { state ->
             val boundedPage = page.coerceIn(0, state.lastPageIndex)
-            state.copy(selectedPage = boundedPage)
+            val selectedPath = state.items.getOrNull(boundedPage)?.path
+            rememberMediaSession(state.sourceDirectoryPath, selectedPath)
+            state.copy(
+                selectedPage = boundedPage,
+                selectedPath = selectedPath ?: state.selectedPath,
+            )
         }
     }
 
@@ -76,9 +88,11 @@ class MediaViewerViewModel : ViewModel() {
     }
 
     fun startSlideShow(stayMillis: Long) {
+        val boundedStayMillis = stayMillis.coerceAtLeast(1L)
+        preferences.saveSlideShowStayMillis(boundedStayMillis)
         _uiState.update {
             it.copy(
-                slideShowStayMillis = stayMillis.coerceAtLeast(1L),
+                slideShowStayMillis = boundedStayMillis,
                 isSlideShowRunning = true,
                 isChromeHidden = true,
             )
@@ -92,6 +106,11 @@ class MediaViewerViewModel : ViewModel() {
                 isChromeHidden = false,
             )
         }
+    }
+
+    private fun rememberMediaSession(directoryPath: String?, mediaPath: String?) {
+        directoryPath ?: return
+        preferences.saveLastMediaSession(directoryPath, mediaPath)
     }
 }
 

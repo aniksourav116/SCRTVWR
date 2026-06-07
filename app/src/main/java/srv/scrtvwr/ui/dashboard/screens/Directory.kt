@@ -28,9 +28,13 @@ import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -41,7 +45,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -75,6 +82,7 @@ fun Directory(
         onSearchQueryChange = viewModel::updateSearchQuery,
         onViewModeChange = viewModel::setViewMode,
         onOpenDirectory = viewModel::openDirectory,
+        onOpenRecentDirectory = viewModel::openDirectoryPath,
         onOpenMedia = { entry ->
             context.startActivity(
                 Intent(context, MediaViewerActivity::class.java).apply {
@@ -82,6 +90,16 @@ fun Directory(
                     putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, entry.path)
                 },
             )
+        },
+        onResumeMedia = {
+            uiState.lastMediaSession?.let { session ->
+                context.startActivity(
+                    Intent(context, MediaViewerActivity::class.java).apply {
+                        putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, session.directoryPath)
+                        putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, session.mediaPath)
+                    },
+                )
+            }
         },
         onNavigateUp = viewModel::navigateUp,
         onRefresh = viewModel::refresh,
@@ -95,11 +113,15 @@ fun DirectoryScreen(
     onSearchQueryChange: (String) -> Unit,
     onViewModeChange: (DirectoryViewMode) -> Unit,
     onOpenDirectory: (DirectoryEntry) -> Unit,
+    onOpenRecentDirectory: (String) -> Unit,
     onOpenMedia: (DirectoryEntry) -> Unit,
+    onResumeMedia: () -> Unit,
     onNavigateUp: () -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var recentMenuExpanded by remember { mutableStateOf(false) }
+
     Column(
         modifier = modifier.fillMaxSize().padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -120,6 +142,49 @@ fun DirectoryScreen(
             }
             IconButton(onClick = onRefresh) {
                 Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+            }
+            if (uiState.lastMediaSession != null) {
+                IconButton(onClick = onResumeMedia) {
+                    Icon(Icons.Default.Restore, contentDescription = "Resume viewer")
+                }
+            }
+            Box {
+                IconButton(
+                    onClick = { recentMenuExpanded = true },
+                    enabled = uiState.recentDirectories.isNotEmpty(),
+                ) {
+                    Icon(Icons.Default.History, contentDescription = "Recent directories")
+                }
+                DropdownMenu(
+                    expanded = recentMenuExpanded,
+                    onDismissRequest = { recentMenuExpanded = false },
+                ) {
+                    uiState.recentDirectories.forEach { path ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(
+                                        text = File(path).name.ifBlank { path },
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        text = path,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            },
+                            leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null) },
+                            onClick = {
+                                onOpenRecentDirectory(path)
+                                recentMenuExpanded = false
+                            },
+                        )
+                    }
+                }
             }
             IconButton(onClick = { onViewModeChange(DirectoryViewMode.List) }) {
                 Icon(
@@ -453,7 +518,9 @@ fun DirectoryScreenPreview() {
             onSearchQueryChange = {},
             onViewModeChange = {},
             onOpenDirectory = {},
+            onOpenRecentDirectory = {},
             onOpenMedia = {},
+            onResumeMedia = {},
             onNavigateUp = {},
             onRefresh = {},
         )
