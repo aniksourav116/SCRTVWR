@@ -64,6 +64,13 @@ fun ScrtvwrApp(viewModel: DashboardViewModel = viewModel()) {
             }
     }
 
+    LaunchedEffect(state.currentDestination, destinations) {
+        val page = destinations.indexOf(state.currentDestination)
+        if (page >= 0 && page != pagerState.currentPage) {
+            pagerState.animateScrollToPage(page)
+        }
+    }
+
     NavigationSuiteScaffold(
         navigationSuiteItems = {
             destinations.forEachIndexed { page, destination ->
@@ -96,8 +103,15 @@ fun ScrtvwrApp(viewModel: DashboardViewModel = viewModel()) {
             ) { page ->
                 when (destinations[page]) {
                     AppDestination.STORAGE -> Storage(Modifier.fillMaxSize())
-                    AppDestination.DIRECTORY -> Directory(Modifier.fillMaxSize())
-                    AppDestination.HISTORY -> History(Modifier.fillMaxSize())
+                    AppDestination.DIRECTORY -> Directory(
+                        modifier = Modifier.fillMaxSize(),
+                        targetDirectoryPath = state.pendingDirectoryPath,
+                        onTargetDirectoryConsumed = viewModel::clearPendingDirectoryPath,
+                    )
+                    AppDestination.HISTORY -> History(
+                        modifier = Modifier.fillMaxSize(),
+                        onOpenDirectory = viewModel::openDirectoryFromHistory,
+                    )
                     AppDestination.OTHERS -> Others(Modifier.fillMaxSize())
                 }
             }

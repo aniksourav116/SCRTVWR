@@ -42,6 +42,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -73,8 +74,17 @@ import java.io.File
 @Composable
 fun Directory(
     modifier: Modifier = Modifier,
+    targetDirectoryPath: String? = null,
+    onTargetDirectoryConsumed: () -> Unit = {},
     viewModel: DirectoryViewModel = viewModel(),
 ) {
+    LaunchedEffect(targetDirectoryPath) {
+        targetDirectoryPath?.let {
+            viewModel.openDirectoryPath(it)
+            onTargetDirectoryConsumed()
+        }
+    }
+
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     DirectoryScreen(

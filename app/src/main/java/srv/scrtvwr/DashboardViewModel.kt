@@ -19,11 +19,25 @@ class DashboardViewModel : ViewModel() {
     fun select(destination: AppDestination) {
         _uiState.update { it.copy(currentDestination = destination) }
     }
+
+    fun openDirectoryFromHistory(path: String) {
+        _uiState.update {
+            it.copy(
+                currentDestination = AppDestination.DIRECTORY,
+                pendingDirectoryPath = path,
+            )
+        }
+    }
+
+    fun clearPendingDirectoryPath() {
+        _uiState.update { it.copy(pendingDirectoryPath = null) }
+    }
 }
 
 data class DashboardUiState(
     val currentDestination: AppDestination = AppDestination.STORAGE,
     val destinations: List<AppDestination> = AppDestination.entries,
+    val pendingDirectoryPath: String? = null,
 )
 
 enum class AppDestination(
