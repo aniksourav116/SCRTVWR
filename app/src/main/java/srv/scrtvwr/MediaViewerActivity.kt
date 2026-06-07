@@ -29,6 +29,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.FormatIndentDecrease
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.FitScreen
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInFull
@@ -39,6 +40,7 @@ import androidx.compose.material.icons.filled.ViewColumn
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -125,6 +127,7 @@ private fun MediaViewerRoute(
         onFlipClick = viewModel::toggleFlip,
         onBookmarkClick = viewModel::toggleBookmark,
         onChromeToggle = viewModel::toggleChrome,
+        onNextDirectoryClick = viewModel::loadNextDirectory,
         onBack = onBack,
     )
 }
@@ -139,23 +142,24 @@ private fun MediaViewerScreen(
     onFlipClick: () -> Unit,
     onBookmarkClick: () -> Unit,
     onChromeToggle: () -> Unit,
+    onNextDirectoryClick: () -> Unit,
     onBack: () -> Unit,
 ) {
     val pagerState = rememberPagerState(
         initialPage = uiState.initialPage,
-        pageCount = { uiState.items.size.coerceAtLeast(1) },
+        pageCount = { uiState.pageCount.coerceAtLeast(1) },
     )
     val coroutineScope = rememberCoroutineScope()
     var menuExpanded by remember { mutableStateOf(false) }
     var verticalDrag by remember { mutableFloatStateOf(0f) }
 
-    LaunchedEffect(uiState.initialPage, uiState.items.size) {
+    LaunchedEffect(uiState.initialPage, uiState.pageCount) {
         if (uiState.items.isNotEmpty()) {
-            pagerState.scrollToPage(uiState.initialPage.coerceIn(uiState.items.indices))
+            pagerState.scrollToPage(uiState.initialPage.coerceIn(0, uiState.lastPageIndex))
         }
     }
 
-    LaunchedEffect(pagerState, uiState.items) {
+    LaunchedEffect(pagerState, uiState.pageCount) {
         snapshotFlow { pagerState.currentPage }
             .distinctUntilChanged()
             .collect(onPageChanged)
@@ -254,10 +258,10 @@ private fun MediaViewerScreen(
             ) {
                 HorizontalPager(
                     state = pagerState,
-                    beyondViewportPageCount = minOf(25, uiState.items.lastIndex.coerceAtLeast(0)),
+                    beyondViewportPageCount = minOf(25, uiState.lastPageIndex),
                     modifier = Modifier
                         .fillMaxSize()
-                        .pointerInput(uiState.items.size) {
+                        .pointerInput(uiState.pageCount) {
                             detectVerticalDragGestures(
                                 onDragStart = { verticalDrag = 0f },
                                 onVerticalDrag = { _, dragAmount -> verticalDrag += dragAmount },
@@ -266,7 +270,7 @@ private fun MediaViewerScreen(
                                         verticalDrag < -80f -> pagerState.currentPage + 1
                                         verticalDrag > 80f -> pagerState.currentPage - 1
                                         else -> pagerState.currentPage
-                                    }.coerceIn(0, uiState.items.lastIndex.coerceAtLeast(0))
+                                    }.coerceIn(0, uiState.lastPageIndex)
 
                                     if (nextPage != pagerState.currentPage) {
                                         coroutineScope.launch {
@@ -286,10 +290,17 @@ private fun MediaViewerScreen(
                             flipped = uiState.flipped,
                             onContentClick = onChromeToggle,
                         )
-                    } ?: EmptyViewerMessage()
+                    } ?: if (page == uiState.nextDirectoryPageIndex) {
+                        NextDirectoryPage(
+                            directoryName = uiState.nextDirectory?.name.orEmpty(),
+                            onClick = onNextDirectoryClick,
+                        )
+                    } else {
+                        EmptyViewerMessage()
+                    }
                 }
 
-                if (uiState.isChromeHidden && uiState.items.size > 1) {
+                if (uiState.isChromeHidden && uiState.pageCount > 1) {
                     HiddenNavigationButtons(
                         onPreviousClick = {
                             val previousPage = (pagerState.currentPage - 1).coerceAtLeast(0)
@@ -298,7 +309,7 @@ private fun MediaViewerScreen(
                             }
                         },
                         onNextClick = {
-                            val nextPage = (pagerState.currentPage + 1).coerceAtMost(uiState.items.lastIndex)
+                            val nextPage = (pagerState.currentPage + 1).coerceAtMost(uiState.lastPageIndex)
                             coroutineScope.launch {
                                 pagerState.scrollToPage(nextPage)
                             }
@@ -310,7 +321,7 @@ private fun MediaViewerScreen(
             if (!uiState.isChromeHidden) {
                 ViewerTimeline(
                     currentPage = pagerState.currentPage,
-                    pageCount = uiState.items.size,
+                    pageCount = uiState.pageCount,
                     onPageSelected = { page ->
                         coroutineScope.launch {
                             pagerState.animateScrollToPage(page)
@@ -416,6 +427,46 @@ private fun MediaPage(
                     contentDescription = "Video thumbnail",
                     tint = Color.White,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NextDirectoryPage(
+    directoryName: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.padding(24.dp),
+        ) {
+            Icon(
+                Icons.Default.Folder,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.75f),
+                modifier = Modifier.size(52.dp),
+            )
+            Text(
+                text = "Next directory",
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = directoryName,
+                color = Color.White.copy(alpha = 0.7f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Button(onClick = onClick) {
+                Text("Move to next directory")
             }
         }
     }

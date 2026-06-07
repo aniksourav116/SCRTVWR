@@ -29,12 +29,14 @@ class MediaViewerViewModel : ViewModel() {
             ?.ifEmpty { selected?.toMediaViewerItem()?.let(::listOf).orEmpty() }
             ?: selected?.toMediaViewerItem()?.let(::listOf).orEmpty()
         val selectedIndex = items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
+        val nextDirectory = sourceDirectory?.nextMediaDirectory()
 
         _uiState.update {
             MediaViewerUiState(
-                sourceDirectoryPath = directoryPath,
+                sourceDirectoryPath = sourceDirectory?.absolutePath ?: directoryPath,
                 selectedPath = selectedPath,
                 items = items,
+                nextDirectory = nextDirectory,
                 initialPage = selectedIndex,
                 selectedPage = selectedIndex,
             )
@@ -43,9 +45,14 @@ class MediaViewerViewModel : ViewModel() {
 
     fun selectPage(page: Int) {
         _uiState.update { state ->
-            val boundedPage = page.coerceIn(0, state.items.lastIndex.coerceAtLeast(0))
+            val boundedPage = page.coerceIn(0, state.lastPageIndex)
             state.copy(selectedPage = boundedPage)
         }
+    }
+
+    fun loadNextDirectory() {
+        val nextDirectory = _uiState.value.nextDirectory ?: return
+        load(nextDirectory.path, null)
     }
 
     fun toggleFillFrame() {
@@ -73,6 +80,7 @@ data class MediaViewerUiState(
     val sourceDirectoryPath: String? = null,
     val selectedPath: String? = null,
     val items: List<MediaViewerItem> = emptyList(),
+    val nextDirectory: MediaViewerDirectory? = null,
     val initialPage: Int = 0,
     val selectedPage: Int = 0,
     val fillFrame: Boolean = false,
@@ -80,6 +88,20 @@ data class MediaViewerUiState(
     val flipped: Boolean = false,
     val bookmarked: Boolean = false,
     val isChromeHidden: Boolean = false,
+) {
+    val pageCount: Int
+        get() = items.size + if (nextDirectory != null) 1 else 0
+
+    val lastPageIndex: Int
+        get() = (pageCount - 1).coerceAtLeast(0)
+
+    val nextDirectoryPageIndex: Int?
+        get() = nextDirectory?.let { items.size }
+}
+
+data class MediaViewerDirectory(
+    val name: String,
+    val path: String,
 )
 
 data class MediaViewerItem(
@@ -117,3 +139,24 @@ private fun File.toMediaViewerItem(): MediaViewerItem? {
         lastModifiedMillis = lastModified(),
     )
 }
+
+private fun File.nextMediaDirectory(): MediaViewerDirectory? {
+    val currentPath = canonicalPathOrAbsolute()
+    return parentFile
+        ?.listFiles()
+        ?.asSequence()
+        ?.filter { it.isDirectory }
+        ?.sortedBy { it.name.lowercase() }
+        ?.dropWhile { it.canonicalPathOrAbsolute() != currentPath }
+        ?.drop(1)
+        ?.firstOrNull { it.mediaViewerItems().isNotEmpty() }
+        ?.let {
+            MediaViewerDirectory(
+                name = it.name.ifBlank { it.absolutePath },
+                path = it.absolutePath,
+            )
+        }
+}
+
+private fun File.canonicalPathOrAbsolute(): String =
+    runCatching { canonicalPath }.getOrElse { absolutePath }
