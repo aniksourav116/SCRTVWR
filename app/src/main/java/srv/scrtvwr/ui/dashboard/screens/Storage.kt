@@ -20,10 +20,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.StorageUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.StorageViewModel
+import srv.scrtvwr.ui.theme.SCRTVWRTheme
 
 @Composable
 fun Storage(
@@ -71,5 +73,20 @@ fun StorageScreen(
             Icon(Icons.Default.Refresh, contentDescription = null)
             Text("Refresh", Modifier.padding(start = 8.dp))
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun StorageScreenPreview() {
+    SCRTVWRTheme {
+        StorageScreen(
+            uiState = StorageUiState(
+                totalSpaceGb = 256,
+                usedSpaceGb = 120,
+                lastChecked = "Oct 27, 2023 10:00 AM"
+            ),
+            onRefresh = {}
+        )
     }
 }
