@@ -89,11 +89,18 @@ data class DirectoryEntry(
     val isDirectory: Boolean,
     val sizeBytes: Long,
     val lastModifiedMillis: Long,
+    val mediaType: DirectoryMediaType = DirectoryMediaType.Other,
 )
 
 enum class DirectoryViewMode {
     List,
     Grid,
+}
+
+enum class DirectoryMediaType {
+    Image,
+    Video,
+    Other,
 }
 
 private fun File.fileExplorerEntries(searchQuery: String = ""): List<DirectoryEntry> {
@@ -112,6 +119,7 @@ private fun File.fileExplorerEntries(searchQuery: String = ""): List<DirectoryEn
                     isDirectory = file.isDirectory,
                     sizeBytes = if (file.isFile) file.length() else 0L,
                     lastModifiedMillis = file.lastModified(),
+                    mediaType = file.mediaType(),
                 )
             }
             ?.toList()
@@ -129,3 +137,13 @@ private fun File.isDifferentDirectory(other: File): Boolean =
 
 private fun File.canonicalPathOrAbsolute(): String =
     runCatching { canonicalPath }.getOrElse { absolutePath }
+
+private fun File.mediaType(): DirectoryMediaType {
+    if (isDirectory) return DirectoryMediaType.Other
+
+    return when (extension.lowercase()) {
+        "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif" -> DirectoryMediaType.Image
+        "mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v" -> DirectoryMediaType.Video
+        else -> DirectoryMediaType.Other
+    }
+}

@@ -1,7 +1,13 @@
 package srv.scrtvwr.ui.dashboard.screens
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -9,6 +15,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -20,6 +27,7 @@ import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ElevatedCard
@@ -32,17 +40,24 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryEntry
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryMediaType
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewModel
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewMode
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 
 @Composable
@@ -170,7 +185,7 @@ private fun DirectoryList(
             ListItem(
                 headlineContent = { Text(entry.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 supportingContent = { Text(entry.supportingText()) },
-                leadingContent = { EntryIcon(entry) },
+                leadingContent = { EntryThumbnail(entry, size = 48) },
                 modifier = if (entry.isDirectory) {
                     Modifier.clickable { onOpenDirectory(entry) }
                 } else {
@@ -199,7 +214,7 @@ private fun DirectoryGrid(
                 DirectoryGridCard(
                     title = "..",
                     subtitle = "Go up",
-                    icon = { Icon(Icons.Default.ArrowUpward, contentDescription = null) },
+                    thumbnail = { Icon(Icons.Default.ArrowUpward, contentDescription = null) },
                     onClick = onNavigateUp,
                 )
             }
@@ -215,7 +230,7 @@ private fun DirectoryGrid(
             DirectoryGridCard(
                 title = entry.name,
                 subtitle = entry.supportingText(),
-                icon = { EntryIcon(entry) },
+                thumbnail = { EntryThumbnail(entry, size = 96) },
                 onClick = if (entry.isDirectory) {
                     { onOpenDirectory(entry) }
                 } else {
@@ -230,7 +245,7 @@ private fun DirectoryGrid(
 private fun DirectoryGridCard(
     title: String,
     subtitle: String,
-    icon: @Composable () -> Unit,
+    thumbnail: @Composable () -> Unit,
     onClick: (() -> Unit)?,
 ) {
     ElevatedCard(
@@ -243,7 +258,7 @@ private fun DirectoryGridCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            icon()
+            thumbnail()
             Text(title, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(
                 subtitle,
@@ -257,15 +272,55 @@ private fun DirectoryGridCard(
 }
 
 @Composable
-private fun EntryIcon(entry: DirectoryEntry) {
-    Icon(
-        imageVector = if (entry.isDirectory) {
-            Icons.Default.Folder
+private fun EntryThumbnail(
+    entry: DirectoryEntry,
+    size: Int,
+) {
+    val bitmap by produceState<Bitmap?>(
+        initialValue = null,
+        key1 = entry.path,
+        key2 = entry.lastModifiedMillis,
+        key3 = entry.mediaType,
+    ) {
+        value = when (entry.mediaType) {
+            DirectoryMediaType.Image -> loadImageThumbnail(entry.path, size)
+            DirectoryMediaType.Video -> loadVideoThumbnail(entry.path)
+            DirectoryMediaType.Other -> null
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .size(size.dp)
+            .clip(MaterialTheme.shapes.small)
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap!!.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+            if (entry.mediaType == DirectoryMediaType.Video) {
+                Icon(
+                    Icons.Default.PlayCircle,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                )
+            }
         } else {
-            Icons.AutoMirrored.Filled.InsertDriveFile
-        },
-        contentDescription = null,
-    )
+            Icon(
+                imageVector = if (entry.isDirectory) {
+                    Icons.Default.Folder
+                } else {
+                    Icons.AutoMirrored.Filled.InsertDriveFile
+                },
+                contentDescription = null,
+            )
+        }
+    }
 }
 
 @Composable
@@ -282,7 +337,49 @@ private fun EmptyDirectoryMessage(searchQuery: String) {
 }
 
 private fun DirectoryEntry.supportingText(): String =
-    if (isDirectory) "Folder" else formatBytes(sizeBytes)
+    when {
+        isDirectory -> "Folder"
+        mediaType == DirectoryMediaType.Image -> "Image - ${formatBytes(sizeBytes)}"
+        mediaType == DirectoryMediaType.Video -> "Video - ${formatBytes(sizeBytes)}"
+        else -> formatBytes(sizeBytes)
+    }
+
+private suspend fun loadImageThumbnail(
+    path: String,
+    targetSize: Int,
+): Bitmap? = withContext(Dispatchers.IO) {
+    runCatching {
+        val bounds = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        BitmapFactory.decodeFile(path, bounds)
+
+        val sampleOptions = BitmapFactory.Options().apply {
+            inSampleSize = bounds.thumbnailSampleSize(targetSize)
+        }
+        BitmapFactory.decodeFile(path, sampleOptions)
+    }.getOrNull()
+}
+
+private suspend fun loadVideoThumbnail(path: String): Bitmap? = withContext(Dispatchers.IO) {
+    runCatching {
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(path)
+            retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+        } finally {
+            retriever.release()
+        }
+    }.getOrNull()
+}
+
+private fun BitmapFactory.Options.thumbnailSampleSize(targetSize: Int): Int {
+    var sampleSize = 1
+    while (outHeight / sampleSize > targetSize * 2 || outWidth / sampleSize > targetSize * 2) {
+        sampleSize *= 2
+    }
+    return sampleSize
+}
 
 private fun formatBytes(bytes: Long): String {
     if (bytes < 1_000L) return "$bytes B"
