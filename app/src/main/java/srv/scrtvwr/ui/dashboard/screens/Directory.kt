@@ -1,5 +1,6 @@
 package srv.scrtvwr.ui.dashboard.screens
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
@@ -46,10 +47,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.lifecycle.viewmodel.compose.viewModel
+import srv.scrtvwr.MediaViewerActivity
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryEntry
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryMediaType
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryUiState
@@ -66,11 +70,21 @@ fun Directory(
     viewModel: DirectoryViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
     DirectoryScreen(
         uiState = uiState,
         onSearchQueryChange = viewModel::updateSearchQuery,
         onViewModeChange = viewModel::setViewMode,
         onOpenDirectory = viewModel::openDirectory,
+        onOpenMedia = { entry ->
+            context.startActivity(
+                Intent(context, MediaViewerActivity::class.java).apply {
+                    putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, uiState.currentDirectory.absolutePath)
+                    putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, entry.path)
+                    data = File(entry.path).toUri()
+                },
+            )
+        },
         onNavigateUp = viewModel::navigateUp,
         onRefresh = viewModel::refresh,
         modifier = modifier,
@@ -83,6 +97,7 @@ fun DirectoryScreen(
     onSearchQueryChange: (String) -> Unit,
     onViewModeChange: (DirectoryViewMode) -> Unit,
     onOpenDirectory: (DirectoryEntry) -> Unit,
+    onOpenMedia: (DirectoryEntry) -> Unit,
     onNavigateUp: () -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
@@ -145,12 +160,14 @@ fun DirectoryScreen(
             DirectoryViewMode.List -> DirectoryList(
                 uiState = uiState,
                 onOpenDirectory = onOpenDirectory,
+                onOpenMedia = onOpenMedia,
                 onNavigateUp = onNavigateUp,
             )
 
             DirectoryViewMode.Grid -> DirectoryGrid(
                 uiState = uiState,
                 onOpenDirectory = onOpenDirectory,
+                onOpenMedia = onOpenMedia,
                 onNavigateUp = onNavigateUp,
             )
         }
@@ -161,6 +178,7 @@ fun DirectoryScreen(
 private fun DirectoryList(
     uiState: DirectoryUiState,
     onOpenDirectory: (DirectoryEntry) -> Unit,
+    onOpenMedia: (DirectoryEntry) -> Unit,
     onNavigateUp: () -> Unit,
 ) {
     LazyColumn(Modifier.fillMaxSize()) {
@@ -186,8 +204,14 @@ private fun DirectoryList(
                 headlineContent = { Text(entry.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 supportingContent = { Text(entry.supportingText()) },
                 leadingContent = { EntryThumbnail(entry, size = 48) },
-                modifier = if (entry.isDirectory) {
-                    Modifier.clickable { onOpenDirectory(entry) }
+                modifier = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
+                    Modifier.clickable {
+                        if (entry.isDirectory) {
+                            onOpenDirectory(entry)
+                        } else {
+                            onOpenMedia(entry)
+                        }
+                    }
                 } else {
                     Modifier
                 },
@@ -200,6 +224,7 @@ private fun DirectoryList(
 private fun DirectoryGrid(
     uiState: DirectoryUiState,
     onOpenDirectory: (DirectoryEntry) -> Unit,
+    onOpenMedia: (DirectoryEntry) -> Unit,
     onNavigateUp: () -> Unit,
 ) {
     LazyVerticalGrid(
@@ -231,8 +256,14 @@ private fun DirectoryGrid(
                 title = entry.name,
                 subtitle = entry.supportingText(),
                 thumbnail = { EntryThumbnail(entry, size = 96) },
-                onClick = if (entry.isDirectory) {
-                    { onOpenDirectory(entry) }
+                onClick = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
+                    {
+                        if (entry.isDirectory) {
+                            onOpenDirectory(entry)
+                        } else {
+                            onOpenMedia(entry)
+                        }
+                    }
                 } else {
                     null
                 },
@@ -424,6 +455,7 @@ fun DirectoryScreenPreview() {
             onSearchQueryChange = {},
             onViewModeChange = {},
             onOpenDirectory = {},
+            onOpenMedia = {},
             onNavigateUp = {},
             onRefresh = {},
         )
