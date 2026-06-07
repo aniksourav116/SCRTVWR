@@ -63,6 +63,10 @@ class MediaViewerViewModel : ViewModel() {
     fun toggleBookmark() {
         _uiState.update { it.copy(bookmarked = !it.bookmarked) }
     }
+
+    fun toggleChrome() {
+        _uiState.update { it.copy(isChromeHidden = !it.isChromeHidden) }
+    }
 }
 
 data class MediaViewerUiState(
@@ -75,6 +79,7 @@ data class MediaViewerUiState(
     val rotation: Int = 0,
     val flipped: Boolean = false,
     val bookmarked: Boolean = false,
+    val isChromeHidden: Boolean = false,
 )
 
 data class MediaViewerItem(

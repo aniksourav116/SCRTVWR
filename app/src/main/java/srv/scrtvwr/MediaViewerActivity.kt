@@ -9,15 +9,19 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
@@ -56,6 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -119,6 +124,7 @@ private fun MediaViewerRoute(
         onRotateClick = viewModel::rotateClockwise,
         onFlipClick = viewModel::toggleFlip,
         onBookmarkClick = viewModel::toggleBookmark,
+        onChromeToggle = viewModel::toggleChrome,
         onBack = onBack,
     )
 }
@@ -132,6 +138,7 @@ private fun MediaViewerScreen(
     onRotateClick: () -> Unit,
     onFlipClick: () -> Unit,
     onBookmarkClick: () -> Unit,
+    onChromeToggle: () -> Unit,
     onBack: () -> Unit,
 ) {
     val pagerState = rememberPagerState(
@@ -157,66 +164,68 @@ private fun MediaViewerScreen(
     val selectedItem = uiState.items.getOrNull(pagerState.currentPage)
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("Camera", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            selectedItem?.name.orEmpty(),
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = onFitClick) {
-                        Icon(Icons.Default.OpenInFull, contentDescription = "Toggle full view")
-                    }
-                    Box {
-                        IconButton(onClick = { menuExpanded = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More options")
-                        }
-                        DropdownMenu(
-                            expanded = menuExpanded,
-                            onDismissRequest = { menuExpanded = false },
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text(if (uiState.fillFrame) "Fit to screen" else "Fill screen") },
-                                onClick = {
-                                    onFitClick()
-                                    menuExpanded = false
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Rotate 90") },
-                                onClick = {
-                                    onRotateClick()
-                                    menuExpanded = false
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(if (uiState.bookmarked) "Remove bookmark" else "Bookmark") },
-                                onClick = {
-                                    onBookmarkClick()
-                                    menuExpanded = false
-                                },
+            if (!uiState.isChromeHidden) {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text("Camera", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                selectedItem?.name.orEmpty(),
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF303030),
-                    titleContentColor = Color.White,
-                    navigationIconContentColor = Color.White,
-                    actionIconContentColor = Color.White,
-                ),
-            )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = onFitClick) {
+                            Icon(Icons.Default.OpenInFull, contentDescription = "Toggle full view")
+                        }
+                        Box {
+                            IconButton(onClick = { menuExpanded = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                            }
+                            DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(if (uiState.fillFrame) "Fit to screen" else "Fill screen") },
+                                    onClick = {
+                                        onFitClick()
+                                        menuExpanded = false
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Rotate 90") },
+                                    onClick = {
+                                        onRotateClick()
+                                        menuExpanded = false
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(if (uiState.bookmarked) "Remove bookmark" else "Bookmark") },
+                                    onClick = {
+                                        onBookmarkClick()
+                                        menuExpanded = false
+                                    },
+                                )
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color(0xFF303030),
+                        titleContentColor = Color.White,
+                        navigationIconContentColor = Color.White,
+                        actionIconContentColor = Color.White,
+                    ),
+                )
+            }
         },
         containerColor = Color.Black,
     ) { padding ->
@@ -226,61 +235,88 @@ private fun MediaViewerScreen(
                 .padding(padding)
                 .background(Color.Black),
         ) {
-            ViewerOptionsRow(
-                fillFrame = uiState.fillFrame,
-                flipped = uiState.flipped,
-                bookmarked = uiState.bookmarked,
-                onFitClick = onFitClick,
-                onRotateClick = onRotateClick,
-                onFlipClick = onFlipClick,
-                onBookmarkClick = onBookmarkClick,
-            )
-
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .pointerInput(uiState.items.size) {
-                        detectVerticalDragGestures(
-                            onDragStart = { verticalDrag = 0f },
-                            onVerticalDrag = { _, dragAmount -> verticalDrag += dragAmount },
-                            onDragEnd = {
-                                val nextPage = when {
-                                    verticalDrag < -80f -> pagerState.currentPage + 1
-                                    verticalDrag > 80f -> pagerState.currentPage - 1
-                                    else -> pagerState.currentPage
-                                }.coerceIn(0, uiState.items.lastIndex.coerceAtLeast(0))
-
-                                if (nextPage != pagerState.currentPage) {
-                                    coroutineScope.launch {
-                                        pagerState.animateScrollToPage(nextPage)
-                                    }
-                                }
-                                verticalDrag = 0f
-                            },
-                        )
-                    },
-            ) { page ->
-                uiState.items.getOrNull(page)?.let { item ->
-                    MediaPage(
-                        item = item,
-                        fillFrame = uiState.fillFrame,
-                        rotation = uiState.rotation,
-                        flipped = uiState.flipped,
-                    )
-                } ?: EmptyViewerMessage()
+            if (!uiState.isChromeHidden) {
+                ViewerOptionsRow(
+                    fillFrame = uiState.fillFrame,
+                    flipped = uiState.flipped,
+                    bookmarked = uiState.bookmarked,
+                    onFitClick = onFitClick,
+                    onRotateClick = onRotateClick,
+                    onFlipClick = onFlipClick,
+                    onBookmarkClick = onBookmarkClick,
+                )
             }
 
-            ViewerTimeline(
-                currentPage = pagerState.currentPage,
-                pageCount = uiState.items.size,
-                onPageSelected = { page ->
-                    coroutineScope.launch {
-                        pagerState.animateScrollToPage(page)
-                    }
-                },
-            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(uiState.items.size) {
+                            detectVerticalDragGestures(
+                                onDragStart = { verticalDrag = 0f },
+                                onVerticalDrag = { _, dragAmount -> verticalDrag += dragAmount },
+                                onDragEnd = {
+                                    val nextPage = when {
+                                        verticalDrag < -80f -> pagerState.currentPage + 1
+                                        verticalDrag > 80f -> pagerState.currentPage - 1
+                                        else -> pagerState.currentPage
+                                    }.coerceIn(0, uiState.items.lastIndex.coerceAtLeast(0))
+
+                                    if (nextPage != pagerState.currentPage) {
+                                        coroutineScope.launch {
+                                            pagerState.animateScrollToPage(nextPage)
+                                        }
+                                    }
+                                    verticalDrag = 0f
+                                },
+                            )
+                        },
+                ) { page ->
+                    uiState.items.getOrNull(page)?.let { item ->
+                        MediaPage(
+                            item = item,
+                            fillFrame = uiState.fillFrame,
+                            rotation = uiState.rotation,
+                            flipped = uiState.flipped,
+                            onContentClick = onChromeToggle,
+                        )
+                    } ?: EmptyViewerMessage()
+                }
+
+                if (uiState.isChromeHidden && uiState.items.size > 1) {
+                    HiddenNavigationButtons(
+                        onPreviousClick = {
+                            val previousPage = (pagerState.currentPage - 1).coerceAtLeast(0)
+                            coroutineScope.launch {
+                                pagerState.animateScrollToPage(previousPage)
+                            }
+                        },
+                        onNextClick = {
+                            val nextPage = (pagerState.currentPage + 1).coerceAtMost(uiState.items.lastIndex)
+                            coroutineScope.launch {
+                                pagerState.animateScrollToPage(nextPage)
+                            }
+                        },
+                    )
+                }
+            }
+
+            if (!uiState.isChromeHidden) {
+                ViewerTimeline(
+                    currentPage = pagerState.currentPage,
+                    pageCount = uiState.items.size,
+                    onPageSelected = { page ->
+                        coroutineScope.launch {
+                            pagerState.animateScrollToPage(page)
+                        }
+                    },
+                )
+            }
         }
     }
 }
@@ -342,6 +378,7 @@ private fun MediaPage(
     fillFrame: Boolean,
     rotation: Int,
     flipped: Boolean,
+    onContentClick: () -> Unit,
 ) {
     val bitmap by produceState<Bitmap?>(initialValue = null, key1 = item.path, key2 = item.lastModifiedMillis) {
         value = when (item.type) {
@@ -351,7 +388,9 @@ private fun MediaPage(
     }
 
     Box(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(onClick = onContentClick),
         contentAlignment = Alignment.Center,
     ) {
         if (bitmap == null) {
@@ -378,6 +417,60 @@ private fun MediaPage(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun BoxScope.HiddenNavigationButtons(
+    onPreviousClick: () -> Unit,
+    onNextClick: () -> Unit,
+) {
+    HiddenNavigationButton(
+        text = "-",
+        contentDescription = "Previous media",
+        modifier = Modifier
+            .align(Alignment.BottomStart)
+            .fillMaxWidth(0.5f),
+        onClick = onPreviousClick,
+    )
+    HiddenNavigationButton(
+        text = "+",
+        contentDescription = "Next media",
+        modifier = Modifier
+            .align(Alignment.BottomEnd)
+            .fillMaxWidth(0.5f),
+        onClick = onNextClick,
+    )
+    Box(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .width(3.dp)
+            .height(56.dp)
+            .alpha(0.33f)
+            .background(Color.White),
+    )
+}
+
+@Composable
+private fun HiddenNavigationButton(
+    text: String,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .height(56.dp)
+            .alpha(0.33f)
+            .background(Color.White)
+            .clickable(onClickLabel = contentDescription, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            color = Color.Black,
+            style = MaterialTheme.typography.headlineMedium,
+        )
     }
 }
 
