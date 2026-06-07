@@ -254,6 +254,7 @@ private fun MediaViewerScreen(
             ) {
                 HorizontalPager(
                     state = pagerState,
+                    beyondViewportPageCount = minOf(25, uiState.items.lastIndex.coerceAtLeast(0)),
                     modifier = Modifier
                         .fillMaxSize()
                         .pointerInput(uiState.items.size) {
@@ -293,13 +294,13 @@ private fun MediaViewerScreen(
                         onPreviousClick = {
                             val previousPage = (pagerState.currentPage - 1).coerceAtLeast(0)
                             coroutineScope.launch {
-                                pagerState.animateScrollToPage(previousPage)
+                                pagerState.scrollToPage(previousPage)
                             }
                         },
                         onNextClick = {
                             val nextPage = (pagerState.currentPage + 1).coerceAtMost(uiState.items.lastIndex)
                             coroutineScope.launch {
-                                pagerState.animateScrollToPage(nextPage)
+                                pagerState.scrollToPage(nextPage)
                             }
                         },
                     )
