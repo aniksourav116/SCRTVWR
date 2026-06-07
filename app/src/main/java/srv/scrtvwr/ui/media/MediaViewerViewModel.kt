@@ -74,6 +74,25 @@ class MediaViewerViewModel : ViewModel() {
     fun toggleChrome() {
         _uiState.update { it.copy(isChromeHidden = !it.isChromeHidden) }
     }
+
+    fun startSlideShow(stayMillis: Long) {
+        _uiState.update {
+            it.copy(
+                slideShowStayMillis = stayMillis.coerceAtLeast(1L),
+                isSlideShowRunning = true,
+                isChromeHidden = true,
+            )
+        }
+    }
+
+    fun stopSlideShow() {
+        _uiState.update {
+            it.copy(
+                isSlideShowRunning = false,
+                isChromeHidden = false,
+            )
+        }
+    }
 }
 
 data class MediaViewerUiState(
@@ -88,6 +107,8 @@ data class MediaViewerUiState(
     val flipped: Boolean = false,
     val bookmarked: Boolean = false,
     val isChromeHidden: Boolean = false,
+    val isSlideShowRunning: Boolean = false,
+    val slideShowStayMillis: Long = 50L,
 ) {
     val pageCount: Int
         get() = items.size + if (nextDirectory != null) 1 else 0

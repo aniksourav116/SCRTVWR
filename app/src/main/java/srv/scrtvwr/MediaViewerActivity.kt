@@ -34,19 +34,23 @@ import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.ViewColumn
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -73,6 +77,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -128,6 +133,8 @@ private fun MediaViewerRoute(
         onBookmarkClick = viewModel::toggleBookmark,
         onChromeToggle = viewModel::toggleChrome,
         onNextDirectoryClick = viewModel::loadNextDirectory,
+        onSlideShowStart = viewModel::startSlideShow,
+        onSlideShowStop = viewModel::stopSlideShow,
         onBack = onBack,
     )
 }
@@ -143,6 +150,8 @@ private fun MediaViewerScreen(
     onBookmarkClick: () -> Unit,
     onChromeToggle: () -> Unit,
     onNextDirectoryClick: () -> Unit,
+    onSlideShowStart: (Long) -> Unit,
+    onSlideShowStop: () -> Unit,
     onBack: () -> Unit,
 ) {
     val pagerState = rememberPagerState(
@@ -151,6 +160,8 @@ private fun MediaViewerScreen(
     )
     val coroutineScope = rememberCoroutineScope()
     var menuExpanded by remember { mutableStateOf(false) }
+    var slideShowDialogVisible by remember { mutableStateOf(false) }
+    var slideShowStayText by remember { mutableStateOf("50") }
     var verticalDrag by remember { mutableFloatStateOf(0f) }
 
     LaunchedEffect(uiState.initialPage, uiState.pageCount) {
@@ -163,6 +174,18 @@ private fun MediaViewerScreen(
         snapshotFlow { pagerState.currentPage }
             .distinctUntilChanged()
             .collect(onPageChanged)
+    }
+
+    LaunchedEffect(uiState.isSlideShowRunning, uiState.slideShowStayMillis, uiState.items.size) {
+        while (uiState.isSlideShowRunning && uiState.items.isNotEmpty()) {
+            delay(uiState.slideShowStayMillis)
+            val nextPage = pagerState.currentPage + 1
+            if (nextPage >= uiState.items.size) {
+                onSlideShowStop()
+            } else {
+                pagerState.scrollToPage(nextPage)
+            }
+        }
     }
 
     val selectedItem = uiState.items.getOrNull(pagerState.currentPage)
@@ -248,6 +271,7 @@ private fun MediaViewerScreen(
                     onRotateClick = onRotateClick,
                     onFlipClick = onFlipClick,
                     onBookmarkClick = onBookmarkClick,
+                    onSlideShowClick = { slideShowDialogVisible = true },
                 )
             }
 
@@ -316,6 +340,14 @@ private fun MediaViewerScreen(
                         },
                     )
                 }
+
+                if (uiState.isSlideShowRunning) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable(onClick = onSlideShowStop),
+                    )
+                }
             }
 
             if (!uiState.isChromeHidden) {
@@ -331,6 +363,18 @@ private fun MediaViewerScreen(
             }
         }
     }
+
+    if (slideShowDialogVisible) {
+        SlideShowDialog(
+            stayMillis = slideShowStayText,
+            onStayMillisChange = { slideShowStayText = it.filter(Char::isDigit) },
+            onDismiss = { slideShowDialogVisible = false },
+            onStart = {
+                onSlideShowStart(slideShowStayText.toLongOrNull() ?: 50L)
+                slideShowDialogVisible = false
+            },
+        )
+    }
 }
 
 @Composable
@@ -342,6 +386,7 @@ private fun ViewerOptionsRow(
     onRotateClick: () -> Unit,
     onFlipClick: () -> Unit,
     onBookmarkClick: () -> Unit,
+    onSlideShowClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -378,10 +423,41 @@ private fun ViewerOptionsRow(
         IconButton(onClick = {}) {
             Icon(Icons.AutoMirrored.Filled.FormatIndentDecrease, contentDescription = "Details", tint = Color.White)
         }
-        IconButton(onClick = {}) {
-            Icon(Icons.Default.ViewColumn, contentDescription = "Media list", tint = Color.White)
+        IconButton(onClick = onSlideShowClick) {
+            Icon(Icons.Default.Slideshow, contentDescription = "Start slideshow", tint = Color.White)
         }
     }
+}
+
+@Composable
+private fun SlideShowDialog(
+    stayMillis: String,
+    onStayMillisChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onStart: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Slide show") },
+        text = {
+            OutlinedTextField(
+                value = stayMillis,
+                onValueChange = onStayMillisChange,
+                label = { Text("Per image stay time (ms)") },
+                singleLine = true,
+            )
+        },
+        confirmButton = {
+            Button(onClick = onStart) {
+                Text("Start")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
 }
 
 @Composable
