@@ -24,8 +24,10 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
@@ -66,6 +68,7 @@ import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryMediaType
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewModel
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewMode
+import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -91,6 +94,7 @@ fun Directory(
         uiState = uiState,
         onSearchQueryChange = viewModel::updateSearchQuery,
         onViewModeChange = viewModel::setViewMode,
+        onSortOrderChange = viewModel::setSortOrder,
         onOpenDirectory = viewModel::openDirectory,
         onOpenRecentDirectory = viewModel::openDirectoryPath,
         onOpenMedia = { entry ->
@@ -122,6 +126,7 @@ fun DirectoryScreen(
     uiState: DirectoryUiState,
     onSearchQueryChange: (String) -> Unit,
     onViewModeChange: (DirectoryViewMode) -> Unit,
+    onSortOrderChange: (DirectorySortOrder) -> Unit,
     onOpenDirectory: (DirectoryEntry) -> Unit,
     onOpenRecentDirectory: (String) -> Unit,
     onOpenMedia: (DirectoryEntry) -> Unit,
@@ -131,6 +136,7 @@ fun DirectoryScreen(
     modifier: Modifier = Modifier,
 ) {
     var recentMenuExpanded by remember { mutableStateOf(false) }
+    var sortMenuExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier.fillMaxSize().padding(20.dp),
@@ -152,6 +158,36 @@ fun DirectoryScreen(
             }
             IconButton(onClick = onRefresh) {
                 Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+            }
+            Box {
+                IconButton(onClick = { sortMenuExpanded = true }) {
+                    Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort")
+                }
+                DropdownMenu(
+                    expanded = sortMenuExpanded,
+                    onDismissRequest = { sortMenuExpanded = false },
+                ) {
+                    DirectorySortOrder.entries.forEach { sortOrder ->
+                        DropdownMenuItem(
+                            text = { Text(sortOrder.label) },
+                            onClick = {
+                                onSortOrderChange(sortOrder)
+                                sortMenuExpanded = false
+                            },
+                            trailingIcon = if (sortOrder == uiState.sortOrder) {
+                                {
+                                    Icon(
+                                        Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            } else {
+                                null
+                            },
+                        )
+                    }
+                }
             }
             if (uiState.lastMediaSession != null) {
                 IconButton(onClick = onResumeMedia) {
@@ -527,6 +563,7 @@ fun DirectoryScreenPreview() {
             ),
             onSearchQueryChange = {},
             onViewModeChange = {},
+            onSortOrderChange = {},
             onOpenDirectory = {},
             onOpenRecentDirectory = {},
             onOpenMedia = {},

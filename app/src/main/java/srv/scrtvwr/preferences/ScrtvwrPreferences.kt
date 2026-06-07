@@ -2,6 +2,7 @@ package srv.scrtvwr.preferences
 
 import android.content.Context
 import org.json.JSONArray
+import srv.scrtvwr.ui.sort.DirectorySortOrder
 
 class ScrtvwrPreferences(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -31,6 +32,17 @@ class ScrtvwrPreferences(context: Context) {
 
     fun getLastDirectory(): String? =
         preferences.getString(KEY_LAST_DIRECTORY, null)
+
+    fun getDirectorySortOrder(): DirectorySortOrder =
+        preferences.getString(KEY_DIRECTORY_SORT_ORDER, null)
+            ?.let { value -> DirectorySortOrder.entries.firstOrNull { it.name == value } }
+            ?: DirectorySortOrder.NameAscending
+
+    fun saveDirectorySortOrder(sortOrder: DirectorySortOrder) {
+        preferences.edit()
+            .putString(KEY_DIRECTORY_SORT_ORDER, sortOrder.name)
+            .apply()
+    }
 
     fun getLastMediaSession(): LastMediaSession? {
         val directoryPath = preferences.getString(KEY_LAST_MEDIA_DIRECTORY, null) ?: return null
@@ -63,6 +75,7 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_SLIDE_SHOW_STAY_MILLIS = "slide_show_stay_millis"
         const val KEY_RECENT_DIRECTORIES = "recent_directories"
         const val KEY_LAST_DIRECTORY = "last_directory"
+        const val KEY_DIRECTORY_SORT_ORDER = "directory_sort_order"
         const val KEY_LAST_MEDIA_DIRECTORY = "last_media_directory"
         const val KEY_LAST_MEDIA_PATH = "last_media_path"
         const val DEFAULT_SLIDE_SHOW_STAY_MILLIS = 50L

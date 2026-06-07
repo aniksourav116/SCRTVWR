@@ -6,6 +6,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import srv.scrtvwr.preferences.ScrtvwrPreferences
+import srv.scrtvwr.ui.sort.DirectorySortOrder
+import srv.scrtvwr.ui.sort.fileComparator
 import java.io.File
 
 class MediaViewerViewModel(application: Application) : AndroidViewModel(application) {
@@ -29,12 +31,13 @@ class MediaViewerViewModel(application: Application) : AndroidViewModel(applicat
             else -> null
         }
 
+        val sortOrder = preferences.getDirectorySortOrder()
         val items = sourceDirectory
-            ?.mediaViewerItems()
+            ?.mediaViewerItems(sortOrder)
             ?.ifEmpty { selected?.toMediaViewerItem()?.let(::listOf).orEmpty() }
             ?: selected?.toMediaViewerItem()?.let(::listOf).orEmpty()
         val selectedIndex = items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
-        val nextDirectory = sourceDirectory?.nextMediaDirectory()
+        val nextDirectory = sourceDirectory?.nextMediaDirectory(sortOrder)
 
         _uiState.update {
             MediaViewerUiState(
@@ -149,6 +152,7 @@ data class MediaViewerItem(
     val path: String,
     val type: MediaViewerType,
     val lastModifiedMillis: Long,
+    val sizeBytes: Long,
 )
 
 enum class MediaViewerType {
@@ -156,13 +160,14 @@ enum class MediaViewerType {
     Video,
 }
 
-private fun File.mediaViewerItems(): List<MediaViewerItem> =
+private fun File.mediaViewerItems(sortOrder: DirectorySortOrder): List<MediaViewerItem> =
     runCatching {
         listFiles()
             ?.asSequence()
             ?.filter { it.isFile }
+            ?.filter { it.toMediaViewerItem() != null }
+            ?.sortedWith(sortOrder.fileComparator(directoriesFirst = false))
             ?.mapNotNull { it.toMediaViewerItem() }
-            ?.sortedBy { it.name.lowercase() }
             ?.toList()
     }.getOrNull().orEmpty()
 
@@ -177,19 +182,20 @@ private fun File.toMediaViewerItem(): MediaViewerItem? {
         path = absolutePath,
         type = type,
         lastModifiedMillis = lastModified(),
+        sizeBytes = length(),
     )
 }
 
-private fun File.nextMediaDirectory(): MediaViewerDirectory? {
+private fun File.nextMediaDirectory(sortOrder: DirectorySortOrder): MediaViewerDirectory? {
     val currentPath = canonicalPathOrAbsolute()
     return parentFile
         ?.listFiles()
         ?.asSequence()
         ?.filter { it.isDirectory }
-        ?.sortedBy { it.name.lowercase() }
+        ?.sortedWith(sortOrder.fileComparator(directoriesFirst = false))
         ?.dropWhile { it.canonicalPathOrAbsolute() != currentPath }
         ?.drop(1)
-        ?.firstOrNull { it.mediaViewerItems().isNotEmpty() }
+        ?.firstOrNull { it.mediaViewerItems(sortOrder).isNotEmpty() }
         ?.let {
             MediaViewerDirectory(
                 name = it.name.ifBlank { it.absolutePath },

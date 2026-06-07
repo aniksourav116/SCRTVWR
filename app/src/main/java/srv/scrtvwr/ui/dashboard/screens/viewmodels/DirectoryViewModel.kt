@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import srv.scrtvwr.preferences.LastMediaSession
 import srv.scrtvwr.preferences.ScrtvwrPreferences
+import srv.scrtvwr.ui.sort.DirectorySortOrder
+import srv.scrtvwr.ui.sort.fileComparator
 import java.io.File
 
 class DirectoryViewModel(application: Application) : AndroidViewModel(application) {
@@ -26,23 +28,31 @@ class DirectoryViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val searchQuery = MutableStateFlow("")
     private val viewMode = MutableStateFlow(DirectoryViewMode.List)
+    private val sortOrder = MutableStateFlow(preferences.getDirectorySortOrder())
     private val recentDirectories = MutableStateFlow(preferences.getRecentDirectories().validDirectories(rootDirectory))
     private val lastMediaSession = MutableStateFlow(preferences.getLastMediaSession()?.takeIfValid(rootDirectory))
 
     val uiState: StateFlow<DirectoryUiState> = combine(
-        _currentDirectory,
-        searchQuery,
-        viewMode,
+        combine(
+            _currentDirectory,
+            searchQuery,
+            viewMode,
+            sortOrder,
+        ) { currentDirectory, query, mode, order ->
+            DirectoryUiState(
+                rootDirectory = rootDirectory,
+                currentDirectory = currentDirectory,
+                searchQuery = query,
+                entries = currentDirectory.fileExplorerEntries(query, order),
+                viewMode = mode,
+                sortOrder = order,
+                canNavigateUp = currentDirectory.isDifferentDirectory(rootDirectory),
+            )
+        },
         recentDirectories,
         lastMediaSession,
-    ) { currentDirectory, query, mode, recent, session ->
-        DirectoryUiState(
-            rootDirectory = rootDirectory,
-            currentDirectory = currentDirectory,
-            searchQuery = query,
-            entries = currentDirectory.fileExplorerEntries(query),
-            viewMode = mode,
-            canNavigateUp = currentDirectory.isDifferentDirectory(rootDirectory),
+    ) { state, recent, session ->
+        state.copy(
             recentDirectories = recent,
             lastMediaSession = session,
         )
@@ -52,7 +62,8 @@ class DirectoryViewModel(application: Application) : AndroidViewModel(applicatio
         initialValue = DirectoryUiState(
             rootDirectory = rootDirectory,
             currentDirectory = initialDirectory,
-            entries = initialDirectory.fileExplorerEntries(),
+            entries = initialDirectory.fileExplorerEntries(sortOrder = sortOrder.value),
+            sortOrder = sortOrder.value,
             recentDirectories = recentDirectories.value,
             lastMediaSession = lastMediaSession.value,
         ),
@@ -68,6 +79,11 @@ class DirectoryViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun setViewMode(mode: DirectoryViewMode) {
         viewMode.value = mode
+    }
+
+    fun setSortOrder(order: DirectorySortOrder) {
+        sortOrder.value = order
+        preferences.saveDirectorySortOrder(order)
     }
 
     fun openDirectory(entry: DirectoryEntry) {
@@ -112,6 +128,7 @@ data class DirectoryUiState(
     val searchQuery: String = "",
     val entries: List<DirectoryEntry> = emptyList(),
     val viewMode: DirectoryViewMode = DirectoryViewMode.List,
+    val sortOrder: DirectorySortOrder = DirectorySortOrder.NameAscending,
     val canNavigateUp: Boolean = false,
     val recentDirectories: List<String> = emptyList(),
     val lastMediaSession: LastMediaSession? = null,
@@ -137,7 +154,10 @@ enum class DirectoryMediaType {
     Other,
 }
 
-private fun File.fileExplorerEntries(searchQuery: String = ""): List<DirectoryEntry> {
+private fun File.fileExplorerEntries(
+    searchQuery: String = "",
+    sortOrder: DirectorySortOrder = DirectorySortOrder.NameAscending,
+): List<DirectoryEntry> {
     val normalizedQuery = searchQuery.trim()
     return runCatching {
         listFiles()
@@ -145,7 +165,7 @@ private fun File.fileExplorerEntries(searchQuery: String = ""): List<DirectoryEn
             ?.filter { file ->
                 normalizedQuery.isBlank() || file.name.contains(normalizedQuery, ignoreCase = true)
             }
-            ?.sortedWith(compareByDescending<File> { it.isDirectory }.thenBy { it.name.lowercase() })
+            ?.sortedWith(sortOrder.fileComparator(directoriesFirst = true))
             ?.map { file ->
                 DirectoryEntry(
                     name = file.name.ifBlank { file.absolutePath },
