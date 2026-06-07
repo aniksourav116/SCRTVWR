@@ -1,16 +1,30 @@
 package srv.scrtvwr.ui.dashboard.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -18,11 +32,18 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryEntry
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewModel
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewMode
+import srv.scrtvwr.ui.theme.SCRTVWRTheme
+import java.io.File
 
 @Composable
 fun Directory(
@@ -30,35 +51,284 @@ fun Directory(
     viewModel: DirectoryViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    DirectoryScreen(uiState, viewModel::updateSearchQuery, modifier)
+    DirectoryScreen(
+        uiState = uiState,
+        onSearchQueryChange = viewModel::updateSearchQuery,
+        onViewModeChange = viewModel::setViewMode,
+        onOpenDirectory = viewModel::openDirectory,
+        onNavigateUp = viewModel::navigateUp,
+        onRefresh = viewModel::refresh,
+        modifier = modifier,
+    )
 }
 
 @Composable
 fun DirectoryScreen(
     uiState: DirectoryUiState,
     onSearchQueryChange: (String) -> Unit,
+    onViewModeChange: (DirectoryViewMode) -> Unit,
+    onOpenDirectory: (DirectoryEntry) -> Unit,
+    onNavigateUp: () -> Unit,
+    onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier.fillMaxSize().padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Directories", style = MaterialTheme.typography.headlineSmall)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Directory", style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    uiState.currentDirectory.absolutePath,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(onClick = onRefresh) {
+                Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+            }
+            IconButton(onClick = { onViewModeChange(DirectoryViewMode.List) }) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ViewList,
+                    contentDescription = "Show list",
+                    tint = if (uiState.viewMode == DirectoryViewMode.List) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+            IconButton(onClick = { onViewModeChange(DirectoryViewMode.Grid) }) {
+                Icon(
+                    Icons.Default.GridView,
+                    contentDescription = "Show grid",
+                    tint = if (uiState.viewMode == DirectoryViewMode.Grid) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+        }
+
         OutlinedTextField(
             value = uiState.searchQuery,
             onValueChange = onSearchQueryChange,
-            label = { Text("Search folders") },
+            label = { Text("Search files and folders") },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
-        LazyColumn(Modifier.fillMaxSize()) {
-            items(uiState.visibleDirectories) { directory ->
+
+        when (uiState.viewMode) {
+            DirectoryViewMode.List -> DirectoryList(
+                uiState = uiState,
+                onOpenDirectory = onOpenDirectory,
+                onNavigateUp = onNavigateUp,
+            )
+
+            DirectoryViewMode.Grid -> DirectoryGrid(
+                uiState = uiState,
+                onOpenDirectory = onOpenDirectory,
+                onNavigateUp = onNavigateUp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DirectoryList(
+    uiState: DirectoryUiState,
+    onOpenDirectory: (DirectoryEntry) -> Unit,
+    onNavigateUp: () -> Unit,
+) {
+    LazyColumn(Modifier.fillMaxSize()) {
+        if (uiState.canNavigateUp) {
+            item(key = "parent") {
                 ListItem(
-                    headlineContent = { Text(directory) },
-                    leadingContent = { Icon(Icons.Default.Folder, contentDescription = null) },
+                    headlineContent = { Text("..") },
+                    supportingContent = { Text("Go up") },
+                    leadingContent = { Icon(Icons.Default.ArrowUpward, contentDescription = null) },
+                    modifier = Modifier.clickable(onClick = onNavigateUp),
                 )
             }
         }
+
+        if (uiState.entries.isEmpty()) {
+            item(key = "empty") {
+                EmptyDirectoryMessage(uiState.searchQuery)
+            }
+        }
+
+        items(uiState.entries, key = DirectoryEntry::path) { entry ->
+            ListItem(
+                headlineContent = { Text(entry.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                supportingContent = { Text(entry.supportingText()) },
+                leadingContent = { EntryIcon(entry) },
+                modifier = if (entry.isDirectory) {
+                    Modifier.clickable { onOpenDirectory(entry) }
+                } else {
+                    Modifier
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DirectoryGrid(
+    uiState: DirectoryUiState,
+    onOpenDirectory: (DirectoryEntry) -> Unit,
+    onNavigateUp: () -> Unit,
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(140.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (uiState.canNavigateUp) {
+            item(key = "parent") {
+                DirectoryGridCard(
+                    title = "..",
+                    subtitle = "Go up",
+                    icon = { Icon(Icons.Default.ArrowUpward, contentDescription = null) },
+                    onClick = onNavigateUp,
+                )
+            }
+        }
+
+        if (uiState.entries.isEmpty()) {
+            item(key = "empty") {
+                EmptyDirectoryMessage(uiState.searchQuery)
+            }
+        }
+
+        items(uiState.entries, key = DirectoryEntry::path) { entry ->
+            DirectoryGridCard(
+                title = entry.name,
+                subtitle = entry.supportingText(),
+                icon = { EntryIcon(entry) },
+                onClick = if (entry.isDirectory) {
+                    { onOpenDirectory(entry) }
+                } else {
+                    null
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DirectoryGridCard(
+    title: String,
+    subtitle: String,
+    icon: @Composable () -> Unit,
+    onClick: (() -> Unit)?,
+) {
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 132.dp)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            icon()
+            Text(title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(
+                subtitle,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun EntryIcon(entry: DirectoryEntry) {
+    Icon(
+        imageVector = if (entry.isDirectory) {
+            Icons.Default.Folder
+        } else {
+            Icons.AutoMirrored.Filled.InsertDriveFile
+        },
+        contentDescription = null,
+    )
+}
+
+@Composable
+private fun EmptyDirectoryMessage(searchQuery: String) {
+    Text(
+        text = if (searchQuery.isBlank()) {
+            "This directory is empty."
+        } else {
+            "No files or folders match \"$searchQuery\"."
+        },
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(vertical = 12.dp),
+    )
+}
+
+private fun DirectoryEntry.supportingText(): String =
+    if (isDirectory) "Folder" else formatBytes(sizeBytes)
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 1_000L) return "$bytes B"
+    val units = listOf("KB", "MB", "GB", "TB")
+    var value = bytes / 1_000.0
+    var unitIndex = 0
+
+    while (value >= 1_000 && unitIndex < units.lastIndex) {
+        value /= 1_000
+        unitIndex++
+    }
+
+    return "%.1f %s".format(value, units[unitIndex])
+}
+
+@Preview(showBackground = true)
+@Composable
+fun DirectoryScreenPreview() {
+    SCRTVWRTheme {
+        DirectoryScreen(
+            uiState = DirectoryUiState(
+                rootDirectory = File("/storage/emulated/0"),
+                currentDirectory = File("/storage/emulated/0/Movies"),
+                entries = listOf(
+                    DirectoryEntry(
+                        name = "Recordings",
+                        path = "/storage/emulated/0/Movies/Recordings",
+                        isDirectory = true,
+                        sizeBytes = 0L,
+                        lastModifiedMillis = 0L,
+                    ),
+                    DirectoryEntry(
+                        name = "clip.mp4",
+                        path = "/storage/emulated/0/Movies/clip.mp4",
+                        isDirectory = false,
+                        sizeBytes = 24_000_000L,
+                        lastModifiedMillis = 0L,
+                    ),
+                ),
+                canNavigateUp = true,
+            ),
+            onSearchQueryChange = {},
+            onViewModeChange = {},
+            onOpenDirectory = {},
+            onNavigateUp = {},
+            onRefresh = {},
+        )
     }
 }
