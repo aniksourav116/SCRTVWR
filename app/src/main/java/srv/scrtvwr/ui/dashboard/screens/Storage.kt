@@ -33,6 +33,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -55,9 +58,26 @@ fun Storage(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    var pendingDirectoryPath by remember { mutableStateOf<String?>(null) }
+    val legacyPermissions = remember {
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+            arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            )
+        } else {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+    }
     val legacyPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { viewModel.refresh() }
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        viewModel.refresh()
+        if (grants.values.all { it }) {
+            pendingDirectoryPath?.let(onOpenDirectory)
+            pendingDirectoryPath = null
+        }
+    }
     val allFilesAccessLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { viewModel.refresh() }
@@ -73,11 +93,10 @@ fun Storage(
             }
 
             Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q &&
-                ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.READ_EXTERNAL_STORAGE,
-                ) != PackageManager.PERMISSION_GRANTED -> {
-                legacyPermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+                !legacyPermissions.all { permission ->
+                    ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+                } -> {
+                legacyPermissionLauncher.launch(legacyPermissions)
             }
         }
     }
@@ -86,7 +105,16 @@ fun Storage(
         uiState = uiState,
         onRefresh = viewModel::refresh,
         onOpenDevice = { device ->
-            onOpenDirectory(device.rootPath)
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q &&
+                !legacyPermissions.all { permission ->
+                    ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+                }
+            ) {
+                pendingDirectoryPath = device.rootPath
+                legacyPermissionLauncher.launch(legacyPermissions)
+            } else {
+                onOpenDirectory(device.rootPath)
+            }
         },
         modifier = modifier,
     )

@@ -51,7 +51,7 @@ class DirectoryViewModel(application: Application) : AndroidViewModel(applicatio
                 rootDirectory = root,
                 currentDirectory = currentDirectory,
                 searchQuery = query,
-                entries = currentDirectory.fileExplorerEntries(query, order),
+                directoryListing = currentDirectory.fileExplorerEntries(query, order),
                 viewMode = mode,
                 sortOrder = order,
                 canNavigateUp = currentDirectory.isDifferentDirectory(root),
@@ -70,7 +70,7 @@ class DirectoryViewModel(application: Application) : AndroidViewModel(applicatio
         initialValue = DirectoryUiState(
             rootDirectory = rootDirectory.value,
             currentDirectory = initialDirectory,
-            entries = initialDirectory.fileExplorerEntries(sortOrder = sortOrder.value),
+            directoryListing = initialDirectory.fileExplorerEntries(sortOrder = sortOrder.value),
             sortOrder = sortOrder.value,
             recentDirectories = recentDirectories.value,
             lastMediaSession = lastMediaSession.value,
@@ -137,12 +137,23 @@ data class DirectoryUiState(
     val rootDirectory: File = Environment.getExternalStorageDirectory(),
     val currentDirectory: File = rootDirectory,
     val searchQuery: String = "",
-    val entries: List<DirectoryEntry> = emptyList(),
+    val directoryListing: DirectoryListing = DirectoryListing(entries = emptyList()),
     val viewMode: DirectoryViewMode = DirectoryViewMode.List,
     val sortOrder: DirectorySortOrder = DirectorySortOrder.NameAscending,
     val canNavigateUp: Boolean = false,
     val recentDirectories: List<String> = emptyList(),
     val lastMediaSession: LastMediaSession? = null,
+) {
+    val entries: List<DirectoryEntry>
+        get() = directoryListing.entries
+
+    val canReadCurrentDirectory: Boolean
+        get() = directoryListing.canRead
+}
+
+data class DirectoryListing(
+    val entries: List<DirectoryEntry>,
+    val canRead: Boolean = true,
 )
 
 data class DirectoryEntry(
@@ -168,11 +179,16 @@ enum class DirectoryMediaType {
 private fun File.fileExplorerEntries(
     searchQuery: String = "",
     sortOrder: DirectorySortOrder = DirectorySortOrder.NameAscending,
-): List<DirectoryEntry> {
+): DirectoryListing {
     val normalizedQuery = searchQuery.trim()
     return runCatching {
-        listFiles()
-            ?.asSequence()
+        val files = listFiles() ?: return@runCatching DirectoryListing(
+            entries = emptyList(),
+            canRead = false,
+        )
+
+        DirectoryListing(
+            entries = files.asSequence()
             ?.filter { file ->
                 normalizedQuery.isBlank() || file.name.contains(normalizedQuery, ignoreCase = true)
             }
@@ -188,7 +204,10 @@ private fun File.fileExplorerEntries(
                 )
             }
             ?.toList()
-    }.getOrNull().orEmpty()
+                .orEmpty(),
+            canRead = canRead() || files.isNotEmpty(),
+        )
+    }.getOrNull() ?: DirectoryListing(entries = emptyList(), canRead = false)
 }
 
 private fun File.isSameOrChildOf(root: File): Boolean {

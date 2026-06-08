@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import srv.scrtvwr.MediaViewerActivity
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryEntry
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryListing
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryMediaType
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewModel
@@ -304,7 +305,7 @@ private fun DirectoryList(
 
         if (uiState.entries.isEmpty()) {
             item(key = "empty") {
-                EmptyDirectoryMessage(uiState.searchQuery)
+                EmptyDirectoryMessage(uiState)
             }
         }
 
@@ -356,7 +357,7 @@ private fun DirectoryGrid(
 
         if (uiState.entries.isEmpty()) {
             item(key = "empty") {
-                EmptyDirectoryMessage(uiState.searchQuery)
+                EmptyDirectoryMessage(uiState)
             }
         }
 
@@ -464,12 +465,18 @@ private fun EntryThumbnail(
 }
 
 @Composable
-private fun EmptyDirectoryMessage(searchQuery: String) {
+private fun EmptyDirectoryMessage(uiState: DirectoryUiState) {
     Text(
-        text = if (searchQuery.isBlank()) {
-            "This directory is empty."
-        } else {
-            "No files or folders match \"$searchQuery\"."
+        text = when {
+            !uiState.canReadCurrentDirectory -> {
+                "Android is not allowing this app to read this directory."
+            }
+            uiState.searchQuery.isBlank() -> {
+                "This directory is empty."
+            }
+            else -> {
+                "No files or folders match \"${uiState.searchQuery}\"."
+            }
         },
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(vertical = 12.dp),
@@ -543,20 +550,22 @@ fun DirectoryScreenPreview() {
             uiState = DirectoryUiState(
                 rootDirectory = File("/storage/emulated/0"),
                 currentDirectory = File("/storage/emulated/0/Movies"),
-                entries = listOf(
-                    DirectoryEntry(
-                        name = "Recordings",
-                        path = "/storage/emulated/0/Movies/Recordings",
-                        isDirectory = true,
-                        sizeBytes = 0L,
-                        lastModifiedMillis = 0L,
-                    ),
-                    DirectoryEntry(
-                        name = "clip.mp4",
-                        path = "/storage/emulated/0/Movies/clip.mp4",
-                        isDirectory = false,
-                        sizeBytes = 24_000_000L,
-                        lastModifiedMillis = 0L,
+                directoryListing = DirectoryListing(
+                    entries = listOf(
+                        DirectoryEntry(
+                            name = "Recordings",
+                            path = "/storage/emulated/0/Movies/Recordings",
+                            isDirectory = true,
+                            sizeBytes = 0L,
+                            lastModifiedMillis = 0L,
+                        ),
+                        DirectoryEntry(
+                            name = "clip.mp4",
+                            path = "/storage/emulated/0/Movies/clip.mp4",
+                            isDirectory = false,
+                            sizeBytes = 24_000_000L,
+                            lastModifiedMillis = 0L,
+                        ),
                     ),
                 ),
                 canNavigateUp = true,
