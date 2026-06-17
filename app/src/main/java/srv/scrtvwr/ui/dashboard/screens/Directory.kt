@@ -12,11 +12,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -39,10 +42,9 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
@@ -55,9 +57,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -140,127 +144,137 @@ fun DirectoryScreen(
     var sortMenuExpanded by remember { mutableStateOf(false) }
 
     Column(
-        modifier = modifier.fillMaxSize().padding(20.dp),
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(
+        DirectoryHeader(uiState = uiState)
+
+        Surface(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.36f),
         ) {
-            Column(Modifier.weight(1f)) {
-                Text("Directory", style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    uiState.currentDirectory.absolutePath,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            IconButton(onClick = onRefresh) {
-                Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-            }
-            Box {
-                IconButton(onClick = { sortMenuExpanded = true }) {
-                    Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort")
-                }
-                DropdownMenu(
-                    expanded = sortMenuExpanded,
-                    onDismissRequest = { sortMenuExpanded = false },
-                ) {
-                    DirectorySortOrder.entries.forEach { sortOrder ->
-                        DropdownMenuItem(
-                            text = { Text(sortOrder.label) },
-                            onClick = {
-                                onSortOrderChange(sortOrder)
-                                sortMenuExpanded = false
-                            },
-                            trailingIcon = if (sortOrder == uiState.sortOrder) {
-                                {
-                                    Icon(
-                                        Icons.Default.Check,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                    )
-                                }
-                            } else {
-                                null
-                            },
+            Column(
+                modifier = Modifier.padding(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    DirectoryToolbarButton(
+                        icon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                        label = "Refresh",
+                        onClick = onRefresh,
+                        modifier = Modifier.weight(1f),
+                    )
+
+                    Box(modifier = Modifier.weight(1f)) {
+                        DirectoryToolbarButton(
+                            icon = { Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null) },
+                            label = uiState.sortOrder.shortLabel(),
+                            onClick = { sortMenuExpanded = true },
+                            modifier = Modifier.fillMaxWidth(),
                         )
+                        DropdownMenu(
+                            expanded = sortMenuExpanded,
+                            onDismissRequest = { sortMenuExpanded = false },
+                        ) {
+                            DirectorySortOrder.entries.forEach { sortOrder ->
+                                DropdownMenuItem(
+                                    text = { Text(sortOrder.label) },
+                                    onClick = {
+                                        onSortOrderChange(sortOrder)
+                                        sortMenuExpanded = false
+                                    },
+                                    trailingIcon = if (sortOrder == uiState.sortOrder) {
+                                        {
+                                            Icon(
+                                                Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                            )
+                                        }
+                                    } else {
+                                        null
+                                    },
+                                )
+                            }
+                        }
+                    }
+
+                    DirectoryToolbarButton(
+                        icon = { Icon(Icons.Default.Restore, contentDescription = null) },
+                        label = "Resume",
+                        onClick = onResumeMedia,
+                        enabled = uiState.lastMediaSession != null,
+                        modifier = Modifier.weight(1f),
+                    )
+
+                    Box(modifier = Modifier.weight(1f)) {
+                        DirectoryToolbarButton(
+                            icon = { Icon(Icons.Default.History, contentDescription = null) },
+                            label = "Recent",
+                            onClick = { recentMenuExpanded = true },
+                            enabled = uiState.recentDirectories.isNotEmpty(),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        DropdownMenu(
+                            expanded = recentMenuExpanded,
+                            onDismissRequest = { recentMenuExpanded = false },
+                        ) {
+                            uiState.recentDirectories.forEach { path ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(
+                                                text = File(path).name.ifBlank { path },
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Text(
+                                                text = path,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    },
+                                    leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null) },
+                                    onClick = {
+                                        onOpenRecentDirectory(path)
+                                        recentMenuExpanded = false
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
-            }
-            if (uiState.lastMediaSession != null) {
-                IconButton(onClick = onResumeMedia) {
-                    Icon(Icons.Default.Restore, contentDescription = "Resume viewer")
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    DirectoryToolbarButton(
+                        icon = { Icon(Icons.AutoMirrored.Filled.ViewList, contentDescription = null) },
+                        label = "List view",
+                        selected = uiState.viewMode == DirectoryViewMode.List,
+                        onClick = { onViewModeChange(DirectoryViewMode.List) },
+                        modifier = Modifier.weight(1f),
+                    )
+
+                    DirectoryToolbarButton(
+                        icon = { Icon(Icons.Default.GridView, contentDescription = null) },
+                        label = "Grid view",
+                        selected = uiState.viewMode == DirectoryViewMode.Grid,
+                        onClick = { onViewModeChange(DirectoryViewMode.Grid) },
+                        modifier = Modifier.weight(1f),
+                    )
                 }
-            }
-            Box {
-                IconButton(
-                    onClick = { recentMenuExpanded = true },
-                    enabled = uiState.recentDirectories.isNotEmpty(),
-                ) {
-                    Icon(Icons.Default.History, contentDescription = "Recent directories")
-                }
-                DropdownMenu(
-                    expanded = recentMenuExpanded,
-                    onDismissRequest = { recentMenuExpanded = false },
-                ) {
-                    uiState.recentDirectories.forEach { path ->
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Text(
-                                        text = File(path).name.ifBlank { path },
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Text(
-                                        text = path,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            },
-                            leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null) },
-                            onClick = {
-                                onOpenRecentDirectory(path)
-                                recentMenuExpanded = false
-                            },
-                        )
-                    }
-                }
-            }
-            IconButton(onClick = { onViewModeChange(DirectoryViewMode.List) }) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ViewList,
-                    contentDescription = "Show list",
-                    tint = if (uiState.viewMode == DirectoryViewMode.List) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-            }
-            IconButton(onClick = { onViewModeChange(DirectoryViewMode.Grid) }) {
-                Icon(
-                    Icons.Default.GridView,
-                    contentDescription = "Show grid",
-                    tint = if (uiState.viewMode == DirectoryViewMode.Grid) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
             }
         }
 
         OutlinedTextField(
             value = uiState.searchQuery,
             onValueChange = onSearchQueryChange,
-            label = { Text("Search files and folders") },
+            placeholder = { Text("Search files and folders") },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
@@ -285,20 +299,105 @@ fun DirectoryScreen(
 }
 
 @Composable
+private fun DirectoryHeader(uiState: DirectoryUiState) {
+    val folderName = uiState.currentDirectory.name.ifBlank {
+        uiState.currentDirectory.absolutePath
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "Directory",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = folderName,
+            style = MaterialTheme.typography.headlineMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = uiState.currentDirectory.absolutePath,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun DirectoryToolbarButton(
+    icon: @Composable () -> Unit,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+    enabled: Boolean = true,
+) {
+    val contentColor = when {
+        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        selected -> MaterialTheme.colorScheme.onPrimaryContainer
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Surface(
+        modifier = modifier
+            .height(60.dp)
+            .then(
+                if (enabled) {
+                    Modifier.clickable(onClick = onClick)
+                } else {
+                    Modifier
+                },
+            ),
+        shape = MaterialTheme.shapes.small,
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            Color.Transparent
+        },
+        contentColor = contentColor,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            icon()
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+private fun DirectorySortOrder.shortLabel(): String =
+    label.substringBefore(" ").ifBlank { label }
+
+@Composable
 private fun DirectoryList(
     uiState: DirectoryUiState,
     onOpenDirectory: (DirectoryEntry) -> Unit,
     onOpenMedia: (DirectoryEntry) -> Unit,
     onNavigateUp: () -> Unit,
 ) {
-    LazyColumn(Modifier.fillMaxSize()) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         if (uiState.canNavigateUp) {
             item(key = "parent") {
-                ListItem(
-                    headlineContent = { Text("..") },
-                    supportingContent = { Text("Go up") },
-                    leadingContent = { Icon(Icons.Default.ArrowUpward, contentDescription = null) },
-                    modifier = Modifier.clickable(onClick = onNavigateUp),
+                DirectoryListRow(
+                    title = "..",
+                    subtitle = "Go up",
+                    thumbnail = { Icon(Icons.Default.ArrowUpward, contentDescription = null) },
+                    onClick = onNavigateUp,
                 )
             }
         }
@@ -310,12 +409,12 @@ private fun DirectoryList(
         }
 
         items(uiState.entries, key = DirectoryEntry::path) { entry ->
-            ListItem(
-                headlineContent = { Text(entry.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                supportingContent = { Text(entry.supportingText()) },
-                leadingContent = { EntryThumbnail(entry, size = 48) },
-                modifier = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
-                    Modifier.clickable {
+            DirectoryListRow(
+                title = entry.name,
+                subtitle = entry.supportingText(),
+                thumbnail = { EntryThumbnail(entry, size = 48) },
+                onClick = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
+                    {
                         if (entry.isDirectory) {
                             onOpenDirectory(entry)
                         } else {
@@ -323,8 +422,52 @@ private fun DirectoryList(
                         }
                     }
                 } else {
-                    Modifier
+                    null
                 },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DirectoryListRow(
+    title: String,
+    subtitle: String,
+    thumbnail: @Composable () -> Unit,
+    onClick: (() -> Unit)?,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.size(56.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            thumbnail()
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
