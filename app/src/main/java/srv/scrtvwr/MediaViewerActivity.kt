@@ -565,6 +565,7 @@ private fun BoxScope.HiddenNavigationButtons(
 ) {
     Row(
         modifier = Modifier.align(Alignment.BottomCenter)
+            .padding(bottom = 16.dp)
     ) {
         HiddenNavigationButton(
             text = "-",
@@ -606,15 +607,14 @@ private fun HiddenNavigationButton(
         modifier = modifier
             .fillMaxWidth()
             .wrapContentHeight()
-            .padding(24.dp)
-            .alpha(0.33f)
-            .background(Color.Transparent)
+            .alpha(0.11f)
+            .background(MaterialTheme.colorScheme.surface)
             .clickable(onClickLabel = contentDescription, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
-            color = Color.Gray.copy(alpha = 0.5f),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
             style = MaterialTheme.typography.headlineLarge,
         )
     }
