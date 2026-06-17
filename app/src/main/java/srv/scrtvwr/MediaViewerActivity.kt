@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
@@ -74,6 +76,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.Dispatchers
@@ -595,16 +598,18 @@ private fun HiddenNavigationButton(
 ) {
     Box(
         modifier = modifier
-            .height(56.dp)
+            .fillMaxWidth()
+            .wrapContentHeight()
+            .padding(24.dp)
             .alpha(0.33f)
-            .background(Color.White)
+            .background(Color.Transparent)
             .clickable(onClickLabel = contentDescription, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
-            color = Color.Black,
-            style = MaterialTheme.typography.headlineMedium,
+            color = Color.Gray.copy(alpha = 0.5f),
+            style = MaterialTheme.typography.headlineLarge,
         )
     }
 }
@@ -676,3 +681,18 @@ private fun BitmapFactory.Options.previewSampleSize(): Int {
     }
     return sampleSize
 }
+
+@Preview(showBackground = true)
+@Composable
+private fun HiddenNavigationButtonPreview() {
+    SCRTVWRTheme {
+        HiddenNavigationButton(
+            text = "+",
+            contentDescription = "Previous media",
+            modifier = Modifier.width(64.dp),
+            onClick = {}
+        )
+    }
+}
+
+
