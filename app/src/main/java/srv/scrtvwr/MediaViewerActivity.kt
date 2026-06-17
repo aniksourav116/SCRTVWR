@@ -336,6 +336,8 @@ private fun MediaViewerScreen(
 
                 if (uiState.isChromeHidden && uiState.pageCount > 1) {
                     HiddenNavigationButtons(
+                        currentPage = pagerState.currentPage,
+                        pageCount = uiState.pageCount,
                         onPreviousClick = {
                             val previousPage = (pagerState.currentPage - 1).coerceAtLeast(0)
                             coroutineScope.launch {
@@ -560,40 +562,40 @@ private fun NextDirectoryPage(
 
 @Composable
 private fun BoxScope.HiddenNavigationButtons(
+    currentPage: Int,
+    pageCount: Int,
     onPreviousClick: () -> Unit,
     onNextClick: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.align(Alignment.BottomCenter)
-            .padding(bottom = 16.dp)
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(bottom = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         HiddenNavigationButton(
             text = "-",
             contentDescription = "Previous media",
             modifier = Modifier
-//                .align(Alignment.BottomStart)
-                .weight(1f)
-                .fillMaxWidth(0.5f),
+                .weight(1f),
             onClick = onPreviousClick,
         )
+
+        Text(
+            text = "%d/%d".format(currentPage + 1, pageCount),
+            color = Color.White.copy(alpha = 0.5f),
+            style = MaterialTheme.typography.labelLarge
+        )
+
         HiddenNavigationButton(
             text = "+",
             contentDescription = "Next media",
             modifier = Modifier
-                .weight(1f)
-//                .align(Alignment.BottomEnd)
-                .fillMaxWidth(0.5f),
+                .weight(1f),
             onClick = onNextClick,
         )
     }
-    /*Box(
-        modifier = Modifier
-            .align(Alignment.BottomCenter)
-            .width(3.dp)
-            .height(56.dp)
-            .alpha(0.33f)
-            .background(Color.White),
-    )*/
 }
 
 @Composable
