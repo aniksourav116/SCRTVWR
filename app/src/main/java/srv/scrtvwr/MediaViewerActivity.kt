@@ -563,30 +563,36 @@ private fun BoxScope.HiddenNavigationButtons(
     onPreviousClick: () -> Unit,
     onNextClick: () -> Unit,
 ) {
-    HiddenNavigationButton(
-        text = "-",
-        contentDescription = "Previous media",
-        modifier = Modifier
-            .align(Alignment.BottomStart)
-            .fillMaxWidth(0.5f),
-        onClick = onPreviousClick,
-    )
-    HiddenNavigationButton(
-        text = "+",
-        contentDescription = "Next media",
-        modifier = Modifier
-            .align(Alignment.BottomEnd)
-            .fillMaxWidth(0.5f),
-        onClick = onNextClick,
-    )
-    Box(
+    Row(
+        modifier = Modifier.align(Alignment.BottomCenter)
+    ) {
+        HiddenNavigationButton(
+            text = "-",
+            contentDescription = "Previous media",
+            modifier = Modifier
+//                .align(Alignment.BottomStart)
+                .weight(1f)
+                .fillMaxWidth(0.5f),
+            onClick = onPreviousClick,
+        )
+        HiddenNavigationButton(
+            text = "+",
+            contentDescription = "Next media",
+            modifier = Modifier
+                .weight(1f)
+//                .align(Alignment.BottomEnd)
+                .fillMaxWidth(0.5f),
+            onClick = onNextClick,
+        )
+    }
+    /*Box(
         modifier = Modifier
             .align(Alignment.BottomCenter)
             .width(3.dp)
             .height(56.dp)
             .alpha(0.33f)
             .background(Color.White),
-    )
+    )*/
 }
 
 @Composable
