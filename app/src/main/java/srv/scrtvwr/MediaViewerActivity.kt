@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -569,33 +570,42 @@ private fun BoxScope.HiddenNavigationButtons(
     onPreviousClick: () -> Unit,
     onNextClick: () -> Unit,
 ) {
-    Row(
+    Box(
         modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.25f)
             .align(Alignment.BottomCenter)
-            .padding(bottom = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        HiddenNavigationButton(
-            text = "-",
-            contentDescription = "Previous media",
-            modifier = Modifier
-                .weight(1f),
-            onClick = onPreviousClick,
-        )
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            HiddenNavigationButton(
+                text = "-",
+                contentDescription = "Previous media",
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                onClick = onPreviousClick,
+            )
+
+            HiddenNavigationButton(
+                text = "+",
+                contentDescription = "Next media",
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                onClick = onNextClick,
+            )
+        }
 
         Text(
             text = "%d/%d".format(currentPage + 1, pageCount),
             color = Color.White.copy(alpha = 0.5f),
-            style = MaterialTheme.typography.labelLarge
-        )
-
-        HiddenNavigationButton(
-            text = "+",
-            contentDescription = "Next media",
+            style = MaterialTheme.typography.labelLarge,
             modifier = Modifier
-                .weight(1f),
-            onClick = onNextClick,
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 8.dp)
         )
     }
 }
@@ -609,8 +619,6 @@ private fun HiddenNavigationButton(
 ) {
     Box(
         modifier = modifier
-            .fillMaxWidth()
-            .wrapContentHeight()
             .alpha(0.11f)
             .background(MaterialTheme.colorScheme.surface)
             .clickable(onClickLabel = contentDescription, onClick = onClick),
