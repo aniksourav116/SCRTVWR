@@ -2,6 +2,7 @@ package srv.scrtvwr
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
@@ -93,6 +94,15 @@ fun ScrtvwrApp(viewModel: DashboardViewModel = viewModel()) {
         },
     ) {
         val visibleDestination = destinations[pagerState.currentPage]
+        BackHandler(enabled = visibleDestination != AppDestination.STORAGE) {
+            val storagePage = destinations.indexOf(AppDestination.STORAGE)
+            if (storagePage >= 0) {
+                coroutineScope.launch {
+                    pagerState.animateScrollToPage(storagePage)
+                }
+            }
+        }
+
         BaseScaffold(
             title = stringResource(visibleDestination.label),
             showBackButton = false,
