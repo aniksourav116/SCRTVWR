@@ -4,6 +4,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -84,6 +85,7 @@ fun Directory(
     modifier: Modifier = Modifier,
     targetDirectoryPath: String? = null,
     onTargetDirectoryConsumed: () -> Unit = {},
+    backHandlerEnabled: Boolean = true,
     viewModel: DirectoryViewModel = viewModel(),
 ) {
     LaunchedEffect(targetDirectoryPath) {
@@ -95,6 +97,10 @@ fun Directory(
 
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    BackHandler(enabled = backHandlerEnabled && uiState.canNavigateUp) {
+        viewModel.navigateUp()
+    }
+
     DirectoryScreen(
         uiState = uiState,
         onSearchQueryChange = viewModel::updateSearchQuery,

@@ -13,7 +13,10 @@ import java.io.File
 class MediaViewerViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = ScrtvwrPreferences(application)
     private val _uiState = MutableStateFlow(
-        MediaViewerUiState(slideShowStayMillis = preferences.getSlideShowStayMillis()),
+        MediaViewerUiState(
+            slideShowStayMillis = preferences.getSlideShowStayMillis(),
+            imagePreloadDistance = preferences.getImagePreloadDistance(),
+        ),
     )
     val uiState = _uiState.asStateFlow()
 
@@ -48,6 +51,7 @@ class MediaViewerViewModel(application: Application) : AndroidViewModel(applicat
                 initialPage = selectedIndex,
                 selectedPage = selectedIndex,
                 slideShowStayMillis = preferences.getSlideShowStayMillis(),
+                imagePreloadDistance = preferences.getImagePreloadDistance(),
             )
         }
         rememberMediaSession(sourceDirectory?.absolutePath ?: directoryPath, items.getOrNull(selectedIndex)?.path ?: selectedPath)
@@ -131,6 +135,7 @@ data class MediaViewerUiState(
     val isChromeHidden: Boolean = false,
     val isSlideShowRunning: Boolean = false,
     val slideShowStayMillis: Long = 50L,
+    val imagePreloadDistance: Int = 20,
 ) {
     val pageCount: Int
         get() = items.size + if (nextDirectory != null) 1 else 0

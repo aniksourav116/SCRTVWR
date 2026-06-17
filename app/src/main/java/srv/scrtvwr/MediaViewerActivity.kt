@@ -289,7 +289,7 @@ private fun MediaViewerScreen(
             ) {
                 HorizontalPager(
                     state = pagerState,
-                    beyondViewportPageCount = minOf(25, uiState.lastPageIndex),
+                    beyondViewportPageCount = minOf(uiState.imagePreloadDistance, uiState.lastPageIndex),
                     modifier = Modifier
                         .fillMaxSize()
                         .pointerInput(uiState.pageCount) {

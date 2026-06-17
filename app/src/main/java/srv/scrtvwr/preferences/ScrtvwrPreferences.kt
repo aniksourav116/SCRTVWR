@@ -16,6 +16,15 @@ class ScrtvwrPreferences(context: Context) {
             .apply()
     }
 
+    fun getImagePreloadDistance(): Int =
+        preferences.getInt(KEY_IMAGE_PRELOAD_DISTANCE, DEFAULT_IMAGE_PRELOAD_DISTANCE)
+
+    fun saveImagePreloadDistance(distance: Int) {
+        preferences.edit()
+            .putInt(KEY_IMAGE_PRELOAD_DISTANCE, distance.coerceAtLeast(0))
+            .apply()
+    }
+
     fun getRecentDirectories(): List<String> =
         preferences.getString(KEY_RECENT_DIRECTORIES, null)
             ?.let(::decodeStringList)
@@ -73,12 +82,14 @@ class ScrtvwrPreferences(context: Context) {
     private companion object {
         const val PREFERENCES_NAME = "scrtvwr_preferences"
         const val KEY_SLIDE_SHOW_STAY_MILLIS = "slide_show_stay_millis"
+        const val KEY_IMAGE_PRELOAD_DISTANCE = "image_preload_distance"
         const val KEY_RECENT_DIRECTORIES = "recent_directories"
         const val KEY_LAST_DIRECTORY = "last_directory"
         const val KEY_DIRECTORY_SORT_ORDER = "directory_sort_order"
         const val KEY_LAST_MEDIA_DIRECTORY = "last_media_directory"
         const val KEY_LAST_MEDIA_PATH = "last_media_path"
         const val DEFAULT_SLIDE_SHOW_STAY_MILLIS = 50L
+        const val DEFAULT_IMAGE_PRELOAD_DISTANCE = 20
         const val MAX_RECENT_DIRECTORIES = 100
     }
 }
