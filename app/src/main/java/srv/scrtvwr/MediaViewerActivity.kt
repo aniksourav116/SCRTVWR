@@ -1,5 +1,6 @@
 package srv.scrtvwr
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
@@ -101,6 +102,13 @@ class MediaViewerActivity : ComponentActivity() {
                 MediaViewerRoute(
                     directoryPath = directoryPath,
                     selectedPath = mediaPath,
+                    onOpenVideo = { path ->
+                        startActivity(
+                            Intent(this, VideoPlayerActivity::class.java).apply {
+                                putExtra(VideoPlayerActivity.EXTRA_VIDEO_PATH, path)
+                            },
+                        )
+                    },
                     onBack = ::finish,
                 )
             }
@@ -117,6 +125,7 @@ class MediaViewerActivity : ComponentActivity() {
 private fun MediaViewerRoute(
     directoryPath: String?,
     selectedPath: String?,
+    onOpenVideo: (String) -> Unit,
     onBack: () -> Unit,
     viewModel: MediaViewerViewModel = viewModel(),
 ) {
@@ -136,6 +145,7 @@ private fun MediaViewerRoute(
         onNextDirectoryClick = viewModel::loadNextDirectory,
         onSlideShowStart = viewModel::startSlideShow,
         onSlideShowStop = viewModel::stopSlideShow,
+        onOpenVideo = onOpenVideo,
         onBack = onBack,
     )
 }
@@ -153,6 +163,7 @@ private fun MediaViewerScreen(
     onNextDirectoryClick: () -> Unit,
     onSlideShowStart: (Long) -> Unit,
     onSlideShowStop: () -> Unit,
+    onOpenVideo: (String) -> Unit,
     onBack: () -> Unit,
 ) {
     val pagerState = rememberPagerState(
@@ -217,6 +228,11 @@ private fun MediaViewerScreen(
                         }
                     },
                     actions = {
+                        if (selectedItem?.type == MediaViewerType.Video) {
+                            IconButton(onClick = { onOpenVideo(selectedItem.path) }) {
+                                Icon(Icons.Default.PlayCircle, contentDescription = "Play video")
+                            }
+                        }
                         IconButton(onClick = onFitClick) {
                             Icon(Icons.Default.OpenInFull, contentDescription = "Toggle full view")
                         }
@@ -228,6 +244,14 @@ private fun MediaViewerScreen(
                                 expanded = menuExpanded,
                                 onDismissRequest = { menuExpanded = false },
                             ) {
+                                DropdownMenuItem(
+                                    text = { Text("Play video") },
+                                    onClick = {
+                                        selectedItem?.path?.let(onOpenVideo)
+                                        menuExpanded = false
+                                    },
+                                    enabled = selectedItem?.type == MediaViewerType.Video,
+                                )
                                 DropdownMenuItem(
                                     text = { Text(if (uiState.fillFrame) "Fit to screen" else "Fill screen") },
                                     onClick = {
@@ -279,6 +303,9 @@ private fun MediaViewerScreen(
                     onFlipClick = onFlipClick,
                     onBookmarkClick = onBookmarkClick,
                     onSlideShowClick = { slideShowDialogVisible = true },
+                    onPlayVideoClick = selectedItem
+                        ?.takeIf { it.type == MediaViewerType.Video }
+                        ?.let { { onOpenVideo(it.path) } },
                 )
             }
 
@@ -320,6 +347,7 @@ private fun MediaViewerScreen(
                             rotation = uiState.rotation,
                             flipped = uiState.flipped,
                             onContentClick = onChromeToggle,
+                            onVideoPlayClick = { onOpenVideo(item.path) },
                         )
                     } ?: if (page == uiState.nextDirectoryPageIndex) {
                         NextDirectoryPage(
@@ -394,6 +422,7 @@ private fun ViewerOptionsRow(
     onFlipClick: () -> Unit,
     onBookmarkClick: () -> Unit,
     onSlideShowClick: () -> Unit,
+    onPlayVideoClick: (() -> Unit)?,
 ) {
     Row(
         modifier = Modifier
@@ -429,6 +458,11 @@ private fun ViewerOptionsRow(
         }
         IconButton(onClick = {}) {
             Icon(Icons.AutoMirrored.Filled.FormatIndentDecrease, contentDescription = "Details", tint = Color.White)
+        }
+        if (onPlayVideoClick != null) {
+            IconButton(onClick = onPlayVideoClick) {
+                Icon(Icons.Default.PlayCircle, contentDescription = "Play video", tint = Color.White)
+            }
         }
         IconButton(onClick = onSlideShowClick) {
             Icon(Icons.Default.Slideshow, contentDescription = "Start slideshow", tint = Color.White)
@@ -474,6 +508,7 @@ private fun MediaPage(
     rotation: Int,
     flipped: Boolean,
     onContentClick: () -> Unit,
+    onVideoPlayClick: () -> Unit,
 ) {
     val bitmap by produceState<Bitmap?>(initialValue = null, key1 = item.path, key2 = item.lastModifiedMillis) {
         value = when (item.type) {
@@ -505,11 +540,14 @@ private fun MediaPage(
                 contentScale = if (fillFrame) ContentScale.Crop else ContentScale.Fit,
             )
             if (item.type == MediaViewerType.Video) {
-                Icon(
-                    Icons.Default.PlayCircle,
-                    contentDescription = "Video thumbnail",
-                    tint = Color.White,
-                )
+                IconButton(onClick = onVideoPlayClick) {
+                    Icon(
+                        Icons.Default.PlayCircle,
+                        contentDescription = "Play video",
+                        tint = Color.White,
+                        modifier = Modifier.size(64.dp),
+                    )
+                }
             }
         }
     }
