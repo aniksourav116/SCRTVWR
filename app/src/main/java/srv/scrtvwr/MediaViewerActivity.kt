@@ -76,6 +76,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
@@ -318,6 +319,27 @@ private fun MediaViewerScreen(
                                     verticalDrag = 0f
                                 },
                             )
+                        }
+                        .pointerInput(uiState.pageCount) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    if (event.type == PointerEventType.Scroll) {
+                                        val delta = event.changes.first().scrollDelta.y
+                                        val nextPage = when {
+                                            delta > 0f -> pagerState.currentPage + 1
+                                            delta < 0f -> pagerState.currentPage - 1
+                                            else -> pagerState.currentPage
+                                        }.coerceIn(0, uiState.lastPageIndex)
+
+                                        if (nextPage != pagerState.currentPage) {
+                                            coroutineScope.launch {
+                                                pagerState.animateScrollToPage(nextPage)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         },
                 ) { page ->
                     uiState.items.getOrNull(page)?.let { item ->
@@ -574,7 +596,7 @@ private fun BoxScope.HiddenNavigationButtons(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .fillMaxHeight(0.15f)
+            .fillMaxHeight(0.25f)
             .align(Alignment.BottomCenter)
     ) {
         Row(
