@@ -573,7 +573,7 @@ private fun BoxScope.HiddenNavigationButtons(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .fillMaxHeight(0.25f)
+            .fillMaxHeight(0.15f)
             .align(Alignment.BottomCenter)
     ) {
         Row(
