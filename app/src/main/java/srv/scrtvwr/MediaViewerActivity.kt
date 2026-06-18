@@ -71,6 +71,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -663,7 +664,7 @@ private fun ViewerTimeline(
             valueRange = 0f..(pageCount - 1).coerceAtLeast(0).toFloat(),
             steps = (pageCount - 2).coerceAtLeast(0),
             enabled = pageCount > 1,
-            modifier = Modifier.height(28.dp),
+            modifier = Modifier.height(28.dp).padding(horizontal = 32.dp),
         )
     }
 }
