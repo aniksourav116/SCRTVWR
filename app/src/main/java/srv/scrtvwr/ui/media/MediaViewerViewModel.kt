@@ -9,6 +9,8 @@ import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.sort.fileComparator
 import java.io.File
+import java.util.zip.ZipFile
+import com.github.junrar.Archive
 
 class MediaViewerViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = ScrtvwrPreferences(application)
@@ -26,35 +28,58 @@ class MediaViewerViewModel(application: Application) : AndroidViewModel(applicat
             return
         }
 
-        val directory = directoryPath?.let(::File)
-        val selected = selectedPath?.let(::File)
-        val sourceDirectory = when {
-            directory?.isDirectory == true -> directory
-            selected?.parentFile?.isDirectory == true -> selected.parentFile
-            else -> null
-        }
+        val items: List<MediaViewerItem>
+        val sourceDirectoryPath: String?
+        val initialPage: Int
+        val nextDirectory: MediaViewerDirectory?
 
-        val sortOrder = preferences.getDirectorySortOrder()
-        val items = sourceDirectory
-            ?.mediaViewerItems(sortOrder)
-            ?.ifEmpty { selected?.toMediaViewerItem()?.let(::listOf).orEmpty() }
-            ?: selected?.toMediaViewerItem()?.let(::listOf).orEmpty()
-        val selectedIndex = items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
-        val nextDirectory = sourceDirectory?.nextMediaDirectory(sortOrder)
+        val selectedFile = selectedPath?.let(::File)
+        val isArchive = selectedPath != null && (selectedPath.isArchive() || selectedPath.contains("::"))
+
+        if (isArchive) {
+            val archivePath = selectedPath!!.substringBefore("::")
+            val archiveFile = File(archivePath)
+            items = archiveFile.archiveMediaItems()
+            sourceDirectoryPath = archivePath
+            initialPage = if (selectedPath.contains("::")) {
+                items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
+            } else {
+                0
+            }
+            nextDirectory = null
+        } else {
+            val directory = directoryPath?.let(::File)
+            val selected = selectedFile
+            val sourceDirectory = when {
+                directory?.isDirectory == true -> directory
+                selected?.parentFile?.isDirectory == true -> selected.parentFile
+                else -> null
+            }
+
+            val sortOrder = preferences.getDirectorySortOrder()
+            items = sourceDirectory
+                ?.mediaViewerItems(sortOrder)
+                ?.ifEmpty { selected?.toMediaViewerItem()?.let(::listOf).orEmpty() }
+                ?: selected?.toMediaViewerItem()?.let(::listOf).orEmpty()
+
+            sourceDirectoryPath = sourceDirectory?.absolutePath ?: directoryPath
+            initialPage = items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
+            nextDirectory = sourceDirectory?.nextMediaDirectory(sortOrder)
+        }
 
         _uiState.update {
             MediaViewerUiState(
-                sourceDirectoryPath = sourceDirectory?.absolutePath ?: directoryPath,
+                sourceDirectoryPath = sourceDirectoryPath,
                 selectedPath = selectedPath,
                 items = items,
                 nextDirectory = nextDirectory,
-                initialPage = selectedIndex,
-                selectedPage = selectedIndex,
+                initialPage = initialPage,
+                selectedPage = initialPage,
                 slideShowStayMillis = preferences.getSlideShowStayMillis(),
                 imagePreloadDistance = preferences.getImagePreloadDistance(),
             )
         }
-        rememberMediaSession(sourceDirectory?.absolutePath ?: directoryPath, items.getOrNull(selectedIndex)?.path ?: selectedPath)
+        rememberMediaSession(sourceDirectoryPath, items.getOrNull(initialPage)?.path ?: selectedPath)
     }
 
     fun selectPage(page: Int) {
@@ -211,3 +236,63 @@ private fun File.nextMediaDirectory(sortOrder: DirectorySortOrder): MediaViewerD
 
 private fun File.canonicalPathOrAbsolute(): String =
     runCatching { canonicalPath }.getOrElse { absolutePath }
+
+private fun String.isArchive(): Boolean {
+    val lower = lowercase()
+    return lower.endsWith(".zip") || lower.endsWith(".cbz") || lower.endsWith(".rar") || lower.endsWith(".cbr")
+}
+
+private fun File.archiveMediaItems(): List<MediaViewerItem> {
+    val ext = extension.lowercase()
+    return when (ext) {
+        "zip", "cbz" -> getZipImageEntries(this)
+        "rar", "cbr" -> getRarImageEntries(this)
+        else -> emptyList()
+    }
+}
+
+private fun getZipImageEntries(file: File): List<MediaViewerItem> = runCatching {
+    ZipFile(file).use { zip ->
+        zip.entries().asSequence()
+            .filter { !it.isDirectory }
+            .filter { it.name.isImageExtension() }
+            .map { entry ->
+                MediaViewerItem(
+                    name = entry.name.substringAfterLast('/'),
+                    path = "${file.absolutePath}::${entry.name}",
+                    type = MediaViewerType.Image,
+                    lastModifiedMillis = entry.time,
+                    sizeBytes = entry.size
+                )
+            }
+            .sortedBy { it.name }
+            .toList()
+    }
+}.getOrNull().orEmpty()
+
+private fun getRarImageEntries(file: File): List<MediaViewerItem> = runCatching {
+    Archive(file).use { archive ->
+        archive.fileHeaders
+            .filter { !it.isDirectory }
+            .filter { it.fileName.isImageExtension() }
+            .map { header ->
+                MediaViewerItem(
+                    name = header.fileName.substringAfterLast('\\').substringAfterLast('/'),
+                    path = "${file.absolutePath}::${header.fileName}",
+                    type = MediaViewerType.Image,
+                    lastModifiedMillis = header.mTime?.time ?: file.lastModified(),
+                    sizeBytes = header.fullUnpackSize
+                )
+            }
+            .sortedBy { it.name }
+            .toList()
+    }
+}.getOrNull().orEmpty()
+
+private fun String.isImageExtension(): Boolean {
+    val ext = substringAfterLast('.', "").lowercase()
+    return when (ext) {
+        "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif" -> true
+        else -> false
+    }
+}

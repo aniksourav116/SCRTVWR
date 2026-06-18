@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.os.Bundle
 import android.view.WindowManager
+import java.io.File
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -88,6 +89,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.github.junrar.Archive
+import java.util.zip.ZipFile
 import srv.scrtvwr.ui.media.MediaViewerItem
 import srv.scrtvwr.ui.media.MediaViewerType
 import srv.scrtvwr.ui.media.MediaViewerUiState
@@ -713,6 +716,11 @@ private fun ViewerTimeline(
 }
 
 private suspend fun loadImagePreview(path: String): Bitmap? = withContext(Dispatchers.IO) {
+    if (path.contains("::")) {
+        val archivePath = path.substringBefore("::")
+        val entryName = path.substringAfter("::")
+        return@withContext loadArchiveImagePreview(archivePath, entryName)
+    }
     runCatching {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, bounds)
@@ -720,6 +728,30 @@ private suspend fun loadImagePreview(path: String): Bitmap? = withContext(Dispat
             inSampleSize = bounds.previewSampleSize()
         }
         BitmapFactory.decodeFile(path, sampleOptions)
+    }.getOrNull()
+}
+
+private suspend fun loadArchiveImagePreview(archivePath: String, entryName: String): Bitmap? = withContext(Dispatchers.IO) {
+    runCatching {
+        val archiveFile = File(archivePath)
+        val bytes = if (archivePath.lowercase().endsWith(".zip") || archivePath.lowercase().endsWith(".cbz")) {
+            ZipFile(archiveFile).use { zip ->
+                val entry = zip.getEntry(entryName) ?: return@runCatching null
+                zip.getInputStream(entry).use { it.readBytes() }
+            }
+        } else {
+            Archive(archiveFile).use { archive ->
+                val header = archive.fileHeaders.firstOrNull { it.fileName == entryName } ?: return@runCatching null
+                archive.getInputStream(header).use { it.readBytes() }
+            }
+        } ?: return@runCatching null
+
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val sampleOptions = BitmapFactory.Options().apply {
+            inSampleSize = bounds.previewSampleSize()
+        }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, sampleOptions)
     }.getOrNull()
 }
 

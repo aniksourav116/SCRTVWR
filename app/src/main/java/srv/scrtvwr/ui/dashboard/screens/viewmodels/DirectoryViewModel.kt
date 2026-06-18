@@ -173,6 +173,7 @@ enum class DirectoryViewMode {
 enum class DirectoryMediaType {
     Image,
     Video,
+    Archive,
     Other,
 }
 
@@ -238,6 +239,7 @@ private fun File.mediaType(): DirectoryMediaType {
     return when (extension.lowercase()) {
         "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif" -> DirectoryMediaType.Image
         "mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v" -> DirectoryMediaType.Video
+        "zip", "cbz", "rar", "cbr" -> DirectoryMediaType.Archive
         else -> DirectoryMediaType.Other
     }
 }

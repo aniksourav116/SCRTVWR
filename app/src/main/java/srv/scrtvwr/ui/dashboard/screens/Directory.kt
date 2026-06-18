@@ -576,6 +576,7 @@ private fun EntryThumbnail(
             DirectoryMediaType.Image -> loadImageThumbnail(entry.path, size)
             DirectoryMediaType.Video -> loadVideoThumbnail(entry.path)
             DirectoryMediaType.Other -> null
+            DirectoryMediaType.Archive -> null
         }
     }
 
@@ -637,6 +638,7 @@ private fun DirectoryEntry.supportingText(): String =
         isDirectory -> "Folder"
         mediaType == DirectoryMediaType.Image -> "Image - ${formatBytes(sizeBytes)}"
         mediaType == DirectoryMediaType.Video -> "Video - ${formatBytes(sizeBytes)}"
+        mediaType == DirectoryMediaType.Archive -> "Archive - ${formatBytes(sizeBytes)}"
         else -> formatBytes(sizeBytes)
     }
 
