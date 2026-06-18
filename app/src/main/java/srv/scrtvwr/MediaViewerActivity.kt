@@ -322,19 +322,40 @@ private fun MediaViewerScreen(
                         }
                         .pointerInput(uiState.pageCount) {
                             awaitPointerEventScope {
+                                var lastScrollTime = 0L
+                                var acceleration = 1f
                                 while (true) {
                                     val event = awaitPointerEvent()
                                     if (event.type == PointerEventType.Scroll) {
                                         val delta = event.changes.first().scrollDelta.y
-                                        val nextPage = when {
-                                            delta > 0f -> pagerState.currentPage + 1
-                                            delta < 0f -> pagerState.currentPage - 1
-                                            else -> pagerState.currentPage
-                                        }.coerceIn(0, uiState.lastPageIndex)
+                                        if (delta == 0f) continue
+                                        
+                                        val now = System.currentTimeMillis()
+                                        val timeDiff = now - lastScrollTime
+                                        lastScrollTime = now
+
+                                        // If scrolling rapidly (less than 150ms between events), increase skip multiplier
+                                        if (timeDiff < 150) {
+                                            acceleration = (acceleration + 1.5f).coerceAtMost(25f)
+                                        } else {
+                                            acceleration = 1f
+                                        }
+
+                                        // Calculate how many pages to skip based on delta and acceleration
+                                        val skip = (delta * acceleration).toInt().let {
+                                            if (it == 0) (if (delta > 0) 1 else -1) else it
+                                        }
+                                        
+                                        val nextPage = (pagerState.currentPage + skip).coerceIn(0, uiState.lastPageIndex)
 
                                         if (nextPage != pagerState.currentPage) {
                                             coroutineScope.launch {
-                                                pagerState.animateScrollToPage(nextPage)
+                                                // Use instant scroll for high speed to keep UI responsive
+                                                if (kotlin.math.abs(skip) > 1) {
+                                                    pagerState.scrollToPage(nextPage)
+                                                } else {
+                                                    pagerState.animateScrollToPage(nextPage)
+                                                }
                                             }
                                         }
                                     }
