@@ -6,8 +6,11 @@ import android.media.MediaMetadataRetriever
 import android.os.Build
 import android.util.LruCache
 import com.github.junrar.Archive
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -15,6 +18,8 @@ import java.io.File
 import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
+import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.ZipFile
 import kotlin.coroutines.coroutineContext
 
@@ -26,7 +31,13 @@ data class PreviewResult(
 object MediaPreviewLoader {
     private const val MAX_ARCHIVE_ENTRY_BYTES = 128L * 1024L * 1024L
     private const val MAX_CACHE_KIB = 48 * 1024
+    private const val MAX_DISK_CACHE_BYTES = 64L * 1024L * 1024L
+    private const val MAX_DISK_CACHE_DIMENSION = 256
+    private const val DISK_WRITES_PER_TRIM = 32
     private val directoryThumbnailSemaphore = Semaphore(2)
+    private val diskCacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val diskWritesSinceTrim = AtomicInteger()
+    @Volatile private var diskCacheDirectory: File? = null
 
     private val cache = object : LruCache<String, Bitmap>(MAX_CACHE_KIB) {
         override fun sizeOf(key: String, value: Bitmap): Int =
@@ -34,7 +45,7 @@ object MediaPreviewLoader {
     }
 
     suspend fun loadImage(path: String, modified: Long, maxDimension: Int): PreviewResult =
-        loadCached("image:$path:$modified:$maxDimension") {
+        loadCached("image:$path:$modified:$maxDimension", maxDimension) {
             if (path.contains("::")) {
                 loadArchiveImage(path.substringBefore("::"), path.substringAfter("::"), maxDimension)
             } else {
@@ -43,7 +54,7 @@ object MediaPreviewLoader {
         }
 
     suspend fun loadVideoFrame(path: String, modified: Long, maxDimension: Int): PreviewResult =
-        loadCached("video:$path:$modified:$maxDimension") {
+        loadCached("video:$path:$modified:$maxDimension", maxDimension) {
             runCatching {
                 val retriever = MediaMetadataRetriever()
                 try {
@@ -69,7 +80,7 @@ object MediaPreviewLoader {
         }
 
     suspend fun loadDirectoryThumbnail(path: String, modified: Long, maxDimension: Int): PreviewResult =
-        loadCached("directory:$path:$modified:$maxDimension") {
+        loadCached("directory:$path:$modified:$maxDimension", maxDimension) {
             directoryThumbnailSemaphore.withPermit {
                 val image = File(path).listFiles()?.firstOrNull { file ->
                     coroutineContext.ensureActive()
@@ -79,14 +90,83 @@ object MediaPreviewLoader {
             }
         }
 
-    private suspend fun loadCached(key: String, loader: suspend () -> PreviewResult): PreviewResult {
+    private suspend fun loadCached(
+        key: String,
+        maxDimension: Int,
+        loader: suspend () -> PreviewResult,
+    ): PreviewResult {
         cache.get(key)?.let { return PreviewResult(bitmap = it) }
-        val result = withContext(Dispatchers.IO) {
+        return withContext(Dispatchers.IO) {
             coroutineContext.ensureActive()
-            loader().also { coroutineContext.ensureActive() }
+            cache.get(key)?.let { return@withContext PreviewResult(bitmap = it) }
+            if (maxDimension <= MAX_DISK_CACHE_DIMENSION) {
+                readDiskCache(key)?.let { bitmap ->
+                    cache.put(key, bitmap)
+                    return@withContext PreviewResult(bitmap = bitmap)
+                }
+            }
+            loader().also { result ->
+                coroutineContext.ensureActive()
+                result.bitmap?.let { bitmap ->
+                    cache.put(key, bitmap)
+                    if (maxDimension <= MAX_DISK_CACHE_DIMENSION) writeDiskCache(key, bitmap)
+                }
+            }
         }
-        result.bitmap?.let { cache.put(key, it) }
-        return result
+    }
+
+    private fun readDiskCache(key: String): Bitmap? {
+        val file = diskCacheFile(key) ?: return null
+        if (!file.isFile) return null
+        return BitmapFactory.decodeFile(file.path)?.also {
+            file.setLastModified(System.currentTimeMillis())
+        } ?: run {
+            file.delete()
+            null
+        }
+    }
+
+    private fun writeDiskCache(key: String, bitmap: Bitmap) {
+        val target = diskCacheFile(key) ?: return
+        if (target.isFile) {
+            target.setLastModified(System.currentTimeMillis())
+            return
+        }
+        val directory = target.parentFile ?: return
+        runCatching {
+            directory.mkdirs()
+            val temporary = File.createTempFile("thumbnail-", ".tmp", directory)
+            try {
+                temporary.outputStream().buffered().use { output ->
+                    check(bitmap.compress(Bitmap.CompressFormat.WEBP, 80, output))
+                }
+                if (!temporary.renameTo(target) && !target.isFile) error("Unable to store thumbnail")
+            } finally {
+                temporary.delete()
+            }
+        }
+        if (diskWritesSinceTrim.incrementAndGet() >= DISK_WRITES_PER_TRIM) {
+            diskWritesSinceTrim.set(0)
+            diskCacheScope.launch { trimDiskCache() }
+        }
+    }
+
+    private fun diskCacheFile(key: String): File? {
+        val directory = diskCacheDirectory ?: return null
+        val digest = MessageDigest.getInstance("SHA-256").digest(key.toByteArray(Charsets.UTF_8))
+        val name = digest.joinToString(separator = "") { byte -> "%02x".format(byte) }
+        return File(directory, "$name.webp")
+    }
+
+    private fun trimDiskCache() {
+        val files = diskCacheDirectory?.listFiles()?.filter(File::isFile)
+            ?.sortedByDescending(File::lastModified)
+            ?: return
+        var retainedBytes = 0L
+        files.forEach { file ->
+            retainedBytes += file.length()
+            if (retainedBytes > MAX_DISK_CACHE_BYTES) file.delete()
+        }
     }
 
     private fun decodeFile(path: String, maxDimension: Int): PreviewResult =
@@ -173,6 +253,15 @@ object MediaPreviewLoader {
         private fun account(count: Long) {
             readBytes += count
             if (readBytes > limit) throw IOException("Archive image exceeds the 128 MB safety limit")
+        }
+    }
+
+    fun initialize(cacheDirectory: File) {
+        val directory = File(cacheDirectory, "media_thumbnails")
+        diskCacheDirectory = directory
+        diskCacheScope.launch {
+            directory.mkdirs()
+            trimDiskCache()
         }
     }
 
