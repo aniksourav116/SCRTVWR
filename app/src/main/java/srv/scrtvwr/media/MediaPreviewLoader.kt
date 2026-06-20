@@ -8,6 +8,8 @@ import android.util.LruCache
 import com.github.junrar.Archive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FilterInputStream
@@ -24,6 +26,7 @@ data class PreviewResult(
 object MediaPreviewLoader {
     private const val MAX_ARCHIVE_ENTRY_BYTES = 128L * 1024L * 1024L
     private const val MAX_CACHE_KIB = 48 * 1024
+    private val directoryThumbnailSemaphore = Semaphore(2)
 
     private val cache = object : LruCache<String, Bitmap>(MAX_CACHE_KIB) {
         override fun sizeOf(key: String, value: Bitmap): Int =
@@ -63,6 +66,17 @@ object MediaPreviewLoader {
                 onSuccess = { PreviewResult(bitmap = it) },
                 onFailure = { PreviewResult(error = it.readableMessage("Unable to read video preview")) },
             )
+        }
+
+    suspend fun loadDirectoryThumbnail(path: String, modified: Long, maxDimension: Int): PreviewResult =
+        loadCached("directory:$path:$modified:$maxDimension") {
+            directoryThumbnailSemaphore.withPermit {
+                val image = File(path).listFiles()?.firstOrNull { file ->
+                    coroutineContext.ensureActive()
+                    file.isFile && file.extension.lowercase() in IMAGE_EXTENSIONS
+                } ?: return@withPermit PreviewResult()
+                decodeFile(image.path, maxDimension)
+            }
         }
 
     private suspend fun loadCached(key: String, loader: suspend () -> PreviewResult): PreviewResult {
@@ -161,4 +175,6 @@ object MediaPreviewLoader {
             if (readBytes > limit) throw IOException("Archive image exceeds the 128 MB safety limit")
         }
     }
+
+    private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif")
 }

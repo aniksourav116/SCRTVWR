@@ -594,13 +594,13 @@ private fun EntryThumbnail(
         initialValue = PreviewResult(),
         key1 = entry.path,
         key2 = entry.lastModifiedMillis,
-        key3 = entry.mediaType,
+        key3 = entry.isDirectory,
     ) {
-        value = when (entry.mediaType) {
-            DirectoryMediaType.Image -> MediaPreviewLoader.loadImage(entry.path, entry.lastModifiedMillis, size * 2)
-            DirectoryMediaType.Video -> MediaPreviewLoader.loadVideoFrame(entry.path, entry.lastModifiedMillis, size * 2)
-            DirectoryMediaType.Other -> PreviewResult()
-            DirectoryMediaType.Archive -> PreviewResult()
+        value = when {
+            entry.isDirectory -> MediaPreviewLoader.loadDirectoryThumbnail(entry.path, entry.lastModifiedMillis, size * 2)
+            entry.mediaType == DirectoryMediaType.Image -> MediaPreviewLoader.loadImage(entry.path, entry.lastModifiedMillis, size * 2)
+            entry.mediaType == DirectoryMediaType.Video -> MediaPreviewLoader.loadVideoFrame(entry.path, entry.lastModifiedMillis, size * 2)
+            else -> PreviewResult()
         }
     }
 
