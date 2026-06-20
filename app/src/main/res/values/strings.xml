@@ -71,6 +71,9 @@
     <string name="media_modified">Modified: %1$s</string>
     <string name="close">Close</string>
     <string name="move_next_directory">Move to next directory</string>
+    <string name="next_directory">Next directory</string>
+    <string name="next_archive">Next archive</string>
+    <string name="move_next_archive">Move to next archive</string>
     <string name="previous_media">Previous media</string>
     <string name="next_media">Next media</string>
     <string name="no_media_selected">No image or video selected</string>

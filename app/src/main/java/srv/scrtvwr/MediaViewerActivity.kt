@@ -35,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.FormatIndentDecrease
 import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.ImageNotSupported
@@ -153,7 +154,7 @@ private fun MediaViewerRoute(
         onFlipClick = viewModel::toggleFlip,
         onBookmarkClick = viewModel::toggleBookmark,
         onChromeToggle = viewModel::toggleChrome,
-        onNextDirectoryClick = viewModel::loadNextDirectory,
+        onNextSourceClick = viewModel::loadNextSource,
         onSlideShowStart = viewModel::startSlideShow,
         onSlideShowStop = viewModel::stopSlideShow,
         onBack = onBack,
@@ -170,7 +171,7 @@ private fun MediaViewerScreen(
     onFlipClick: () -> Unit,
     onBookmarkClick: () -> Unit,
     onChromeToggle: () -> Unit,
-    onNextDirectoryClick: () -> Unit,
+    onNextSourceClick: () -> Unit,
     onSlideShowStart: (Long) -> Unit,
     onSlideShowStop: () -> Unit,
     onBack: () -> Unit,
@@ -400,10 +401,11 @@ private fun MediaViewerScreen(
                             flipped = uiState.flipped,
                             onContentClick = onChromeToggle,
                         )
-                    } ?: if (page == uiState.nextDirectoryPageIndex) {
-                        NextDirectoryPage(
-                            directoryName = uiState.nextDirectory?.name.orEmpty(),
-                            onClick = onNextDirectoryClick,
+                    } ?: if (page == uiState.nextSourcePageIndex) {
+                        NextSourcePage(
+                            sourceName = uiState.nextSource?.name.orEmpty(),
+                            isArchive = uiState.nextSource?.isArchive == true,
+                            onClick = onNextSourceClick,
                         )
                     } else {
                         EmptyViewerMessage()
@@ -642,8 +644,9 @@ private fun formatMediaBytes(bytes: Long): String {
 }
 
 @Composable
-private fun NextDirectoryPage(
-    directoryName: String,
+private fun NextSourcePage(
+    sourceName: String,
+    isArchive: Boolean,
     onClick: () -> Unit,
 ) {
     Box(
@@ -658,24 +661,24 @@ private fun NextDirectoryPage(
             modifier = Modifier.padding(24.dp),
         ) {
             Icon(
-                Icons.Default.Folder,
+                if (isArchive) Icons.Default.Archive else Icons.Default.Folder,
                 contentDescription = null,
                 tint = Color.White.copy(alpha = 0.75f),
                 modifier = Modifier.size(52.dp),
             )
             Text(
-                text = "Next directory",
+                text = stringResource(if (isArchive) R.string.next_archive else R.string.next_directory),
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(
-                text = directoryName,
+                text = sourceName,
                 color = Color.White.copy(alpha = 0.7f),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Button(onClick = onClick) {
-                Text(stringResource(R.string.move_next_directory))
+                Text(stringResource(if (isArchive) R.string.move_next_archive else R.string.move_next_directory))
             }
         }
     }

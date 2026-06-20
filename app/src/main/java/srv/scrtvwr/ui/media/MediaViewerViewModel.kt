@@ -60,7 +60,8 @@ class MediaViewerViewModel(
         val items: List<MediaViewerItem>
         val sourceDirectoryPath: String?
         var initialPage: Int
-        val nextDirectory: MediaViewerDirectory?
+        val nextSource: MediaViewerSource?
+        val sortOrder = preferences.getDirectorySortOrder()
 
         val selectedFile = selectedPath?.let(::File)
         val isArchive = selectedPath != null && MediaCatalog.isArchive(selectedPath)
@@ -75,7 +76,7 @@ class MediaViewerViewModel(
             } else {
                 0
             }
-            nextDirectory = null
+            nextSource = MediaCatalog.nextArchive(archiveFile, sortOrder)
         } else {
             val directory = directoryPath?.let(::File)
             val selected = selectedFile
@@ -85,7 +86,6 @@ class MediaViewerViewModel(
                 else -> null
             }
 
-            val sortOrder = preferences.getDirectorySortOrder()
             items = sourceDirectory
                 ?.let { MediaCatalog.listDirectory(it, sortOrder) }
                 ?.ifEmpty { selected?.let(MediaCatalog::toItem)?.let(::listOf).orEmpty() }
@@ -93,7 +93,7 @@ class MediaViewerViewModel(
 
             sourceDirectoryPath = sourceDirectory?.absolutePath ?: directoryPath
             initialPage = items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
-            nextDirectory = sourceDirectory?.let { MediaCatalog.nextDirectory(it, sortOrder) }
+            nextSource = sourceDirectory?.let { MediaCatalog.nextDirectory(it, sortOrder) }
         }
 
         val sourceKey = "${directoryPath.orEmpty()}|${selectedPath.orEmpty()}"
@@ -111,7 +111,7 @@ class MediaViewerViewModel(
                 sourceDirectoryPath = sourceDirectoryPath,
                 selectedPath = selectedPath,
                 items = items,
-                nextDirectory = nextDirectory,
+                nextSource = nextSource,
                 initialPage = initialPage,
                 selectedPage = initialPage,
                 slideShowStayMillis = preferences.getSlideShowStayMillis(),
@@ -139,9 +139,13 @@ class MediaViewerViewModel(
         }
     }
 
-    fun loadNextDirectory() {
-        val nextDirectory = _uiState.value.nextDirectory ?: return
-        load(nextDirectory.path, null)
+    fun loadNextSource() {
+        val nextSource = _uiState.value.nextSource ?: return
+        if (nextSource.isArchive) {
+            load(File(nextSource.path).parentFile?.absolutePath, nextSource.path)
+        } else {
+            load(nextSource.path, null)
+        }
     }
 
     fun toggleFillFrame() {
@@ -205,7 +209,7 @@ data class MediaViewerUiState(
     val sourceDirectoryPath: String? = null,
     val selectedPath: String? = null,
     val items: List<MediaViewerItem> = emptyList(),
-    val nextDirectory: MediaViewerDirectory? = null,
+    val nextSource: MediaViewerSource? = null,
     val initialPage: Int = 0,
     val selectedPage: Int = 0,
     val fillFrame: Boolean = false,
@@ -220,18 +224,19 @@ data class MediaViewerUiState(
     val errorMessage: String? = null,
 ) {
     val pageCount: Int
-        get() = items.size + if (nextDirectory != null) 1 else 0
+        get() = items.size + if (nextSource != null) 1 else 0
 
     val lastPageIndex: Int
         get() = (pageCount - 1).coerceAtLeast(0)
 
-    val nextDirectoryPageIndex: Int?
-        get() = nextDirectory?.let { items.size }
+    val nextSourcePageIndex: Int?
+        get() = nextSource?.let { items.size }
 }
 
-data class MediaViewerDirectory(
+data class MediaViewerSource(
     val name: String,
     val path: String,
+    val isArchive: Boolean = false,
 )
 
 data class MediaViewerItem(

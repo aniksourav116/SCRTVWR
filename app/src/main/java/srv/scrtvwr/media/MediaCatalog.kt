@@ -3,7 +3,7 @@ package srv.scrtvwr.media
 import com.github.junrar.Archive
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import srv.scrtvwr.ui.media.MediaViewerDirectory
+import srv.scrtvwr.ui.media.MediaViewerSource
 import srv.scrtvwr.ui.media.MediaViewerItem
 import srv.scrtvwr.ui.media.MediaViewerType
 import srv.scrtvwr.ui.sort.DirectorySortOrder
@@ -47,7 +47,7 @@ object MediaCatalog {
         )
     }
 
-    suspend fun nextDirectory(directory: File, sortOrder: DirectorySortOrder): MediaViewerDirectory? {
+    suspend fun nextDirectory(directory: File, sortOrder: DirectorySortOrder): MediaViewerSource? {
         val currentPath = directory.canonicalPathOrAbsolute()
         val candidates = directory.parentFile
             ?.listFiles()
@@ -61,7 +61,29 @@ object MediaCatalog {
         for (candidate in candidates) {
             currentCoroutineContext().ensureActive()
             if (listDirectory(candidate, sortOrder).isNotEmpty()) {
-                return MediaViewerDirectory(candidate.name.ifBlank { candidate.absolutePath }, candidate.absolutePath)
+                return MediaViewerSource(candidate.name.ifBlank { candidate.absolutePath }, candidate.absolutePath)
+            }
+        }
+        return null
+    }
+
+    suspend fun nextArchive(file: File, sortOrder: DirectorySortOrder): MediaViewerSource? {
+        val currentPath = file.canonicalPathOrAbsolute()
+        val candidates = file.parentFile
+            ?.listFiles()
+            ?.asSequence()
+            ?.filter(File::isFile)
+            ?.filter { isArchive(it.path) }
+            ?.sortedWith(sortOrder.fileComparator(directoriesFirst = false))
+            ?.dropWhile { it.canonicalPathOrAbsolute() != currentPath }
+            ?.drop(1)
+            ?.toList()
+            .orEmpty()
+        for (candidate in candidates) {
+            currentCoroutineContext().ensureActive()
+            val hasImages = runCatching { listArchive(candidate).isNotEmpty() }.getOrDefault(false)
+            if (hasImages) {
+                return MediaViewerSource(candidate.name.ifBlank { candidate.absolutePath }, candidate.absolutePath, true)
             }
         }
         return null
