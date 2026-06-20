@@ -12,7 +12,7 @@ object TimeUtil {
         applicationContext = context.applicationContext
     }
 
-    fun getDateAndTimeWithWeekDay(time : Long? = System.currentTimeMillis()) : String {
+    fun getDateAndTimeWithWeekDay(time : Long? = 0L) : String {
         val updatedTime = (time?: 0L)*1000L
         val date = DateUtils.formatDateTime(
             requireContext(),
@@ -24,7 +24,7 @@ object TimeUtil {
                     DateUtils.FORMAT_12HOUR or
                     DateUtils.FORMAT_SHOW_WEEKDAY
         )
-        Timber.d("$time and $date")
+        Timber.d("$time,000L and $date")
         return date
     }
 
