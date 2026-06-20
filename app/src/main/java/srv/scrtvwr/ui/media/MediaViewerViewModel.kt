@@ -14,11 +14,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.media.MediaCatalog
-import srv.scrtvwr.ui.sort.DirectorySortOrder
-import srv.scrtvwr.ui.sort.fileComparator
 import java.io.File
-import java.util.zip.ZipFile
-import com.github.junrar.Archive
 
 class MediaViewerViewModel(
     application: Application,
@@ -67,7 +63,7 @@ class MediaViewerViewModel(
         val isArchive = selectedPath != null && MediaCatalog.isArchive(selectedPath)
 
         if (isArchive) {
-            val archivePath = selectedPath!!.substringBefore("::")
+            val archivePath = selectedPath.substringBefore("::")
             val archiveFile = File(archivePath)
             items = MediaCatalog.listArchive(archiveFile)
             sourceDirectoryPath = archiveFile.parentFile?.absolutePath
@@ -79,17 +75,16 @@ class MediaViewerViewModel(
             nextSource = MediaCatalog.nextArchive(archiveFile, sortOrder)
         } else {
             val directory = directoryPath?.let(::File)
-            val selected = selectedFile
             val sourceDirectory = when {
                 directory?.isDirectory == true -> directory
-                selected?.parentFile?.isDirectory == true -> selected.parentFile
+                selectedFile?.parentFile?.isDirectory == true -> selectedFile.parentFile
                 else -> null
             }
 
             items = sourceDirectory
                 ?.let { MediaCatalog.listDirectory(it, sortOrder) }
-                ?.ifEmpty { selected?.let(MediaCatalog::toItem)?.let(::listOf).orEmpty() }
-                ?: selected?.let(MediaCatalog::toItem)?.let(::listOf).orEmpty()
+                ?.ifEmpty { selectedFile?.let(MediaCatalog::toItem)?.let(::listOf).orEmpty() }
+                ?: selectedFile?.let(MediaCatalog::toItem)?.let(::listOf).orEmpty()
 
             sourceDirectoryPath = sourceDirectory?.absolutePath ?: directoryPath
             initialPage = items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)

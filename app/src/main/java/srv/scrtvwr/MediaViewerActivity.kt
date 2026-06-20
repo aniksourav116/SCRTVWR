@@ -720,6 +720,8 @@ private fun BoxScope.HiddenNavigationButtons(
             )
         }
 
+        //todo add fetched date here.
+
         Text(
             text = "%d/%d".format(currentPage + 1, pageCount),
             color = Color.White.copy(alpha = 0.5f),
