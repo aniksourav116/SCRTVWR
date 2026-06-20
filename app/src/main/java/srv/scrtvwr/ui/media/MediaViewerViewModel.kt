@@ -2,9 +2,15 @@ package srv.scrtvwr.ui.media
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.sort.fileComparator
@@ -14,6 +20,7 @@ import com.github.junrar.Archive
 
 class MediaViewerViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = ScrtvwrPreferences(application)
+    private var loadJob: Job? = null
     private val _uiState = MutableStateFlow(
         MediaViewerUiState(
             slideShowStayMillis = preferences.getSlideShowStayMillis(),
@@ -28,6 +35,13 @@ class MediaViewerViewModel(application: Application) : AndroidViewModel(applicat
             return
         }
 
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch(Dispatchers.IO) {
+            loadMedia(directoryPath, selectedPath)
+        }
+    }
+
+    private suspend fun loadMedia(directoryPath: String?, selectedPath: String?) {
         val items: List<MediaViewerItem>
         val sourceDirectoryPath: String?
         val initialPage: Int
@@ -67,6 +81,7 @@ class MediaViewerViewModel(application: Application) : AndroidViewModel(applicat
             nextDirectory = sourceDirectory?.nextMediaDirectory(sortOrder)
         }
 
+        currentCoroutineContext().ensureActive()
         _uiState.update {
             MediaViewerUiState(
                 sourceDirectoryPath = sourceDirectoryPath,
@@ -243,51 +258,69 @@ private fun String.isArchive(): Boolean {
 }
 
 private fun File.archiveMediaItems(): List<MediaViewerItem> {
-    val ext = extension.lowercase()
-    return when (ext) {
-        "zip", "cbz" -> getZipImageEntries(this)
-        "rar", "cbr" -> getRarImageEntries(this)
-        else -> emptyList()
+    val limits = listOf(-1, 1000, 900, 800, 700, 600, 500, 400, 300, 200, 100)
+    for (limit in limits) {
+        try {
+            val items = when (extension.lowercase()) {
+                "zip", "cbz" -> getZipImageEntries(this, limit)
+                "rar", "cbr" -> getRarImageEntries(this, limit)
+                else -> emptyList()
+            }
+            if (items.isNotEmpty()) return items
+        } catch (e: Exception) {
+            // Try with a smaller limit
+        }
+    }
+    return emptyList()
+}
+
+private fun getZipImageEntries(file: File, limit: Int): List<MediaViewerItem> {
+    return ZipFile(file).use { zip ->
+        var sequence = zip.entries().asSequence()
+            .filter { !it.isDirectory }
+            .filter { it.name.isImageExtension() }
+
+        if (limit > 0) {
+            sequence = sequence.take(limit)
+        }
+
+        sequence.map { entry ->
+            MediaViewerItem(
+                name = entry.name.substringAfterLast('/'),
+                path = "${file.absolutePath}::${entry.name}",
+                type = MediaViewerType.Image,
+                lastModifiedMillis = entry.time,
+                sizeBytes = entry.size
+            )
+        }
+        .sortedBy { it.name }
+        .toList()
     }
 }
 
-private fun getZipImageEntries(file: File): List<MediaViewerItem> = runCatching {
-    ZipFile(file).use { zip ->
-        zip.entries().asSequence()
-            .filter { !it.isDirectory }
-            .filter { it.name.isImageExtension() }
-            .map { entry ->
-                MediaViewerItem(
-                    name = entry.name.substringAfterLast('/'),
-                    path = "${file.absolutePath}::${entry.name}",
-                    type = MediaViewerType.Image,
-                    lastModifiedMillis = entry.time,
-                    sizeBytes = entry.size
-                )
-            }
-            .sortedBy { it.name }
-            .toList()
-    }
-}.getOrNull().orEmpty()
-
-private fun getRarImageEntries(file: File): List<MediaViewerItem> = runCatching {
-    Archive(file).use { archive ->
-        archive.fileHeaders
+private fun getRarImageEntries(file: File, limit: Int): List<MediaViewerItem> {
+    return Archive(file).use { archive ->
+        var sequence = archive.fileHeaders.asSequence()
             .filter { !it.isDirectory }
             .filter { it.fileName.isImageExtension() }
-            .map { header ->
-                MediaViewerItem(
-                    name = header.fileName.substringAfterLast('\\').substringAfterLast('/'),
-                    path = "${file.absolutePath}::${header.fileName}",
-                    type = MediaViewerType.Image,
-                    lastModifiedMillis = header.mTime?.time ?: file.lastModified(),
-                    sizeBytes = header.fullUnpackSize
-                )
-            }
-            .sortedBy { it.name }
-            .toList()
+
+        if (limit > 0) {
+            sequence = sequence.take(limit)
+        }
+
+        sequence.map { header ->
+            MediaViewerItem(
+                name = header.fileName.substringAfterLast('\\').substringAfterLast('/'),
+                path = "${file.absolutePath}::${header.fileName}",
+                type = MediaViewerType.Image,
+                lastModifiedMillis = header.mTime?.time ?: file.lastModified(),
+                sizeBytes = header.fullUnpackSize
+            )
+        }
+        .sortedBy { it.name }
+        .toList()
     }
-}.getOrNull().orEmpty()
+}
 
 private fun String.isImageExtension(): Boolean {
     val ext = substringAfterLast('.', "").lowercase()
