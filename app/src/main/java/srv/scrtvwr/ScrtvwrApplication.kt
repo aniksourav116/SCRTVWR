@@ -3,11 +3,13 @@ package srv.scrtvwr
 import android.app.Application
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.util.logs.CustomLogger
+import srv.scrtvwr.util.time.TimeUtil
 import timber.log.Timber
 
 class ScrtvwrApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        TimeUtil.initialize(this)
         if (BuildConfig.DEBUG) {
             Timber.plant(CustomLogger())
         }
