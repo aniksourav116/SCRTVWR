@@ -11,6 +11,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -93,6 +94,8 @@ import srv.scrtvwr.ui.media.MediaViewerType
 import srv.scrtvwr.ui.media.MediaViewerUiState
 import srv.scrtvwr.ui.media.MediaViewerViewModel
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
+import srv.scrtvwr.util.time.TimeUtil
+import timber.log.Timber
 import kotlin.time.Duration.Companion.milliseconds
 
 class MediaViewerActivity : ComponentActivity() {
@@ -205,18 +208,36 @@ private fun MediaViewerScreen(
     }
 
     val selectedItem = uiState.items.getOrNull(pagerState.currentPage)
+    Timber.d("name ${selectedItem?.name}")
+    val splits = selectedItem?.name?.split("_") ?: emptyList()
+    Timber.d("splits $splits")
+
+    val selectedName =  selectedItem?.name?: stringResource(R.string.no_media_selected)
+    val time = if (splits.isNotEmpty() && splits.size>=4) {
+        TimeUtil.getDateAndTimeWithWeekDay(splits[(splits.size - 3).coerceAtLeast(0)].toLongOrNull())
+    } else {
+        TimeUtil.getDateAndTimeWithWeekDay()
+    }
+
+
     Scaffold(
         topBar = {
             if (!uiState.isChromeHidden) {
                 TopAppBar(
                     title = {
                         Column {
-                            Text(stringResource(R.string.viewer_title), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
-                                selectedItem?.name.orEmpty(),
+                                text = selectedName,
+                                maxLines = 1,
+                                style = MaterialTheme.typography.bodyMedium,
+                                overflow = TextOverflow.MiddleEllipsis,
+//                                modifier = Modifier.basicMarquee(),
+                            )
+                            Text(
+                                text = time,
                                 style = MaterialTheme.typography.bodySmall,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.basicMarquee(),
                             )
                         }
                     },
@@ -310,7 +331,9 @@ private fun MediaViewerScreen(
                     Text(
                         text = uiState.errorMessage,
                         color = Color.White,
-                        modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(24.dp),
                     )
                 } else HorizontalPager(
                     state = pagerState,
@@ -346,7 +369,7 @@ private fun MediaViewerScreen(
                                     if (event.type == PointerEventType.Scroll) {
                                         val delta = event.changes.first().scrollDelta.y
                                         if (delta == 0f) continue
-                                        
+
                                         val now = System.currentTimeMillis()
                                         val timeDiff = now - lastScrollTime
                                         lastScrollTime = now
@@ -362,8 +385,11 @@ private fun MediaViewerScreen(
                                         val skip = (delta * acceleration).toInt().let {
                                             if (it == 0) (if (delta > 0) 1 else -1) else it
                                         }
-                                        
-                                        val nextPage = (pagerState.currentPage + skip).coerceIn(0, uiState.lastPageIndex)
+
+                                        val nextPage = (pagerState.currentPage + skip).coerceIn(
+                                            0,
+                                            uiState.lastPageIndex
+                                        )
 
                                         if (nextPage != pagerState.currentPage) {
                                             coroutineScope.launch {
@@ -773,7 +799,9 @@ private fun ViewerTimeline(
             valueRange = 0f..(pageCount - 1).coerceAtLeast(0).toFloat(),
             steps = (pageCount - 2).coerceAtLeast(0),
             enabled = pageCount > 1,
-            modifier = Modifier.height(28.dp).padding(horizontal = 32.dp),
+            modifier = Modifier
+                .height(28.dp)
+                .padding(horizontal = 32.dp),
         )
     }
 }

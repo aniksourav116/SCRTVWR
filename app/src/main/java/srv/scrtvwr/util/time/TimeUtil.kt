@@ -3,12 +3,29 @@ package srv.scrtvwr.util.time
 
 import android.content.Context
 import android.text.format.DateUtils
+import timber.log.Timber
 
 object TimeUtil {
     private lateinit var applicationContext: Context
 
     fun initialize(context: Context) {
         applicationContext = context.applicationContext
+    }
+
+    fun getDateAndTimeWithWeekDay(time : Long? = System.currentTimeMillis()) : String {
+        val updatedTime = (time?: 0L)*1000L
+        val date = DateUtils.formatDateTime(
+            requireContext(),
+            if (updatedTime > 0L) updatedTime else System.currentTimeMillis(),
+            DateUtils.FORMAT_SHOW_DATE or
+                    DateUtils.FORMAT_SHOW_YEAR or
+                    DateUtils.FORMAT_ABBREV_ALL or
+                    DateUtils.FORMAT_SHOW_TIME or
+                    DateUtils.FORMAT_12HOUR or
+                    DateUtils.FORMAT_SHOW_WEEKDAY
+        )
+        Timber.d("$time and $date")
+        return date
     }
 
     fun formatDisplayDate(
