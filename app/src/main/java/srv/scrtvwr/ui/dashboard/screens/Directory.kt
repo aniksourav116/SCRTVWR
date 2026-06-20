@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -522,7 +523,17 @@ private fun DirectoryGrid(
                 DirectoryGridCard(
                     title = "..",
                     subtitle = stringResource(R.string.go_up),
-                    thumbnail = { Icon(Icons.Default.ArrowUpward, contentDescription = null) },
+                    thumbnail = {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(4f / 3f)
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Default.ArrowUpward, contentDescription = null)
+                        }
+                    },
                     onClick = onNavigateUp,
                 )
             }
@@ -538,7 +549,15 @@ private fun DirectoryGrid(
             DirectoryGridCard(
                 title = entry.name,
                 subtitle = entry.supportingText(),
-                thumbnail = { EntryThumbnail(entry, size = 96) },
+                thumbnail = {
+                    EntryThumbnail(
+                        entry = entry,
+                        size = 128,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(4f / 3f),
+                    )
+                },
                 onClick = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
                     {
                         if (entry.isDirectory) {
@@ -569,18 +588,22 @@ private fun DirectoryGridCard(
             .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier),
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth(),
         ) {
             thumbnail()
-            Text(title, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(
-                subtitle,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(
+                    subtitle,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -589,6 +612,7 @@ private fun DirectoryGridCard(
 private fun EntryThumbnail(
     entry: DirectoryEntry,
     size: Int,
+    modifier: Modifier = Modifier.size(size.dp),
 ) {
     val preview by produceState<PreviewResult>(
         initialValue = PreviewResult(),
@@ -605,8 +629,7 @@ private fun EntryThumbnail(
     }
 
     Box(
-        modifier = Modifier
-            .size(size.dp)
+        modifier = modifier
             .clip(MaterialTheme.shapes.small)
             .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
