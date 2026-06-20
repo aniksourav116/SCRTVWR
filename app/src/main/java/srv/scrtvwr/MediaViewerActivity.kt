@@ -1,13 +1,9 @@
 package srv.scrtvwr
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.media.MediaMetadataRetriever
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.MediaController
 import android.widget.VideoView
-import java.io.File
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -27,34 +23,31 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentHeight
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.FormatIndentDecrease
-import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.PlayCircle
-import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
+import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material.icons.filled.ViewColumn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -64,20 +57,18 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -92,19 +83,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import com.github.junrar.Archive
-import java.util.zip.ZipFile
+import srv.scrtvwr.media.MediaPreviewLoader
+import srv.scrtvwr.media.PreviewResult
 import srv.scrtvwr.ui.media.MediaViewerItem
 import srv.scrtvwr.ui.media.MediaViewerType
 import srv.scrtvwr.ui.media.MediaViewerUiState
 import srv.scrtvwr.ui.media.MediaViewerViewModel
-import srv.scrtvwr.media.MediaPreviewLoader
-import srv.scrtvwr.media.PreviewResult
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -365,10 +352,10 @@ private fun MediaViewerScreen(
                                         lastScrollTime = now
 
                                         // If scrolling rapidly (less than 150ms between events), increase skip multiplier
-                                        if (timeDiff < 150) {
-                                            acceleration = (acceleration + 1.5f).coerceAtMost(25f)
+                                        acceleration = if (timeDiff < 150) {
+                                            (acceleration + 1.5f).coerceAtMost(25f)
                                         } else {
-                                            acceleration = 1f
+                                            1f
                                         }
 
                                         // Calculate how many pages to skip based on delta and acceleration
@@ -563,7 +550,7 @@ private fun MediaPage(
     onContentClick: () -> Unit,
 ) {
     var playingVideo by rememberSaveable(item.path) { mutableStateOf(false) }
-    val preview by produceState<PreviewResult>(initialValue = PreviewResult(), key1 = item.path, key2 = item.lastModifiedMillis) {
+    val preview by produceState(initialValue = PreviewResult(), key1 = item.path, key2 = item.lastModifiedMillis) {
         value = when (item.type) {
             MediaViewerType.Image -> MediaPreviewLoader.loadImage(item.path, item.lastModifiedMillis, 1600)
             MediaViewerType.Video -> MediaPreviewLoader.loadVideoFrame(item.path, item.lastModifiedMillis, 1200)
