@@ -21,20 +21,24 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.OthersUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.OthersViewModel
+import srv.scrtvwr.R
 
 @Composable
 fun Others(
     modifier: Modifier = Modifier,
     viewModel: OthersViewModel = viewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     OthersScreen(
         uiState = uiState,
         onShowHiddenFilesChange = viewModel::setShowHiddenFiles,
@@ -52,8 +56,19 @@ fun OthersScreen(
     onImagePreloadDistanceChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var slideShowStayMillisText by remember { mutableStateOf(uiState.slideShowStayMillis.toString()) }
-    var imagePreloadDistanceText by remember { mutableStateOf(uiState.imagePreloadDistance.toString()) }
+    var slideShowStayMillisText by rememberSaveable { mutableStateOf(uiState.slideShowStayMillis.toString()) }
+    var imagePreloadDistanceText by rememberSaveable { mutableStateOf(uiState.imagePreloadDistance.toString()) }
+    val slideShowWarning = when (slideShowStayMillisText.toLongOrNull()) {
+        null -> stringResource(R.string.invalid_whole_number)
+        in 1L..99L -> stringResource(R.string.short_slideshow_warning)
+        in 600_001L..Long.MAX_VALUE -> stringResource(R.string.long_slideshow_warning)
+        else -> null
+    }
+    val preloadWarning = when (imagePreloadDistanceText.toIntOrNull()) {
+        null -> stringResource(R.string.invalid_whole_number)
+        in 11..Int.MAX_VALUE -> stringResource(R.string.large_preload_warning)
+        else -> null
+    }
 
     LaunchedEffect(uiState.slideShowStayMillis) {
         if (slideShowStayMillisText.toLongOrNull() != uiState.slideShowStayMillis) {
@@ -71,11 +86,11 @@ fun OthersScreen(
         modifier = modifier.fillMaxSize().padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Other options", style = MaterialTheme.typography.headlineSmall)
+        Text(stringResource(R.string.other_options), style = MaterialTheme.typography.headlineSmall)
         ListItem(
             modifier = Modifier.fillMaxWidth(),
-            headlineContent = { Text("Show hidden files") },
-            supportingContent = { Text("Include hidden items in directory listings.") },
+            headlineContent = { Text(stringResource(R.string.show_hidden_files)) },
+            supportingContent = { Text(stringResource(R.string.show_hidden_files_summary)) },
             leadingContent = { Icon(Icons.Default.Visibility, contentDescription = null) },
             trailingContent = {
                 Switch(
@@ -85,8 +100,8 @@ fun OthersScreen(
             },
         )
         NumericPreferenceListItem(
-            headline = "Slide show speed",
-            supporting = "Milliseconds each image stays on screen.",
+            headline = stringResource(R.string.slideshow_speed),
+            supporting = stringResource(R.string.slideshow_speed_summary),
             value = slideShowStayMillisText,
             onValueChange = { value ->
                 slideShowStayMillisText = value.filter(Char::isDigit)
@@ -94,16 +109,18 @@ fun OthersScreen(
             },
             leadingContent = { Icon(Icons.Default.Slideshow, contentDescription = null) },
             suffix = "ms",
+            warning = slideShowWarning,
         )
         NumericPreferenceListItem(
-            headline = "Image preload distance",
-            supporting = "How many nearby pages are prepared in the viewer.",
+            headline = stringResource(R.string.image_preload_distance),
+            supporting = stringResource(R.string.image_preload_summary),
             value = imagePreloadDistanceText,
             onValueChange = { value ->
                 imagePreloadDistanceText = value.filter(Char::isDigit)
                 imagePreloadDistanceText.toIntOrNull()?.let(onImagePreloadDistanceChange)
             },
             leadingContent = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
+            warning = preloadWarning,
         )
     }
 }
@@ -117,11 +134,17 @@ private fun NumericPreferenceListItem(
     leadingContent: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     suffix: String? = null,
+    warning: String? = null,
 ) {
     ListItem(
         modifier = modifier.fillMaxWidth(),
         headlineContent = { Text(headline) },
-        supportingContent = { Text(supporting) },
+        supportingContent = {
+            Column {
+                Text(supporting)
+                warning?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
         leadingContent = leadingContent,
         trailingContent = {
             OutlinedTextField(

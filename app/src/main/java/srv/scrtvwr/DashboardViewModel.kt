@@ -8,15 +8,23 @@ import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
-class DashboardViewModel : ViewModel() {
-    private val _uiState = MutableStateFlow(DashboardUiState())
+class DashboardViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel() {
+    private val _uiState = MutableStateFlow(
+        DashboardUiState(
+            currentDestination = savedStateHandle.get<String>(STATE_DESTINATION)
+                ?.let { value -> AppDestination.entries.firstOrNull { it.name == value } }
+                ?: AppDestination.STORAGE,
+        ),
+    )
     val uiState = _uiState.asStateFlow()
 
     fun select(destination: AppDestination) {
+        savedStateHandle[STATE_DESTINATION] = destination.name
         _uiState.update { it.copy(currentDestination = destination) }
     }
 
@@ -39,6 +47,10 @@ class DashboardViewModel : ViewModel() {
 
     fun clearPendingDirectoryPath() {
         _uiState.update { it.copy(pendingDirectoryPath = null) }
+    }
+
+    private companion object {
+        const val STATE_DESTINATION = "dashboard_destination"
     }
 }
 

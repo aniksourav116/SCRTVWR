@@ -5,6 +5,8 @@ import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.os.Bundle
 import android.view.WindowManager
+import android.widget.MediaController
+import android.widget.VideoView
 import java.io.File
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -51,6 +53,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -66,6 +69,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -80,9 +84,12 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -95,6 +102,8 @@ import srv.scrtvwr.ui.media.MediaViewerItem
 import srv.scrtvwr.ui.media.MediaViewerType
 import srv.scrtvwr.ui.media.MediaViewerUiState
 import srv.scrtvwr.ui.media.MediaViewerViewModel
+import srv.scrtvwr.media.MediaPreviewLoader
+import srv.scrtvwr.media.PreviewResult
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -135,7 +144,7 @@ private fun MediaViewerRoute(
         viewModel.load(directoryPath, selectedPath)
     }
 
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     MediaViewerScreen(
         uiState = uiState,
         onPageChanged = viewModel::selectPage,
@@ -171,9 +180,10 @@ private fun MediaViewerScreen(
         pageCount = { uiState.pageCount.coerceAtLeast(1) },
     )
     val coroutineScope = rememberCoroutineScope()
-    var menuExpanded by remember { mutableStateOf(false) }
-    var slideShowDialogVisible by remember { mutableStateOf(false) }
-    var slideShowStayText by remember { mutableStateOf(uiState.slideShowStayMillis.toString()) }
+    var menuExpanded by rememberSaveable { mutableStateOf(false) }
+    var slideShowDialogVisible by rememberSaveable { mutableStateOf(false) }
+    var detailsDialogVisible by rememberSaveable { mutableStateOf(false) }
+    var slideShowStayText by rememberSaveable { mutableStateOf(uiState.slideShowStayMillis.toString()) }
     var verticalDrag by remember { mutableFloatStateOf(0f) }
 
     LaunchedEffect(slideShowDialogVisible, uiState.slideShowStayMillis) {
@@ -213,7 +223,7 @@ private fun MediaViewerScreen(
                 TopAppBar(
                     title = {
                         Column {
-                            Text("Camera", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(stringResource(R.string.viewer_title), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
                                 selectedItem?.name.orEmpty(),
                                 style = MaterialTheme.typography.bodySmall,
@@ -224,37 +234,44 @@ private fun MediaViewerScreen(
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                         }
                     },
                     actions = {
                         IconButton(onClick = onFitClick) {
-                            Icon(Icons.Default.OpenInFull, contentDescription = "Toggle full view")
+                            Icon(Icons.Default.OpenInFull, contentDescription = stringResource(R.string.toggle_full_view))
                         }
                         Box {
                             IconButton(onClick = { menuExpanded = true }) {
-                                Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                                Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_options))
                             }
                             DropdownMenu(
                                 expanded = menuExpanded,
                                 onDismissRequest = { menuExpanded = false },
                             ) {
                                 DropdownMenuItem(
-                                    text = { Text(if (uiState.fillFrame) "Fit to screen" else "Fill screen") },
+                                    text = { Text(stringResource(if (uiState.fillFrame) R.string.fit_screen else R.string.fill_screen)) },
                                     onClick = {
                                         onFitClick()
                                         menuExpanded = false
                                     },
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("Rotate 90") },
+                                    text = { Text(stringResource(R.string.details)) },
+                                    onClick = {
+                                        detailsDialogVisible = true
+                                        menuExpanded = false
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.rotate_90)) },
                                     onClick = {
                                         onRotateClick()
                                         menuExpanded = false
                                     },
                                 )
                                 DropdownMenuItem(
-                                    text = { Text(if (uiState.bookmarked) "Remove bookmark" else "Bookmark") },
+                                    text = { Text(stringResource(if (uiState.bookmarked) R.string.remove_bookmark else R.string.bookmark)) },
                                     onClick = {
                                         onBookmarkClick()
                                         menuExpanded = false
@@ -289,6 +306,7 @@ private fun MediaViewerScreen(
                     onRotateClick = onRotateClick,
                     onFlipClick = onFlipClick,
                     onBookmarkClick = onBookmarkClick,
+                    onDetailsClick = { detailsDialogVisible = true },
                     onSlideShowClick = { slideShowDialogVisible = true },
                 )
             }
@@ -298,7 +316,15 @@ private fun MediaViewerScreen(
                     .weight(1f)
                     .fillMaxWidth(),
             ) {
-                HorizontalPager(
+                if (uiState.isLoading) {
+                    CircularProgressIndicator(Modifier.align(Alignment.Center))
+                } else if (uiState.errorMessage != null && uiState.items.isEmpty()) {
+                    Text(
+                        text = uiState.errorMessage,
+                        color = Color.White,
+                        modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                    )
+                } else HorizontalPager(
                     state = pagerState,
                     beyondViewportPageCount = minOf(uiState.imagePreloadDistance, uiState.lastPageIndex),
                     modifier = Modifier
@@ -437,6 +463,9 @@ private fun MediaViewerScreen(
             },
         )
     }
+    if (detailsDialogVisible && selectedItem != null) {
+        MediaDetailsDialog(item = selectedItem, onDismiss = { detailsDialogVisible = false })
+    }
 }
 
 @Composable
@@ -448,6 +477,7 @@ private fun ViewerOptionsRow(
     onRotateClick: () -> Unit,
     onFlipClick: () -> Unit,
     onBookmarkClick: () -> Unit,
+    onDetailsClick: () -> Unit,
     onSlideShowClick: () -> Unit,
 ) {
     Row(
@@ -461,32 +491,32 @@ private fun ViewerOptionsRow(
         IconButton(onClick = onFitClick) {
             Icon(
                 Icons.Default.FitScreen,
-                contentDescription = if (fillFrame) "Show full media" else "Fill screen",
+                contentDescription = stringResource(if (fillFrame) R.string.fit_screen else R.string.fill_screen),
                 tint = if (fillFrame) Color(0xFF64B5F6) else Color.White,
             )
         }
         IconButton(onClick = onRotateClick) {
-            Icon(Icons.Default.Rotate90DegreesCcw, contentDescription = "Rotate", tint = Color.White)
+            Icon(Icons.Default.Rotate90DegreesCcw, contentDescription = stringResource(R.string.rotate), tint = Color.White)
         }
         IconButton(onClick = onFlipClick) {
             Icon(
                 Icons.Default.SwapHoriz,
-                contentDescription = "Flip horizontal",
+                contentDescription = stringResource(R.string.flip_horizontal),
                 tint = if (flipped) Color(0xFF64B5F6) else Color.White,
             )
         }
         IconButton(onClick = onBookmarkClick) {
             Icon(
                 Icons.Default.BookmarkBorder,
-                contentDescription = "Bookmark",
+                contentDescription = stringResource(R.string.bookmark),
                 tint = if (bookmarked) Color(0xFF64B5F6) else Color.White,
             )
         }
-        IconButton(onClick = {}) {
-            Icon(Icons.AutoMirrored.Filled.FormatIndentDecrease, contentDescription = "Details", tint = Color.White)
+        IconButton(onClick = onDetailsClick) {
+            Icon(Icons.AutoMirrored.Filled.FormatIndentDecrease, contentDescription = stringResource(R.string.details), tint = Color.White)
         }
         IconButton(onClick = onSlideShowClick) {
-            Icon(Icons.Default.Slideshow, contentDescription = "Start slideshow", tint = Color.White)
+            Icon(Icons.Default.Slideshow, contentDescription = stringResource(R.string.start_slideshow), tint = Color.White)
         }
     }
 }
@@ -500,23 +530,23 @@ private fun SlideShowDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Slide show") },
+        title = { Text(stringResource(R.string.slideshow)) },
         text = {
             OutlinedTextField(
                 value = stayMillis,
                 onValueChange = onStayMillisChange,
-                label = { Text("Per image stay time (ms)") },
+                label = { Text(stringResource(R.string.per_image_stay)) },
                 singleLine = true,
             )
         },
         confirmButton = {
             Button(onClick = onStart) {
-                Text("Start")
+                Text(stringResource(R.string.start))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.cancel))
             }
         },
     )
@@ -530,10 +560,11 @@ private fun MediaPage(
     flipped: Boolean,
     onContentClick: () -> Unit,
 ) {
-    val bitmap by produceState<Bitmap?>(initialValue = null, key1 = item.path, key2 = item.lastModifiedMillis) {
+    var playingVideo by rememberSaveable(item.path) { mutableStateOf(false) }
+    val preview by produceState<PreviewResult>(initialValue = PreviewResult(), key1 = item.path, key2 = item.lastModifiedMillis) {
         value = when (item.type) {
-            MediaViewerType.Image -> loadImagePreview(item.path)
-            MediaViewerType.Video -> loadVideoPreview(item.path)
+            MediaViewerType.Image -> MediaPreviewLoader.loadImage(item.path, item.lastModifiedMillis, 1600)
+            MediaViewerType.Video -> MediaPreviewLoader.loadVideoFrame(item.path, item.lastModifiedMillis, 1200)
         }
     }
 
@@ -543,15 +574,30 @@ private fun MediaPage(
             .clickable(onClick = onContentClick),
         contentAlignment = Alignment.Center,
     ) {
-        if (bitmap == null) {
+        if (item.type == MediaViewerType.Video && playingVideo) {
+            AndroidView(
+                factory = { context ->
+                    VideoView(context).apply {
+                        setVideoPath(item.path)
+                        setMediaController(MediaController(context).also { it.setAnchorView(this) })
+                        setOnPreparedListener { it.isLooping = false; start() }
+                        setOnCompletionListener { playingVideo = false }
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else if (preview.bitmap == null) {
             Icon(
                 Icons.Default.ImageNotSupported,
                 contentDescription = null,
                 tint = Color.White.copy(alpha = 0.7f),
             )
+            preview.error?.let {
+                Text(it, color = Color.White, modifier = Modifier.padding(top = 64.dp, start = 24.dp, end = 24.dp))
+            }
         } else {
             Image(
-                bitmap = bitmap!!.asImageBitmap(),
+                bitmap = preview.bitmap!!.asImageBitmap(),
                 contentDescription = item.name,
                 modifier = Modifier
                     .fillMaxSize()
@@ -560,14 +606,39 @@ private fun MediaPage(
                 contentScale = if (fillFrame) ContentScale.Crop else ContentScale.Fit,
             )
             if (item.type == MediaViewerType.Video) {
-                Icon(
-                    Icons.Default.PlayCircle,
-                    contentDescription = "Video thumbnail",
-                    tint = Color.White,
-                )
+                IconButton(onClick = { playingVideo = true }, modifier = Modifier.size(72.dp)) {
+                    Icon(Icons.Default.PlayCircle, contentDescription = stringResource(R.string.play_video), tint = Color.White, modifier = Modifier.size(64.dp))
+                }
             }
         }
     }
+}
+
+@Composable
+private fun MediaDetailsDialog(item: MediaViewerItem, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.media_details)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(item.name)
+                Text(item.path, style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.media_type, item.type.name))
+                Text(stringResource(R.string.media_size, formatMediaBytes(item.sizeBytes)))
+                Text(stringResource(R.string.media_modified, java.text.DateFormat.getDateTimeInstance().format(java.util.Date(item.lastModifiedMillis))))
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) } },
+    )
+}
+
+private fun formatMediaBytes(bytes: Long): String {
+    if (bytes < 0) return "Unknown"
+    val units = arrayOf("B", "KB", "MB", "GB")
+    var value = bytes.toDouble()
+    var unit = 0
+    while (value >= 1024 && unit < units.lastIndex) { value /= 1024; unit++ }
+    return "%.1f %s".format(value, units[unit])
 }
 
 @Composable
@@ -604,7 +675,7 @@ private fun NextDirectoryPage(
                 overflow = TextOverflow.Ellipsis,
             )
             Button(onClick = onClick) {
-                Text("Move to next directory")
+                Text(stringResource(R.string.move_next_directory))
             }
         }
     }
@@ -629,7 +700,7 @@ private fun BoxScope.HiddenNavigationButtons(
         ) {
             HiddenNavigationButton(
                 text = "-",
-                contentDescription = "Previous media",
+                contentDescription = stringResource(R.string.previous_media),
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
@@ -638,7 +709,7 @@ private fun BoxScope.HiddenNavigationButtons(
 
             HiddenNavigationButton(
                 text = "+",
-                contentDescription = "Next media",
+                contentDescription = stringResource(R.string.next_media),
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
@@ -682,7 +753,7 @@ private fun HiddenNavigationButton(
 @Composable
 private fun EmptyViewerMessage() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("No image or video selected", color = Color.White.copy(alpha = 0.7f))
+        Text(stringResource(R.string.no_media_selected), color = Color.White.copy(alpha = 0.7f))
     }
 }
 
@@ -713,67 +784,6 @@ private fun ViewerTimeline(
             modifier = Modifier.height(28.dp).padding(horizontal = 32.dp),
         )
     }
-}
-
-private suspend fun loadImagePreview(path: String): Bitmap? = withContext(Dispatchers.IO) {
-    if (path.contains("::")) {
-        val archivePath = path.substringBefore("::")
-        val entryName = path.substringAfter("::")
-        return@withContext loadArchiveImagePreview(archivePath, entryName)
-    }
-    runCatching {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(path, bounds)
-        val sampleOptions = BitmapFactory.Options().apply {
-            inSampleSize = bounds.previewSampleSize()
-        }
-        BitmapFactory.decodeFile(path, sampleOptions)
-    }.getOrNull()
-}
-
-private suspend fun loadArchiveImagePreview(archivePath: String, entryName: String): Bitmap? = withContext(Dispatchers.IO) {
-    runCatching {
-        val archiveFile = File(archivePath)
-        val bytes = if (archivePath.lowercase().endsWith(".zip") || archivePath.lowercase().endsWith(".cbz")) {
-            ZipFile(archiveFile).use { zip ->
-                val entry = zip.getEntry(entryName) ?: return@runCatching null
-                zip.getInputStream(entry).use { it.readBytes() }
-            }
-        } else {
-            Archive(archiveFile).use { archive ->
-                val header = archive.fileHeaders.firstOrNull { it.fileName == entryName } ?: return@runCatching null
-                archive.getInputStream(header).use { it.readBytes() }
-            }
-        } ?: return@runCatching null
-
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        val sampleOptions = BitmapFactory.Options().apply {
-            inSampleSize = bounds.previewSampleSize()
-        }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, sampleOptions)
-    }.getOrNull()
-}
-
-private suspend fun loadVideoPreview(path: String): Bitmap? = withContext(Dispatchers.IO) {
-    runCatching {
-        val retriever = MediaMetadataRetriever()
-        try {
-            retriever.setDataSource(path)
-            retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-        } finally {
-            retriever.release()
-        }
-    }.getOrNull()
-}
-
-private fun BitmapFactory.Options.previewSampleSize(): Int {
-    var sampleSize = 1
-    val maxDimension = 1600
-    while (outHeight / sampleSize > maxDimension || outWidth / sampleSize > maxDimension) {
-        sampleSize *= 2
-    }
-    return sampleSize
 }
 
 @Preview(showBackground = true)

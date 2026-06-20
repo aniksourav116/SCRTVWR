@@ -13,11 +13,13 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
         OthersUiState(
             slideShowStayMillis = preferences.getSlideShowStayMillis(),
             imagePreloadDistance = preferences.getImagePreloadDistance(),
+            showHiddenFiles = preferences.getShowHiddenFiles(),
         ),
     )
     val uiState = _uiState.asStateFlow()
 
     fun setShowHiddenFiles(enabled: Boolean) {
+        preferences.saveShowHiddenFiles(enabled)
         _uiState.update { it.copy(showHiddenFiles = enabled) }
     }
 
@@ -37,5 +39,5 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
 data class OthersUiState(
     val showHiddenFiles: Boolean = false,
     val slideShowStayMillis: Long = 50L,
-    val imagePreloadDistance: Int = 20,
+    val imagePreloadDistance: Int = 5,
 )

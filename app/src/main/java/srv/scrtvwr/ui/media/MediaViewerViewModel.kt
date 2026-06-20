@@ -2,6 +2,7 @@ package srv.scrtvwr.ui.media
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -12,13 +13,17 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import srv.scrtvwr.preferences.ScrtvwrPreferences
+import srv.scrtvwr.media.MediaCatalog
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.sort.fileComparator
 import java.io.File
 import java.util.zip.ZipFile
 import com.github.junrar.Archive
 
-class MediaViewerViewModel(application: Application) : AndroidViewModel(application) {
+class MediaViewerViewModel(
+    application: Application,
+    private val savedStateHandle: SavedStateHandle,
+) : AndroidViewModel(application) {
     private val preferences = ScrtvwrPreferences(application)
     private var loadJob: Job? = null
     private val _uiState = MutableStateFlow(
@@ -36,25 +41,35 @@ class MediaViewerViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         loadJob?.cancel()
+        _uiState.update { it.copy(isLoading = true, errorMessage = null) }
         loadJob = viewModelScope.launch(Dispatchers.IO) {
-            loadMedia(directoryPath, selectedPath)
+            runCatching { loadMedia(directoryPath, selectedPath) }
+                .onFailure { error ->
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = error.message ?: "Unable to load media.",
+                        )
+                    }
+                }
         }
     }
 
     private suspend fun loadMedia(directoryPath: String?, selectedPath: String?) {
         val items: List<MediaViewerItem>
         val sourceDirectoryPath: String?
-        val initialPage: Int
+        var initialPage: Int
         val nextDirectory: MediaViewerDirectory?
 
         val selectedFile = selectedPath?.let(::File)
-        val isArchive = selectedPath != null && (selectedPath.isArchive() || selectedPath.contains("::"))
+        val isArchive = selectedPath != null && MediaCatalog.isArchive(selectedPath)
 
         if (isArchive) {
             val archivePath = selectedPath!!.substringBefore("::")
             val archiveFile = File(archivePath)
-            items = archiveFile.archiveMediaItems()
-            sourceDirectoryPath = archivePath
+            items = MediaCatalog.listArchive(archiveFile)
+            sourceDirectoryPath = archiveFile.parentFile?.absolutePath
             initialPage = if (selectedPath.contains("::")) {
                 items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
             } else {
@@ -72,15 +87,24 @@ class MediaViewerViewModel(application: Application) : AndroidViewModel(applicat
 
             val sortOrder = preferences.getDirectorySortOrder()
             items = sourceDirectory
-                ?.mediaViewerItems(sortOrder)
-                ?.ifEmpty { selected?.toMediaViewerItem()?.let(::listOf).orEmpty() }
-                ?: selected?.toMediaViewerItem()?.let(::listOf).orEmpty()
+                ?.let { MediaCatalog.listDirectory(it, sortOrder) }
+                ?.ifEmpty { selected?.let(MediaCatalog::toItem)?.let(::listOf).orEmpty() }
+                ?: selected?.let(MediaCatalog::toItem)?.let(::listOf).orEmpty()
 
             sourceDirectoryPath = sourceDirectory?.absolutePath ?: directoryPath
             initialPage = items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
-            nextDirectory = sourceDirectory?.nextMediaDirectory(sortOrder)
+            nextDirectory = sourceDirectory?.let { MediaCatalog.nextDirectory(it, sortOrder) }
         }
 
+        val sourceKey = "${directoryPath.orEmpty()}|${selectedPath.orEmpty()}"
+        if (savedStateHandle.get<String>(STATE_SOURCE) == sourceKey) {
+            initialPage = savedStateHandle.get<Int>(STATE_SELECTED_PAGE)
+                ?.coerceIn(0, (items.lastIndex).coerceAtLeast(0))
+                ?: initialPage
+        } else {
+            savedStateHandle[STATE_SOURCE] = sourceKey
+            savedStateHandle[STATE_SELECTED_PAGE] = initialPage
+        }
         currentCoroutineContext().ensureActive()
         _uiState.update {
             MediaViewerUiState(
@@ -92,6 +116,8 @@ class MediaViewerViewModel(application: Application) : AndroidViewModel(applicat
                 selectedPage = initialPage,
                 slideShowStayMillis = preferences.getSlideShowStayMillis(),
                 imagePreloadDistance = preferences.getImagePreloadDistance(),
+                bookmarked = preferences.isMediaBookmarked(items.getOrNull(initialPage)?.path ?: selectedPath),
+                isLoading = false,
             )
         }
         rememberMediaSession(sourceDirectoryPath, items.getOrNull(initialPage)?.path ?: selectedPath)
@@ -102,9 +128,13 @@ class MediaViewerViewModel(application: Application) : AndroidViewModel(applicat
             val boundedPage = page.coerceIn(0, state.lastPageIndex)
             val selectedPath = state.items.getOrNull(boundedPage)?.path
             rememberMediaSession(state.sourceDirectoryPath, selectedPath)
+            savedStateHandle[STATE_SELECTED_PAGE] = boundedPage
             state.copy(
                 selectedPage = boundedPage,
                 selectedPath = selectedPath ?: state.selectedPath,
+                rotation = 0,
+                flipped = false,
+                bookmarked = preferences.isMediaBookmarked(selectedPath),
             )
         }
     }
@@ -127,7 +157,12 @@ class MediaViewerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun toggleBookmark() {
-        _uiState.update { it.copy(bookmarked = !it.bookmarked) }
+        _uiState.update { state ->
+            val path = state.selectedPath ?: return@update state
+            val bookmarked = !state.bookmarked
+            preferences.setMediaBookmarked(path, bookmarked)
+            state.copy(bookmarked = bookmarked)
+        }
     }
 
     fun toggleChrome() {
@@ -159,6 +194,11 @@ class MediaViewerViewModel(application: Application) : AndroidViewModel(applicat
         directoryPath ?: return
         preferences.saveLastMediaSession(directoryPath, mediaPath)
     }
+
+    private companion object {
+        const val STATE_SELECTED_PAGE = "media_selected_page"
+        const val STATE_SOURCE = "media_source"
+    }
 }
 
 data class MediaViewerUiState(
@@ -175,7 +215,9 @@ data class MediaViewerUiState(
     val isChromeHidden: Boolean = false,
     val isSlideShowRunning: Boolean = false,
     val slideShowStayMillis: Long = 50L,
-    val imagePreloadDistance: Int = 20,
+    val imagePreloadDistance: Int = 5,
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
 ) {
     val pageCount: Int
         get() = items.size + if (nextDirectory != null) 1 else 0
@@ -203,129 +245,4 @@ data class MediaViewerItem(
 enum class MediaViewerType {
     Image,
     Video,
-}
-
-private fun File.mediaViewerItems(sortOrder: DirectorySortOrder): List<MediaViewerItem> =
-    runCatching {
-        listFiles()
-            ?.asSequence()
-            ?.filter { it.isFile }
-            ?.filter { it.toMediaViewerItem() != null }
-            ?.sortedWith(sortOrder.fileComparator(directoriesFirst = false))
-            ?.mapNotNull { it.toMediaViewerItem() }
-            ?.toList()
-    }.getOrNull().orEmpty()
-
-private fun File.toMediaViewerItem(): MediaViewerItem? {
-    val type = when (extension.lowercase()) {
-        "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif" -> MediaViewerType.Image
-        "mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v" -> MediaViewerType.Video
-        else -> return null
-    }
-    return MediaViewerItem(
-        name = name.ifBlank { absolutePath },
-        path = absolutePath,
-        type = type,
-        lastModifiedMillis = lastModified(),
-        sizeBytes = length(),
-    )
-}
-
-private fun File.nextMediaDirectory(sortOrder: DirectorySortOrder): MediaViewerDirectory? {
-    val currentPath = canonicalPathOrAbsolute()
-    return parentFile
-        ?.listFiles()
-        ?.asSequence()
-        ?.filter { it.isDirectory }
-        ?.sortedWith(sortOrder.fileComparator(directoriesFirst = false))
-        ?.dropWhile { it.canonicalPathOrAbsolute() != currentPath }
-        ?.drop(1)
-        ?.firstOrNull { it.mediaViewerItems(sortOrder).isNotEmpty() }
-        ?.let {
-            MediaViewerDirectory(
-                name = it.name.ifBlank { it.absolutePath },
-                path = it.absolutePath,
-            )
-        }
-}
-
-private fun File.canonicalPathOrAbsolute(): String =
-    runCatching { canonicalPath }.getOrElse { absolutePath }
-
-private fun String.isArchive(): Boolean {
-    val lower = lowercase()
-    return lower.endsWith(".zip") || lower.endsWith(".cbz") || lower.endsWith(".rar") || lower.endsWith(".cbr")
-}
-
-private fun File.archiveMediaItems(): List<MediaViewerItem> {
-    val limits = listOf(-1, 1000, 900, 800, 700, 600, 500, 400, 300, 200, 100)
-    for (limit in limits) {
-        try {
-            val items = when (extension.lowercase()) {
-                "zip", "cbz" -> getZipImageEntries(this, limit)
-                "rar", "cbr" -> getRarImageEntries(this, limit)
-                else -> emptyList()
-            }
-            if (items.isNotEmpty()) return items
-        } catch (e: Exception) {
-            // Try with a smaller limit
-        }
-    }
-    return emptyList()
-}
-
-private fun getZipImageEntries(file: File, limit: Int): List<MediaViewerItem> {
-    return ZipFile(file).use { zip ->
-        var sequence = zip.entries().asSequence()
-            .filter { !it.isDirectory }
-            .filter { it.name.isImageExtension() }
-
-        if (limit > 0) {
-            sequence = sequence.take(limit)
-        }
-
-        sequence.map { entry ->
-            MediaViewerItem(
-                name = entry.name.substringAfterLast('/'),
-                path = "${file.absolutePath}::${entry.name}",
-                type = MediaViewerType.Image,
-                lastModifiedMillis = entry.time,
-                sizeBytes = entry.size
-            )
-        }
-        .sortedBy { it.name }
-        .toList()
-    }
-}
-
-private fun getRarImageEntries(file: File, limit: Int): List<MediaViewerItem> {
-    return Archive(file).use { archive ->
-        var sequence = archive.fileHeaders.asSequence()
-            .filter { !it.isDirectory }
-            .filter { it.fileName.isImageExtension() }
-
-        if (limit > 0) {
-            sequence = sequence.take(limit)
-        }
-
-        sequence.map { header ->
-            MediaViewerItem(
-                name = header.fileName.substringAfterLast('\\').substringAfterLast('/'),
-                path = "${file.absolutePath}::${header.fileName}",
-                type = MediaViewerType.Image,
-                lastModifiedMillis = header.mTime?.time ?: file.lastModified(),
-                sizeBytes = header.fullUnpackSize
-            )
-        }
-        .sortedBy { it.name }
-        .toList()
-    }
-}
-
-private fun String.isImageExtension(): Boolean {
-    val ext = substringAfterLast('.', "").lowercase()
-    return when (ext) {
-        "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif" -> true
-        else -> false
-    }
 }

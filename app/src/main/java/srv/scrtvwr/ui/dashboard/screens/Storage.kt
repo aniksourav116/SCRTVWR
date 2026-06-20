@@ -38,16 +38,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.StorageDevice
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.StorageUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.StorageViewModel
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
+import srv.scrtvwr.R
 import java.text.DecimalFormat
 
 @Composable
@@ -56,9 +60,10 @@ fun Storage(
     onOpenDirectory: (String) -> Unit = {},
     viewModel: StorageViewModel = viewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var pendingDirectoryPath by remember { mutableStateOf<String?>(null) }
+    var hasStorageAccess by remember { mutableStateOf(context.hasRequiredStorageAccess()) }
     val legacyPermissions = remember {
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
             arrayOf(
@@ -72,19 +77,26 @@ fun Storage(
     val legacyPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { grants ->
+        hasStorageAccess = grants.values.all { it }
         viewModel.refresh()
-        if (grants.values.all { it }) {
+        if (hasStorageAccess) {
             pendingDirectoryPath?.let(onOpenDirectory)
             pendingDirectoryPath = null
         }
     }
     val allFilesAccessLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
-    ) { viewModel.refresh() }
-    LaunchedEffect(Unit) {
+    ) {
+        hasStorageAccess = context.hasRequiredStorageAccess()
+        viewModel.refresh()
+        if (hasStorageAccess) {
+            pendingDirectoryPath?.let(onOpenDirectory)
+            pendingDirectoryPath = null
+        }
+    }
+    val requestStorageAccess = {
         when {
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                !Environment.isExternalStorageManager() -> {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
                 val intent = Intent(
                     Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
                     Uri.parse("package:${context.packageName}"),
@@ -92,10 +104,7 @@ fun Storage(
                 allFilesAccessLauncher.launch(intent)
             }
 
-            Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q &&
-                !legacyPermissions.all { permission ->
-                    ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
-                } -> {
+            else -> {
                 legacyPermissionLauncher.launch(legacyPermissions)
             }
         }
@@ -104,14 +113,12 @@ fun Storage(
     StorageScreen(
         uiState = uiState,
         onRefresh = viewModel::refresh,
+        hasStorageAccess = hasStorageAccess,
+        onGrantStorageAccess = requestStorageAccess,
         onOpenDevice = { device ->
-            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q &&
-                !legacyPermissions.all { permission ->
-                    ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
-                }
-            ) {
+            if (!context.hasRequiredStorageAccess()) {
                 pendingDirectoryPath = device.rootPath
-                legacyPermissionLauncher.launch(legacyPermissions)
+                requestStorageAccess()
             } else {
                 onOpenDirectory(device.rootPath)
             }
@@ -125,6 +132,8 @@ fun StorageScreen(
     uiState: StorageUiState,
     onRefresh: () -> Unit,
     onOpenDevice: (StorageDevice) -> Unit,
+    hasStorageAccess: Boolean = true,
+    onGrantStorageAccess: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -138,14 +147,29 @@ fun StorageScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Icon(Icons.Default.Storage, contentDescription = null)
-                Text("Storage devices", style = MaterialTheme.typography.headlineSmall)
+                Text(stringResource(R.string.storage_devices), style = MaterialTheme.typography.headlineSmall)
+            }
+        }
+
+        if (!hasStorageAccess) {
+            item {
+                ElevatedCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(stringResource(R.string.full_access_required), style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            stringResource(R.string.full_access_explanation),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Button(onClick = onGrantStorageAccess) { Text(stringResource(R.string.grant_file_access)) }
+                    }
+                }
             }
         }
 
         if (uiState.devices.isEmpty()) {
             item {
                 Text(
-                    "No mounted storage devices are available.",
+                    stringResource(R.string.no_storage_devices),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -161,17 +185,26 @@ fun StorageScreen(
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "Last checked: ${uiState.lastChecked}",
+                    stringResource(R.string.last_checked, uiState.lastChecked),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Button(onClick = onRefresh) {
                     Icon(Icons.Default.Refresh, contentDescription = null)
-                    Text("Refresh", Modifier.padding(start = 8.dp))
+                    Text(stringResource(R.string.refresh), Modifier.padding(start = 8.dp))
                 }
             }
         }
     }
 }
+
+private fun android.content.Context.hasRequiredStorageAccess(): Boolean =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        Environment.isExternalStorageManager()
+    } else {
+        ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED &&
+            (Build.VERSION.SDK_INT > Build.VERSION_CODES.P ||
+                ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED)
+    }
 
 @Composable
 private fun StorageDeviceCard(
@@ -181,7 +214,7 @@ private fun StorageDeviceCard(
     ElevatedCard(
         Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .clickable(role = Role.Button, onClick = onClick),
     ) {
         Column(
             Modifier.padding(20.dp),
@@ -200,17 +233,17 @@ private fun StorageDeviceCard(
                     )
                 }
             }
-            Text("${formatBytes(device.usedBytes)} of ${formatBytes(device.totalBytes)} used")
+            Text(stringResource(R.string.storage_used, formatBytes(device.usedBytes), formatBytes(device.totalBytes)))
             LinearProgressIndicator(
                 progress = { device.usedFraction },
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(
-                "${formatBytes(device.availableBytes)} available",
+                stringResource(R.string.storage_available, formatBytes(device.availableBytes)),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                "Tap to open directory",
+                stringResource(R.string.tap_open_directory),
                 color = MaterialTheme.colorScheme.primary,
                 style = MaterialTheme.typography.labelLarge,
             )

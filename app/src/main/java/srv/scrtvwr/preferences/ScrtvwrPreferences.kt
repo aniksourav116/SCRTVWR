@@ -25,6 +25,25 @@ class ScrtvwrPreferences(context: Context) {
             .apply()
     }
 
+    fun getShowHiddenFiles(): Boolean =
+        preferences.getBoolean(KEY_SHOW_HIDDEN_FILES, false)
+
+    fun saveShowHiddenFiles(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_SHOW_HIDDEN_FILES, enabled).apply()
+    }
+
+    fun getBookmarkedMedia(): Set<String> =
+        preferences.getStringSet(KEY_BOOKMARKED_MEDIA, emptySet()).orEmpty().toSet()
+
+    fun setMediaBookmarked(path: String, bookmarked: Boolean) {
+        val bookmarks = getBookmarkedMedia().toMutableSet()
+        if (bookmarked) bookmarks += path else bookmarks -= path
+        preferences.edit().putStringSet(KEY_BOOKMARKED_MEDIA, bookmarks).apply()
+    }
+
+    fun isMediaBookmarked(path: String?): Boolean =
+        path != null && path in getBookmarkedMedia()
+
     fun getRecentDirectories(): List<String> =
         preferences.getString(KEY_RECENT_DIRECTORIES, null)
             ?.let(::decodeStringList)
@@ -83,13 +102,15 @@ class ScrtvwrPreferences(context: Context) {
         const val PREFERENCES_NAME = "scrtvwr_preferences"
         const val KEY_SLIDE_SHOW_STAY_MILLIS = "slide_show_stay_millis"
         const val KEY_IMAGE_PRELOAD_DISTANCE = "image_preload_distance"
+        const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
+        const val KEY_BOOKMARKED_MEDIA = "bookmarked_media"
         const val KEY_RECENT_DIRECTORIES = "recent_directories"
         const val KEY_LAST_DIRECTORY = "last_directory"
         const val KEY_DIRECTORY_SORT_ORDER = "directory_sort_order"
         const val KEY_LAST_MEDIA_DIRECTORY = "last_media_directory"
         const val KEY_LAST_MEDIA_PATH = "last_media_path"
         const val DEFAULT_SLIDE_SHOW_STAY_MILLIS = 50L
-        const val DEFAULT_IMAGE_PRELOAD_DISTANCE = 20
+        const val DEFAULT_IMAGE_PRELOAD_DISTANCE = 5
         const val MAX_RECENT_DIRECTORIES = 100
     }
 }

@@ -17,16 +17,24 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HistoryFilter
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HistoryUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HistoryViewModel
+import srv.scrtvwr.R
 
 @Composable
 fun History(
@@ -37,8 +45,16 @@ fun History(
     LaunchedEffect(Unit) {
         viewModel.refresh()
     }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.refresh()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     HistoryScreen(
         uiState = uiState,
         onFilterSelected = viewModel::selectFilter,
@@ -58,13 +74,13 @@ fun HistoryScreen(
         modifier = modifier.fillMaxSize().padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Viewing history", style = MaterialTheme.typography.headlineSmall)
+        Text(stringResource(R.string.viewing_history), style = MaterialTheme.typography.headlineSmall)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             HistoryFilter.entries.forEach { filter ->
                 FilterChip(
                     selected = filter == uiState.selectedFilter,
                     onClick = { onFilterSelected(filter) },
-                    label = { Text(filter.label) },
+                    label = { Text(stringResource(filter.labelResource())) },
                 )
             }
         }
@@ -76,7 +92,9 @@ fun HistoryScreen(
             ) {
                 Icon(Icons.Default.History, contentDescription = null)
                 Text(
-                    uiState.emptyMessage,
+                    stringResource(
+                        if (uiState.selectedFilter == HistoryFilter.FAVORITES) R.string.no_favorites else R.string.no_history,
+                    ),
                     modifier = Modifier.padding(top = 8.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -88,10 +106,16 @@ fun HistoryScreen(
                         headlineContent = { Text(directory.name) },
                         supportingContent = { Text(directory.path) },
                         leadingContent = { Icon(Icons.Default.Folder, contentDescription = null) },
-                        modifier = Modifier.clickable { onOpenDirectory(directory.path) },
+                        modifier = Modifier.clickable(role = Role.Button) { onOpenDirectory(directory.path) },
                     )
                 }
             }
         }
     }
+}
+
+private fun HistoryFilter.labelResource(): Int = when (this) {
+    HistoryFilter.ALL -> R.string.all
+    HistoryFilter.RECENT -> R.string.recent
+    HistoryFilter.FAVORITES -> R.string.favorites
 }

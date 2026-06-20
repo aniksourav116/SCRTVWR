@@ -3,95 +3,82 @@ package srv.scrtvwr.ui.dashboard.screens.viewmodels
 import android.app.Application
 import android.os.Environment
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import srv.scrtvwr.preferences.LastMediaSession
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.sort.fileComparator
 import java.io.File
 
-class DirectoryViewModel(application: Application) : AndroidViewModel(application) {
+class DirectoryViewModel(
+    application: Application,
+    private val savedStateHandle: SavedStateHandle,
+) : AndroidViewModel(application) {
     private val defaultRootDirectory = Environment.getExternalStorageDirectory()
     private val preferences = ScrtvwrPreferences(application)
-    private val initialDirectory = preferences.getLastDirectory()
+    private val initialDirectory = savedStateHandle.get<String>(STATE_DIRECTORY)
+        ?.let(::File)
+        ?.takeIf { it.exists() && it.isDirectory }
+        ?: preferences.getLastDirectory()
         ?.let(::File)
         ?.takeIf { it.exists() && it.isDirectory }
         ?: defaultRootDirectory
-    private val rootDirectory = MutableStateFlow(
-        if (initialDirectory.isSameOrChildOf(defaultRootDirectory)) {
-            defaultRootDirectory
-        } else {
-            initialDirectory
-        },
-    )
-    private val _currentDirectory = MutableStateFlow(initialDirectory)
-    val currentDirectory: StateFlow<File> = _currentDirectory
-
-    private val searchQuery = MutableStateFlow("")
-    private val viewMode = MutableStateFlow(DirectoryViewMode.List)
-    private val sortOrder = MutableStateFlow(preferences.getDirectorySortOrder())
-    private val recentDirectories = MutableStateFlow(preferences.getRecentDirectories().validDirectories())
-    private val lastMediaSession = MutableStateFlow(preferences.getLastMediaSession()?.takeIfValid())
-
-    val uiState: StateFlow<DirectoryUiState> = combine(
-        combine(
-            rootDirectory,
-            _currentDirectory,
-            searchQuery,
-            viewMode,
-            sortOrder,
-        ) { root, currentDirectory, query, mode, order ->
-            DirectoryUiState(
-                rootDirectory = root,
-                currentDirectory = currentDirectory,
-                searchQuery = query,
-                directoryListing = currentDirectory.fileExplorerEntries(query, order),
-                viewMode = mode,
-                sortOrder = order,
-                canNavigateUp = currentDirectory.isDifferentDirectory(root),
-            )
-        },
-        recentDirectories,
-        lastMediaSession,
-    ) { state, recent, session ->
-        state.copy(
-            recentDirectories = recent,
-            lastMediaSession = session,
-        )
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = DirectoryUiState(
-            rootDirectory = rootDirectory.value,
+    private val initialRoot = if (initialDirectory.isSameOrChildOf(defaultRootDirectory)) {
+        defaultRootDirectory
+    } else {
+        initialDirectory
+    }
+    private val _uiState = MutableStateFlow(
+        DirectoryUiState(
+            rootDirectory = initialRoot,
             currentDirectory = initialDirectory,
-            directoryListing = initialDirectory.fileExplorerEntries(sortOrder = sortOrder.value),
-            sortOrder = sortOrder.value,
-            recentDirectories = recentDirectories.value,
-            lastMediaSession = lastMediaSession.value,
+            searchQuery = savedStateHandle[STATE_SEARCH] ?: "",
+            viewMode = savedStateHandle.get<String>(STATE_VIEW_MODE)
+                ?.let { value -> DirectoryViewMode.entries.firstOrNull { it.name == value } }
+                ?: DirectoryViewMode.List,
+            sortOrder = preferences.getDirectorySortOrder(),
+            showHiddenFiles = preferences.getShowHiddenFiles(),
+            canNavigateUp = initialDirectory.isDifferentDirectory(initialRoot),
+            recentDirectories = preferences.getRecentDirectories().validDirectories(),
+            lastMediaSession = preferences.getLastMediaSession()?.takeIfValid(),
+            isLoading = true,
         ),
     )
+    val uiState: StateFlow<DirectoryUiState> = _uiState.asStateFlow()
+    private var scanJob: Job? = null
 
     init {
         rememberDirectory(initialDirectory)
+        scanDirectory()
     }
 
     fun updateSearchQuery(query: String) {
-        searchQuery.value = query
+        savedStateHandle[STATE_SEARCH] = query
+        _uiState.update { it.copy(searchQuery = query) }
+        scanDirectory(delayMillis = 200)
     }
 
     fun setViewMode(mode: DirectoryViewMode) {
-        viewMode.value = mode
+        savedStateHandle[STATE_VIEW_MODE] = mode.name
+        _uiState.update { it.copy(viewMode = mode) }
     }
 
     fun setSortOrder(order: DirectorySortOrder) {
-        sortOrder.value = order
         preferences.saveDirectorySortOrder(order)
+        _uiState.update { it.copy(sortOrder = order) }
+        scanDirectory()
     }
 
     fun openDirectory(entry: DirectoryEntry) {
@@ -103,33 +90,87 @@ class DirectoryViewModel(application: Application) : AndroidViewModel(applicatio
     fun openDirectoryPath(path: String) {
         val directory = File(path)
         if (!directory.exists() || !directory.isDirectory) return
-        if (!directory.isSameOrChildOf(rootDirectory.value)) {
-            rootDirectory.value = directory
+        val state = _uiState.value
+        val root = if (directory.isSameOrChildOf(state.rootDirectory)) state.rootDirectory else directory
+        savedStateHandle[STATE_DIRECTORY] = directory.absolutePath
+        savedStateHandle[STATE_SEARCH] = ""
+        _uiState.update {
+            it.copy(
+                rootDirectory = root,
+                currentDirectory = directory,
+                searchQuery = "",
+                canNavigateUp = directory.isDifferentDirectory(root),
+            )
         }
-
-        _currentDirectory.value = directory
-        searchQuery.value = ""
         rememberDirectory(directory)
+        scanDirectory()
     }
 
     fun navigateUp() {
-        val parentDirectory = _currentDirectory.value.parentFile ?: return
-        if (parentDirectory.isSameOrChildOf(rootDirectory.value)) {
-            _currentDirectory.value = parentDirectory
-            searchQuery.value = ""
+        val state = _uiState.value
+        val parentDirectory = state.currentDirectory.parentFile ?: return
+        if (parentDirectory.isSameOrChildOf(state.rootDirectory)) {
+            savedStateHandle[STATE_DIRECTORY] = parentDirectory.absolutePath
+            savedStateHandle[STATE_SEARCH] = ""
+            _uiState.update {
+                it.copy(
+                    currentDirectory = parentDirectory,
+                    searchQuery = "",
+                    canNavigateUp = parentDirectory.isDifferentDirectory(state.rootDirectory),
+                )
+            }
             rememberDirectory(parentDirectory)
+            scanDirectory()
         }
     }
 
     fun refresh() {
-        recentDirectories.value = preferences.getRecentDirectories().validDirectories()
-        lastMediaSession.value = preferences.getLastMediaSession()?.takeIfValid()
-        _currentDirectory.update { it }
+        _uiState.update {
+            it.copy(
+                showHiddenFiles = preferences.getShowHiddenFiles(),
+                recentDirectories = preferences.getRecentDirectories().validDirectories(),
+                lastMediaSession = preferences.getLastMediaSession()?.takeIfValid(),
+            )
+        }
+        scanDirectory()
     }
 
     private fun rememberDirectory(directory: File) {
         preferences.rememberDirectory(directory.absolutePath)
-        recentDirectories.value = preferences.getRecentDirectories().validDirectories()
+        _uiState.update {
+            it.copy(recentDirectories = preferences.getRecentDirectories().validDirectories())
+        }
+    }
+
+    private fun scanDirectory(delayMillis: Long = 0L) {
+        scanJob?.cancel()
+        scanJob = viewModelScope.launch {
+            if (delayMillis > 0) delay(delayMillis)
+            val request = _uiState.value
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            val listing = withContext(Dispatchers.IO) {
+                request.currentDirectory.fileExplorerEntries(
+                    searchQuery = request.searchQuery,
+                    sortOrder = request.sortOrder,
+                    showHiddenFiles = request.showHiddenFiles,
+                )
+            }
+            _uiState.update { current ->
+                if (current.currentDirectory.absolutePath != request.currentDirectory.absolutePath ||
+                    current.searchQuery != request.searchQuery || current.sortOrder != request.sortOrder
+                ) current else current.copy(
+                    directoryListing = listing,
+                    isLoading = false,
+                    errorMessage = listing.errorMessage,
+                )
+            }
+        }
+    }
+
+    private companion object {
+        const val STATE_DIRECTORY = "directory_path"
+        const val STATE_SEARCH = "directory_search"
+        const val STATE_VIEW_MODE = "directory_view_mode"
     }
 }
 
@@ -143,6 +184,9 @@ data class DirectoryUiState(
     val canNavigateUp: Boolean = false,
     val recentDirectories: List<String> = emptyList(),
     val lastMediaSession: LastMediaSession? = null,
+    val showHiddenFiles: Boolean = false,
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
 ) {
     val entries: List<DirectoryEntry>
         get() = directoryListing.entries
@@ -154,6 +198,7 @@ data class DirectoryUiState(
 data class DirectoryListing(
     val entries: List<DirectoryEntry>,
     val canRead: Boolean = true,
+    val errorMessage: String? = null,
 )
 
 data class DirectoryEntry(
@@ -177,12 +222,14 @@ enum class DirectoryMediaType {
     Other,
 }
 
-private fun File.fileExplorerEntries(
+private suspend fun File.fileExplorerEntries(
     searchQuery: String = "",
     sortOrder: DirectorySortOrder = DirectorySortOrder.NameAscending,
+    showHiddenFiles: Boolean = false,
 ): DirectoryListing {
     val normalizedQuery = searchQuery.trim()
     return runCatching {
+        val context = currentCoroutineContext()
         val files = listFiles() ?: return@runCatching DirectoryListing(
             entries = emptyList(),
             canRead = false,
@@ -190,6 +237,8 @@ private fun File.fileExplorerEntries(
 
         DirectoryListing(
             entries = files.asSequence()
+            ?.onEach { context.ensureActive() }
+            ?.filter { showHiddenFiles || !it.isHidden }
             ?.filter { file ->
                 normalizedQuery.isBlank() || file.name.contains(normalizedQuery, ignoreCase = true)
             }
@@ -208,7 +257,13 @@ private fun File.fileExplorerEntries(
                 .orEmpty(),
             canRead = canRead() || files.isNotEmpty(),
         )
-    }.getOrNull() ?: DirectoryListing(entries = emptyList(), canRead = false)
+    }.getOrElse { error ->
+        DirectoryListing(
+            entries = emptyList(),
+            canRead = false,
+            errorMessage = error.message ?: "Unable to read this directory.",
+        )
+    }
 }
 
 private fun File.isSameOrChildOf(root: File): Boolean {
@@ -224,7 +279,11 @@ private fun LastMediaSession.takeIfValid(): LastMediaSession? =
     takeIf {
         File(directoryPath).exists() &&
             File(directoryPath).isDirectory &&
-            (mediaPath == null || File(mediaPath).exists())
+            (mediaPath == null || if (mediaPath.contains("::")) {
+                File(mediaPath.substringBefore("::")).exists()
+            } else {
+                File(mediaPath).exists()
+            })
     }
 
 private fun File.isDifferentDirectory(other: File): Boolean =

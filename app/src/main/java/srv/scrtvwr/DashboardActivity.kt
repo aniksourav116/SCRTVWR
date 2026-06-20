@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewScreenSizes
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import srv.scrtvwr.ui.components.BaseScaffold
@@ -46,7 +47,7 @@ class DashboardActivity : ComponentActivity() {
 @PreviewScreenSizes
 @Composable
 fun ScrtvwrApp(viewModel: DashboardViewModel = viewModel()) {
-    val state by viewModel.uiState.collectAsState()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     val destinations = state.destinations
     val initialPage = remember(destinations) {
         destinations.indexOf(state.currentDestination).coerceAtLeast(0)
@@ -121,6 +122,7 @@ fun ScrtvwrApp(viewModel: DashboardViewModel = viewModel()) {
                         targetDirectoryPath = state.pendingDirectoryPath,
                         onTargetDirectoryConsumed = viewModel::clearPendingDirectoryPath,
                         backHandlerEnabled = visibleDestination == AppDestination.DIRECTORY,
+                        isVisible = visibleDestination == AppDestination.DIRECTORY,
                     )
                     AppDestination.HISTORY -> History(
                         modifier = Modifier.fillMaxSize(),

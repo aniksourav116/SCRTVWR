@@ -44,11 +44,13 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,17 +59,26 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import srv.scrtvwr.media.MediaPreviewLoader
+import srv.scrtvwr.media.PreviewResult
 import srv.scrtvwr.MediaViewerActivity
+import srv.scrtvwr.R
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryEntry
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryListing
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryMediaType
@@ -86,6 +97,7 @@ fun Directory(
     targetDirectoryPath: String? = null,
     onTargetDirectoryConsumed: () -> Unit = {},
     backHandlerEnabled: Boolean = true,
+    isVisible: Boolean = true,
     viewModel: DirectoryViewModel = viewModel(),
 ) {
     LaunchedEffect(targetDirectoryPath) {
@@ -94,8 +106,19 @@ fun Directory(
             onTargetDirectoryConsumed()
         }
     }
+    LaunchedEffect(isVisible) {
+        if (isVisible) viewModel.refresh()
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, isVisible) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && isVisible) viewModel.refresh()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     BackHandler(enabled = backHandlerEnabled && uiState.canNavigateUp) {
         viewModel.navigateUp()
@@ -169,7 +192,7 @@ fun DirectoryScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     DirectoryToolbarButton(
                         icon = { Icon(Icons.Default.Refresh, contentDescription = null) },
-                        label = "Refresh",
+                        label = stringResource(R.string.refresh),
                         onClick = onRefresh,
                         modifier = Modifier.weight(1f),
                     )
@@ -177,7 +200,7 @@ fun DirectoryScreen(
                     Box(modifier = Modifier.weight(1f)) {
                         DirectoryToolbarButton(
                             icon = { Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null) },
-                            label = uiState.sortOrder.shortLabel(),
+                            label = stringResource(uiState.sortOrder.labelResource()).substringBefore(" "),
                             onClick = { sortMenuExpanded = true },
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -187,7 +210,7 @@ fun DirectoryScreen(
                         ) {
                             DirectorySortOrder.entries.forEach { sortOrder ->
                                 DropdownMenuItem(
-                                    text = { Text(sortOrder.label) },
+                                    text = { Text(stringResource(sortOrder.labelResource())) },
                                     onClick = {
                                         onSortOrderChange(sortOrder)
                                         sortMenuExpanded = false
@@ -210,7 +233,7 @@ fun DirectoryScreen(
 
                     DirectoryToolbarButton(
                         icon = { Icon(Icons.Default.Restore, contentDescription = null) },
-                        label = "Resume",
+                        label = stringResource(R.string.resume),
                         onClick = onResumeMedia,
                         enabled = uiState.lastMediaSession != null,
                         modifier = Modifier.weight(1f),
@@ -219,7 +242,7 @@ fun DirectoryScreen(
                     Box(modifier = Modifier.weight(1f)) {
                         DirectoryToolbarButton(
                             icon = { Icon(Icons.Default.History, contentDescription = null) },
-                            label = "Recent",
+                            label = stringResource(R.string.recent),
                             onClick = { recentMenuExpanded = true },
                             enabled = uiState.recentDirectories.isNotEmpty(),
                             modifier = Modifier.fillMaxWidth(),
@@ -260,7 +283,7 @@ fun DirectoryScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     DirectoryToolbarButton(
                         icon = { Icon(Icons.AutoMirrored.Filled.ViewList, contentDescription = null) },
-                        label = "List view",
+                        label = stringResource(R.string.list_view),
                         selected = uiState.viewMode == DirectoryViewMode.List,
                         onClick = { onViewModeChange(DirectoryViewMode.List) },
                         modifier = Modifier.weight(1f),
@@ -268,7 +291,7 @@ fun DirectoryScreen(
 
                     DirectoryToolbarButton(
                         icon = { Icon(Icons.Default.GridView, contentDescription = null) },
-                        label = "Grid view",
+                        label = stringResource(R.string.grid_view),
                         selected = uiState.viewMode == DirectoryViewMode.Grid,
                         onClick = { onViewModeChange(DirectoryViewMode.Grid) },
                         modifier = Modifier.weight(1f),
@@ -280,13 +303,17 @@ fun DirectoryScreen(
         OutlinedTextField(
             value = uiState.searchQuery,
             onValueChange = onSearchQueryChange,
-            placeholder = { Text("Search files and folders") },
+            placeholder = { Text(stringResource(R.string.search_files_folders)) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
 
-        when (uiState.viewMode) {
+        if (uiState.isLoading && uiState.entries.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else when (uiState.viewMode) {
             DirectoryViewMode.List -> DirectoryList(
                 uiState = uiState,
                 onOpenDirectory = onOpenDirectory,
@@ -312,7 +339,7 @@ private fun DirectoryHeader(uiState: DirectoryUiState) {
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
-            text = "Directory",
+            text = stringResource(R.string.directory),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -352,7 +379,7 @@ private fun DirectoryToolbarButton(
             .height(60.dp)
             .then(
                 if (enabled) {
-                    Modifier.clickable(onClick = onClick)
+                    Modifier.clickable(role = Role.Button, onClick = onClick)
                 } else {
                     Modifier
                 },
@@ -382,9 +409,6 @@ private fun DirectoryToolbarButton(
     }
 }
 
-private fun DirectorySortOrder.shortLabel(): String =
-    label.substringBefore(" ").ifBlank { label }
-
 @Composable
 private fun DirectoryList(
     uiState: DirectoryUiState,
@@ -401,7 +425,7 @@ private fun DirectoryList(
             item(key = "parent") {
                 DirectoryListRow(
                     title = "..",
-                    subtitle = "Go up",
+                    subtitle = stringResource(R.string.go_up),
                     thumbnail = { Icon(Icons.Default.ArrowUpward, contentDescription = null) },
                     onClick = onNavigateUp,
                 )
@@ -446,7 +470,7 @@ private fun DirectoryListRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -497,7 +521,7 @@ private fun DirectoryGrid(
             item(key = "parent") {
                 DirectoryGridCard(
                     title = "..",
-                    subtitle = "Go up",
+                    subtitle = stringResource(R.string.go_up),
                     thumbnail = { Icon(Icons.Default.ArrowUpward, contentDescription = null) },
                     onClick = onNavigateUp,
                 )
@@ -542,7 +566,7 @@ private fun DirectoryGridCard(
         modifier = Modifier
             .fillMaxWidth()
             .defaultMinSize(minHeight = 132.dp)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -566,17 +590,17 @@ private fun EntryThumbnail(
     entry: DirectoryEntry,
     size: Int,
 ) {
-    val bitmap by produceState<Bitmap?>(
-        initialValue = null,
+    val preview by produceState<PreviewResult>(
+        initialValue = PreviewResult(),
         key1 = entry.path,
         key2 = entry.lastModifiedMillis,
         key3 = entry.mediaType,
     ) {
         value = when (entry.mediaType) {
-            DirectoryMediaType.Image -> loadImageThumbnail(entry.path, size)
-            DirectoryMediaType.Video -> loadVideoThumbnail(entry.path)
-            DirectoryMediaType.Other -> null
-            DirectoryMediaType.Archive -> null
+            DirectoryMediaType.Image -> MediaPreviewLoader.loadImage(entry.path, entry.lastModifiedMillis, size * 2)
+            DirectoryMediaType.Video -> MediaPreviewLoader.loadVideoFrame(entry.path, entry.lastModifiedMillis, size * 2)
+            DirectoryMediaType.Other -> PreviewResult()
+            DirectoryMediaType.Archive -> PreviewResult()
         }
     }
 
@@ -587,9 +611,9 @@ private fun EntryThumbnail(
             .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
-        if (bitmap != null) {
+        if (preview.bitmap != null) {
             Image(
-                bitmap = bitmap!!.asImageBitmap(),
+                bitmap = preview.bitmap!!.asImageBitmap(),
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
@@ -618,14 +642,15 @@ private fun EntryThumbnail(
 private fun EmptyDirectoryMessage(uiState: DirectoryUiState) {
     Text(
         text = when {
+            uiState.errorMessage != null -> uiState.errorMessage
             !uiState.canReadCurrentDirectory -> {
-                "Android is not allowing this app to read this directory."
+                stringResource(R.string.directory_unreadable)
             }
             uiState.searchQuery.isBlank() -> {
-                "This directory is empty."
+                stringResource(R.string.directory_empty)
             }
             else -> {
-                "No files or folders match \"${uiState.searchQuery}\"."
+                stringResource(R.string.no_search_results, uiState.searchQuery)
             }
         },
         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -633,50 +658,23 @@ private fun EmptyDirectoryMessage(uiState: DirectoryUiState) {
     )
 }
 
+@Composable
 private fun DirectoryEntry.supportingText(): String =
     when {
-        isDirectory -> "Folder"
-        mediaType == DirectoryMediaType.Image -> "Image - ${formatBytes(sizeBytes)}"
-        mediaType == DirectoryMediaType.Video -> "Video - ${formatBytes(sizeBytes)}"
-        mediaType == DirectoryMediaType.Archive -> "Archive - ${formatBytes(sizeBytes)}"
+        isDirectory -> stringResource(R.string.folder)
+        mediaType == DirectoryMediaType.Image -> stringResource(R.string.image_with_size, formatBytes(sizeBytes))
+        mediaType == DirectoryMediaType.Video -> stringResource(R.string.video_with_size, formatBytes(sizeBytes))
+        mediaType == DirectoryMediaType.Archive -> stringResource(R.string.archive_with_size, formatBytes(sizeBytes))
         else -> formatBytes(sizeBytes)
     }
 
-private suspend fun loadImageThumbnail(
-    path: String,
-    targetSize: Int,
-): Bitmap? = withContext(Dispatchers.IO) {
-    runCatching {
-        val bounds = BitmapFactory.Options().apply {
-            inJustDecodeBounds = true
-        }
-        BitmapFactory.decodeFile(path, bounds)
-
-        val sampleOptions = BitmapFactory.Options().apply {
-            inSampleSize = bounds.thumbnailSampleSize(targetSize)
-        }
-        BitmapFactory.decodeFile(path, sampleOptions)
-    }.getOrNull()
-}
-
-private suspend fun loadVideoThumbnail(path: String): Bitmap? = withContext(Dispatchers.IO) {
-    runCatching {
-        val retriever = MediaMetadataRetriever()
-        try {
-            retriever.setDataSource(path)
-            retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-        } finally {
-            retriever.release()
-        }
-    }.getOrNull()
-}
-
-private fun BitmapFactory.Options.thumbnailSampleSize(targetSize: Int): Int {
-    var sampleSize = 1
-    while (outHeight / sampleSize > targetSize * 2 || outWidth / sampleSize > targetSize * 2) {
-        sampleSize *= 2
-    }
-    return sampleSize
+private fun DirectorySortOrder.labelResource(): Int = when (this) {
+    DirectorySortOrder.NameAscending -> R.string.sort_name_ascending
+    DirectorySortOrder.NameDescending -> R.string.sort_name_descending
+    DirectorySortOrder.NewestFirst -> R.string.sort_newest
+    DirectorySortOrder.OldestFirst -> R.string.sort_oldest
+    DirectorySortOrder.LargestFirst -> R.string.sort_largest
+    DirectorySortOrder.SmallestFirst -> R.string.sort_smallest
 }
 
 private fun formatBytes(bytes: Long): String {
