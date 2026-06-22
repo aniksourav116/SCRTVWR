@@ -33,6 +33,11 @@
     <string name="show_hidden_files_summary">Include hidden items in directory listings.</string>
     <string name="slideshow_speed">Slide show speed</string>
     <string name="slideshow_speed_summary">Milliseconds each image stays on screen.</string>
+    <string name="hold_slideshow">Hold-to-slide control</string>
+    <string name="hold_slideshow_summary">When viewer controls are hidden, long-press the lower screen and drag left or right to adjust speed.</string>
+    <string name="slower">Slower</string>
+    <string name="faster">Faster</string>
+    <string name="slideshow_interval">%1$d ms</string>
     <string name="image_preload_distance">Image preload distance</string>
     <string name="image_preload_summary">How many nearby pages are prepared in the viewer.</string>
     <string name="invalid_whole_number">Enter a valid whole number.</string>

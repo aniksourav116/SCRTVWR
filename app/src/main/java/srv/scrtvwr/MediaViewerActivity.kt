@@ -29,8 +29,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.FormatIndentDecrease
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.BookmarkBorder
@@ -185,6 +187,7 @@ private fun MediaViewerScreen(
     var verticalDrag by remember { mutableFloatStateOf(0f) }
     var isPseudoSlideShowRunning by remember { mutableStateOf(false) }
     var pseudoSlideShowStayMillis by remember { mutableStateOf(uiState.slideShowStayMillis) }
+    var pseudoSlideShowHorizontalFraction by remember { mutableFloatStateOf(0f) }
     val readyMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
     val isAnySlideShowRunning = uiState.isSlideShowRunning || isPseudoSlideShowRunning
     val activeSlideShowStayMillis = if (isPseudoSlideShowRunning) {
@@ -396,20 +399,32 @@ private fun MediaViewerScreen(
                                 },
                             )
                         }
-                        .pointerInput(uiState.pageCount, uiState.isSlideShowRunning, uiState.slideShowStayMillis) {
-                            if (uiState.isSlideShowRunning) return@pointerInput
+                        .pointerInput(
+                            uiState.pageCount,
+                            uiState.isChromeHidden,
+                            uiState.isSlideShowRunning,
+                            uiState.holdSlideShowEnabled,
+                            uiState.slideShowStayMillis,
+                        ) {
+                            if (
+                                !uiState.holdSlideShowEnabled ||
+                                !uiState.isChromeHidden ||
+                                uiState.isSlideShowRunning
+                            ) return@pointerInput
 
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
-                                val startedInMiddle = down.position.x in size.width * 0.25f..size.width * 0.75f &&
-                                    down.position.y in size.height * 0.25f..size.height * 0.75f
-                                if (!startedInMiddle) return@awaitEachGesture
+                                val startedInLowerControl =
+                                    down.position.x in size.width * 0.15f..size.width * 0.85f &&
+                                    down.position.y in size.height * 0.55f..size.height * 0.85f
+                                if (!startedInLowerControl) return@awaitEachGesture
 
                                 val longPress = awaitLongPressOrCancellation(down.id)
                                     ?: return@awaitEachGesture
                                 longPress.consume()
                                 val baseStayMillis = uiState.slideShowStayMillis
                                 pseudoSlideShowStayMillis = baseStayMillis
+                                pseudoSlideShowHorizontalFraction = 0f
                                 isPseudoSlideShowRunning = true
 
                                 try {
@@ -420,6 +435,7 @@ private fun MediaViewerScreen(
                                         val horizontalFraction = (
                                             (change.position.x - down.position.x) / (size.width * 0.5f)
                                         ).coerceIn(-1f, 1f)
+                                        pseudoSlideShowHorizontalFraction = horizontalFraction
                                         pseudoSlideShowStayMillis = adjustedPseudoStayMillis(
                                             baseStayMillis = baseStayMillis,
                                             horizontalFraction = horizontalFraction,
@@ -428,6 +444,7 @@ private fun MediaViewerScreen(
                                     } while (change.pressed)
                                 } finally {
                                     isPseudoSlideShowRunning = false
+                                    pseudoSlideShowHorizontalFraction = 0f
                                 }
                             }
                         }
@@ -516,6 +533,18 @@ private fun MediaViewerScreen(
                     )
                 }
 
+                if (isPseudoSlideShowRunning) {
+                    PseudoSlideShowVisualizer(
+                        stayMillis = pseudoSlideShowStayMillis,
+                        horizontalFraction = pseudoSlideShowHorizontalFraction,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .fillMaxHeight(0.85f)
+                            .align(Alignment.TopCenter)
+                            .padding(bottom = 16.dp, start = 24.dp, end = 24.dp),
+                    )
+                }
+
                 if (uiState.isSlideShowRunning) {
                     Box(
                         modifier = Modifier
@@ -552,6 +581,46 @@ private fun MediaViewerScreen(
     }
     if (detailsDialogVisible && selectedItem != null) {
         MediaDetailsDialog(item = selectedItem, onDismiss = { detailsDialogVisible = false })
+    }
+}
+
+@Composable
+private fun PseudoSlideShowVisualizer(
+    stayMillis: Long,
+    horizontalFraction: Float,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier = modifier) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(72.dp)
+                .align(Alignment.BottomCenter)
+                .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(20.dp))
+                .padding(horizontal = 18.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.alpha(if (horizontalFraction < 0f) 1f else 0.55f),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = Color.White)
+                Text(stringResource(R.string.slower), color = Color.White)
+            }
+            Text(
+                text = stringResource(R.string.slideshow_interval, stayMillis),
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.alpha(if (horizontalFraction > 0f) 1f else 0.55f),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.White)
+                Text(stringResource(R.string.faster), color = Color.White)
+            }
+        }
     }
 }
 

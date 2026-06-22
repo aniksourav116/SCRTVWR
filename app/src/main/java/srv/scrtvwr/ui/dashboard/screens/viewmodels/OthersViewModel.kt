@@ -12,6 +12,7 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
     private val _uiState = MutableStateFlow(
         OthersUiState(
             slideShowStayMillis = preferences.getSlideShowStayMillis(),
+            holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
             imagePreloadDistance = preferences.getImagePreloadDistance(),
             showHiddenFiles = preferences.getShowHiddenFiles(),
         ),
@@ -29,6 +30,11 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(slideShowStayMillis = boundedStayMillis) }
     }
 
+    fun setHoldSlideShowEnabled(enabled: Boolean) {
+        preferences.saveHoldSlideShowEnabled(enabled)
+        _uiState.update { it.copy(holdSlideShowEnabled = enabled) }
+    }
+
     fun setImagePreloadDistance(distance: Int) {
         val boundedDistance = distance.coerceAtLeast(0)
         preferences.saveImagePreloadDistance(boundedDistance)
@@ -39,5 +45,6 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
 data class OthersUiState(
     val showHiddenFiles: Boolean = false,
     val slideShowStayMillis: Long = 50L,
+    val holdSlideShowEnabled: Boolean = false,
     val imagePreloadDistance: Int = 5,
 )

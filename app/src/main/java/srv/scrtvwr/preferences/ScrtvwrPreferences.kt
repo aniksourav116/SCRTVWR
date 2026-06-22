@@ -16,6 +16,13 @@ class ScrtvwrPreferences(context: Context) {
             .apply()
     }
 
+    fun getHoldSlideShowEnabled(): Boolean =
+        preferences.getBoolean(KEY_HOLD_SLIDE_SHOW_ENABLED, false)
+
+    fun saveHoldSlideShowEnabled(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_HOLD_SLIDE_SHOW_ENABLED, enabled).apply()
+    }
+
     fun getImagePreloadDistance(): Int =
         preferences.getInt(KEY_IMAGE_PRELOAD_DISTANCE, DEFAULT_IMAGE_PRELOAD_DISTANCE)
 
@@ -101,6 +108,7 @@ class ScrtvwrPreferences(context: Context) {
     private companion object {
         const val PREFERENCES_NAME = "scrtvwr_preferences"
         const val KEY_SLIDE_SHOW_STAY_MILLIS = "slide_show_stay_millis"
+        const val KEY_HOLD_SLIDE_SHOW_ENABLED = "hold_slide_show_enabled"
         const val KEY_IMAGE_PRELOAD_DISTANCE = "image_preload_distance"
         const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
         const val KEY_BOOKMARKED_MEDIA = "bookmarked_media"

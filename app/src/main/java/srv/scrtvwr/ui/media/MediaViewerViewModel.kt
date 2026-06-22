@@ -25,6 +25,7 @@ class MediaViewerViewModel(
     private val _uiState = MutableStateFlow(
         MediaViewerUiState(
             slideShowStayMillis = preferences.getSlideShowStayMillis(),
+            holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
             imagePreloadDistance = preferences.getImagePreloadDistance(),
         ),
     )
@@ -110,6 +111,7 @@ class MediaViewerViewModel(
                 initialPage = initialPage,
                 selectedPage = initialPage,
                 slideShowStayMillis = preferences.getSlideShowStayMillis(),
+                holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
                 imagePreloadDistance = preferences.getImagePreloadDistance(),
                 bookmarked = preferences.isMediaBookmarked(items.getOrNull(initialPage)?.path ?: selectedPath),
                 isLoading = false,
@@ -214,6 +216,7 @@ data class MediaViewerUiState(
     val isChromeHidden: Boolean = false,
     val isSlideShowRunning: Boolean = false,
     val slideShowStayMillis: Long = 50L,
+    val holdSlideShowEnabled: Boolean = false,
     val imagePreloadDistance: Int = 5,
     val isLoading: Boolean = false,
     val errorMessage: String? = null,

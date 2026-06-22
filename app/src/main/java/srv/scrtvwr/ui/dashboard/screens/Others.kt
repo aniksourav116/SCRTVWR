@@ -43,6 +43,7 @@ fun Others(
         uiState = uiState,
         onShowHiddenFilesChange = viewModel::setShowHiddenFiles,
         onSlideShowStayMillisChange = viewModel::setSlideShowStayMillis,
+        onHoldSlideShowEnabledChange = viewModel::setHoldSlideShowEnabled,
         onImagePreloadDistanceChange = viewModel::setImagePreloadDistance,
         modifier = modifier,
     )
@@ -53,6 +54,7 @@ fun OthersScreen(
     uiState: OthersUiState,
     onShowHiddenFilesChange: (Boolean) -> Unit,
     onSlideShowStayMillisChange: (Long) -> Unit,
+    onHoldSlideShowEnabledChange: (Boolean) -> Unit,
     onImagePreloadDistanceChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -121,6 +123,18 @@ fun OthersScreen(
             },
             leadingContent = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
             warning = preloadWarning,
+        )
+        ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            headlineContent = { Text(stringResource(R.string.hold_slideshow)) },
+            supportingContent = { Text(stringResource(R.string.hold_slideshow_summary)) },
+            leadingContent = { Icon(Icons.Default.Slideshow, contentDescription = null) },
+            trailingContent = {
+                Switch(
+                    checked = uiState.holdSlideShowEnabled,
+                    onCheckedChange = onHoldSlideShowEnabledChange,
+                )
+            },
         )
     }
 }
