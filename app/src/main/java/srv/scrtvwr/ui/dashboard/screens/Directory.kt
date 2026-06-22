@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -79,6 +81,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.PreviewResult
 import srv.scrtvwr.MediaViewerActivity
+import srv.scrtvwr.VideoPlayerActivity
 import srv.scrtvwr.R
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryEntry
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryListing
@@ -121,6 +124,13 @@ fun Directory(
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val videoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        result.data
+            ?.getStringExtra(VideoPlayerActivity.RESULT_DIRECTORY_PATH)
+            ?.let(viewModel::openDirectoryPath)
+    }
     BackHandler(enabled = backHandlerEnabled && uiState.canNavigateUp) {
         viewModel.navigateUp()
     }
@@ -133,21 +143,37 @@ fun Directory(
         onOpenDirectory = viewModel::openDirectory,
         onOpenRecentDirectory = viewModel::openDirectoryPath,
         onOpenMedia = { entry ->
-            context.startActivity(
-                Intent(context, MediaViewerActivity::class.java).apply {
-                    putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, uiState.currentDirectory.absolutePath)
-                    putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, entry.path)
-                },
-            )
+            val activityClass = if (entry.mediaType == DirectoryMediaType.Video) {
+                VideoPlayerActivity::class.java
+            } else {
+                MediaViewerActivity::class.java
+            }
+            val intent = Intent(context, activityClass).apply {
+                    if (entry.mediaType == DirectoryMediaType.Video) {
+                        putExtra(VideoPlayerActivity.EXTRA_DIRECTORY_PATH, uiState.currentDirectory.absolutePath)
+                        putExtra(VideoPlayerActivity.EXTRA_VIDEO_PATH, entry.path)
+                    } else {
+                        putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, uiState.currentDirectory.absolutePath)
+                        putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, entry.path)
+                    }
+                }
+            if (entry.mediaType == DirectoryMediaType.Video) videoLauncher.launch(intent)
+            else context.startActivity(intent)
         },
         onResumeMedia = {
             uiState.lastMediaSession?.let { session ->
-                context.startActivity(
-                    Intent(context, MediaViewerActivity::class.java).apply {
-                        putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, session.directoryPath)
-                        putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, session.mediaPath)
-                    },
-                )
+                val isVideo = session.mediaPath?.substringAfterLast('.', "")?.lowercase() in VIDEO_EXTENSIONS
+                val activityClass = if (isVideo) VideoPlayerActivity::class.java else MediaViewerActivity::class.java
+                val intent = Intent(context, activityClass).apply {
+                        if (isVideo) {
+                            putExtra(VideoPlayerActivity.EXTRA_DIRECTORY_PATH, session.directoryPath)
+                            putExtra(VideoPlayerActivity.EXTRA_VIDEO_PATH, session.mediaPath)
+                        } else {
+                            putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, session.directoryPath)
+                            putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, session.mediaPath)
+                        }
+                    }
+                if (isVideo) videoLauncher.launch(intent) else context.startActivity(intent)
             }
         },
         onNavigateUp = viewModel::navigateUp,
@@ -713,6 +739,8 @@ private fun formatBytes(bytes: Long): String {
 
     return "%.1f %s".format(value, units[unitIndex])
 }
+
+private val VIDEO_EXTENSIONS = setOf("mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v")
 
 @Preview(showBackground = true)
 @Composable
