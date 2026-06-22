@@ -1,9 +1,8 @@
 package srv.scrtvwr
 
 import android.os.Bundle
+import android.net.Uri
 import android.view.WindowManager
-import android.widget.MediaController
-import android.widget.VideoView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -33,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Forward
 import androidx.compose.material.icons.automirrored.filled.FormatIndentDecrease
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.BookmarkBorder
@@ -42,6 +42,11 @@ import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
 import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -62,6 +67,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -85,11 +91,19 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -104,6 +118,8 @@ import srv.scrtvwr.ui.media.MediaViewerViewModel
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.util.time.TimeUtil
 import timber.log.Timber
+import java.io.File
+import java.util.Locale
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.math.pow
 
@@ -497,6 +513,7 @@ private fun MediaViewerScreen(
                     uiState.items.getOrNull(page)?.let { item ->
                         MediaPage(
                             item = item,
+                            isActive = page == pagerState.currentPage,
                             fillFrame = uiState.fillFrame,
                             rotation = uiState.rotation,
                             flipped = uiState.flipped,
@@ -711,6 +728,7 @@ private fun SlideShowDialog(
 @Composable
 private fun MediaPage(
     item: MediaViewerItem,
+    isActive: Boolean,
     fillFrame: Boolean,
     rotation: Int,
     flipped: Boolean,
@@ -718,6 +736,9 @@ private fun MediaPage(
     onContentClick: () -> Unit,
 ) {
     var playingVideo by rememberSaveable(item.path) { mutableStateOf(false) }
+    LaunchedEffect(isActive) {
+        if (!isActive) playingVideo = false
+    }
     val preview by produceState(initialValue = PreviewResult(), key1 = item.path, key2 = item.lastModifiedMillis) {
         value = when (item.type) {
             MediaViewerType.Image -> MediaPreviewLoader.loadImage(item.path, item.lastModifiedMillis, 1600)
@@ -736,15 +757,9 @@ private fun MediaPage(
         contentAlignment = Alignment.Center,
     ) {
         if (item.type == MediaViewerType.Video && playingVideo) {
-            AndroidView(
-                factory = { context ->
-                    VideoView(context).apply {
-                        setVideoPath(item.path)
-                        setMediaController(MediaController(context).also { it.setAnchorView(this) })
-                        setOnPreparedListener { it.isLooping = false; start() }
-                        setOnCompletionListener { playingVideo = false }
-                    }
-                },
+            VideoPlayer(
+                path = item.path,
+                onReady = onReady,
                 modifier = Modifier.fillMaxSize(),
             )
         } else if (preview.bitmap == null) {
@@ -774,6 +789,187 @@ private fun MediaPage(
         }
     }
 }
+
+@Composable
+private fun VideoPlayer(
+    path: String,
+    onReady: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val player = remember(path) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(Uri.fromFile(File(path))))
+            playWhenReady = true
+            prepare()
+        }
+    }
+    var isPlaying by remember(path) { mutableStateOf(false) }
+    var repeat by rememberSaveable(path) { mutableStateOf(false) }
+    var position by remember(path) { mutableStateOf(0L) }
+    var duration by remember(path) { mutableStateOf(0L) }
+    var speed by rememberSaveable(path) { mutableFloatStateOf(1f) }
+    var speedMenuOpen by remember { mutableStateOf(false) }
+    var error by remember(path) { mutableStateOf<String?>(null) }
+
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(value: Boolean) {
+                isPlaying = value
+            }
+
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_READY) {
+                    duration = player.duration.coerceAtLeast(0L)
+                    onReady()
+                }
+            }
+
+            override fun onPlayerError(playbackError: PlaybackException) {
+                error = playbackError.localizedMessage ?: playbackError.errorCodeName
+            }
+        }
+        player.addListener(listener)
+        onDispose {
+            player.removeListener(listener)
+            player.release()
+        }
+    }
+
+    LaunchedEffect(player) {
+        while (true) {
+            position = player.currentPosition.coerceAtLeast(0L)
+            if (player.duration > 0) duration = player.duration
+            delay(250)
+        }
+    }
+
+    LaunchedEffect(repeat) {
+        player.repeatMode = if (repeat) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+    }
+
+    LaunchedEffect(speed) {
+        player.setPlaybackSpeed(speed)
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        player.pause()
+    }
+
+    Box(modifier = modifier.background(Color.Black)) {
+        AndroidView(
+            factory = { viewContext ->
+                PlayerView(viewContext).apply {
+                    useController = false
+                    this.player = player
+                }
+            },
+            update = { it.player = player },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        error?.let { message ->
+            Text(
+                text = stringResource(R.string.video_playback_error, message),
+                color = Color.White,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(24.dp),
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(Color.Black.copy(alpha = 0.72f))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            Slider(
+                value = position.coerceAtMost(duration).toFloat(),
+                onValueChange = {
+                    position = it.toLong()
+                    player.seekTo(position)
+                },
+                valueRange = 0f..duration.coerceAtLeast(1L).toFloat(),
+                enabled = duration > 0,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                IconButton(onClick = {
+                    if (player.isPlaying) {
+                        player.pause()
+                    } else {
+                        if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
+                        player.play()
+                    }
+                }) {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = stringResource(if (isPlaying) R.string.pause_video else R.string.play_video),
+                        tint = Color.White,
+                    )
+                }
+                IconButton(onClick = { player.seekTo((player.currentPosition - VIDEO_SEEK_MILLIS).coerceAtLeast(0L)) }) {
+                    Icon(Icons.Default.Replay, stringResource(R.string.seek_back_2_seconds), tint = Color.White)
+                }
+                IconButton(onClick = { player.seekTo((player.currentPosition + VIDEO_SEEK_MILLIS).coerceAtMost(duration)) }) {
+                    Icon(Icons.AutoMirrored.Filled.Forward, stringResource(R.string.seek_forward_2_seconds), tint = Color.White)
+                }
+                IconButton(onClick = { repeat = !repeat }) {
+                    Icon(
+                        Icons.Default.Repeat,
+                        stringResource(if (repeat) R.string.stop_repeating_video else R.string.repeat_video),
+                        tint = if (repeat) MaterialTheme.colorScheme.primary else Color.White,
+                    )
+                }
+                Text(
+                    text = "${formatVideoTime(position)} / ${formatVideoTime(duration)}",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Box {
+                    TextButton(onClick = { speedMenuOpen = true }) {
+                        Icon(Icons.Default.Speed, contentDescription = stringResource(R.string.playback_speed), tint = Color.White)
+                        Text(" ${formatPlaybackSpeed(speed)}", color = Color.White)
+                    }
+                    DropdownMenu(expanded = speedMenuOpen, onDismissRequest = { speedMenuOpen = false }) {
+                        VIDEO_PLAYBACK_SPEEDS.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(formatPlaybackSpeed(option)) },
+                                onClick = {
+                                    speed = option
+                                    speedMenuOpen = false
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatVideoTime(millis: Long): String {
+    val totalSeconds = millis.coerceAtLeast(0L) / 1_000
+    val hours = totalSeconds / 3_600
+    val minutes = (totalSeconds % 3_600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) {
+        String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(Locale.US, "%d:%02d", minutes, seconds)
+    }
+}
+
+private fun formatPlaybackSpeed(speed: Float): String = "${speed}x"
+
+private const val VIDEO_SEEK_MILLIS = 2_000L
+private val VIDEO_PLAYBACK_SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 
 private val MediaViewerItem.readinessKey: String
     get() = "$path:$lastModifiedMillis"
