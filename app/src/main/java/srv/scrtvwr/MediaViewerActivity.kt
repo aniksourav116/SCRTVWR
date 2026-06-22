@@ -60,6 +60,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -67,6 +68,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -86,6 +88,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.PreviewResult
@@ -176,6 +179,7 @@ private fun MediaViewerScreen(
     var detailsDialogVisible by rememberSaveable { mutableStateOf(false) }
     var slideShowStayText by rememberSaveable { mutableStateOf(uiState.slideShowStayMillis.toString()) }
     var verticalDrag by remember { mutableFloatStateOf(0f) }
+    val readyMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
 
     LaunchedEffect(slideShowDialogVisible, uiState.slideShowStayMillis) {
         if (slideShowDialogVisible) {
@@ -195,14 +199,33 @@ private fun MediaViewerScreen(
             .collect(onPageChanged)
     }
 
-    LaunchedEffect(uiState.isSlideShowRunning, uiState.slideShowStayMillis, uiState.items.size) {
-        while (uiState.isSlideShowRunning && uiState.items.isNotEmpty()) {
-            delay(uiState.slideShowStayMillis.milliseconds)
-            val nextPage = pagerState.currentPage + 1
-            if (nextPage >= uiState.items.size) {
+    LaunchedEffect(
+        uiState.isSlideShowRunning,
+        uiState.slideShowStayMillis,
+        uiState.items,
+        pagerState.currentPage,
+    ) {
+        if (uiState.isSlideShowRunning) {
+            val currentPage = pagerState.currentPage
+            val currentItem = uiState.items.getOrNull(currentPage)
+            if (currentItem == null) {
                 onSlideShowStop()
-            } else {
-                pagerState.scrollToPage(nextPage)
+                return@LaunchedEffect
+            }
+
+            snapshotFlow { readyMedia[currentItem.readinessKey] == true }
+                .first { it }
+            // Give the loaded bitmap a render frame before even a very short stay begins.
+            withFrameNanos { }
+            delay(uiState.slideShowStayMillis.milliseconds)
+
+            if (pagerState.currentPage == currentPage) {
+                val nextPage = currentPage + 1
+                if (nextPage >= uiState.items.size) {
+                    onSlideShowStop()
+                } else {
+                    pagerState.scrollToPage(nextPage)
+                }
             }
         }
     }
@@ -412,6 +435,7 @@ private fun MediaViewerScreen(
                             fillFrame = uiState.fillFrame,
                             rotation = uiState.rotation,
                             flipped = uiState.flipped,
+                            onReady = { readyMedia[item.readinessKey] = true },
                             onContentClick = onChromeToggle,
                         )
                     } ?: if (page == uiState.nextSourcePageIndex) {
@@ -573,6 +597,7 @@ private fun MediaPage(
     fillFrame: Boolean,
     rotation: Int,
     flipped: Boolean,
+    onReady: () -> Unit,
     onContentClick: () -> Unit,
 ) {
     var playingVideo by rememberSaveable(item.path) { mutableStateOf(false) }
@@ -581,6 +606,10 @@ private fun MediaPage(
             MediaViewerType.Image -> MediaPreviewLoader.loadImage(item.path, item.lastModifiedMillis, 1600)
             MediaViewerType.Video -> MediaPreviewLoader.loadVideoFrame(item.path, item.lastModifiedMillis, 1200)
         }
+    }
+
+    LaunchedEffect(preview.bitmap, item.path, item.lastModifiedMillis) {
+        if (preview.bitmap != null) onReady()
     }
 
     Box(
@@ -628,6 +657,9 @@ private fun MediaPage(
         }
     }
 }
+
+private val MediaViewerItem.readinessKey: String
+    get() = "$path:$lastModifiedMillis"
 
 @Composable
 private fun MediaDetailsDialog(item: MediaViewerItem, onDismiss: () -> Unit) {
