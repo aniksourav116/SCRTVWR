@@ -63,6 +63,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -201,8 +203,8 @@ fun DirectoryScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         DirectoryHeader(uiState = uiState)
 
@@ -213,7 +215,6 @@ fun DirectoryScreen(
         ) {
             Column(
                 modifier = Modifier.padding(4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     DirectoryToolbarButton(
@@ -304,9 +305,7 @@ fun DirectoryScreen(
                             }
                         }
                     }
-                }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
                     DirectoryToolbarButton(
                         icon = { Icon(Icons.AutoMirrored.Filled.ViewList, contentDescription = null) },
                         label = stringResource(R.string.list_view),
@@ -332,7 +331,9 @@ fun DirectoryScreen(
             placeholder = { Text(stringResource(R.string.search_files_folders)) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
         )
 
         if (uiState.isLoading && uiState.entries.isEmpty()) {
@@ -363,21 +364,17 @@ private fun DirectoryHeader(uiState: DirectoryUiState) {
         uiState.currentDirectory.absolutePath
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            text = stringResource(R.string.directory),
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
             text = folderName,
-            style = MaterialTheme.typography.headlineMedium,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
         Text(
             text = uiState.currentDirectory.absolutePath,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -402,7 +399,8 @@ private fun DirectoryToolbarButton(
 
     Surface(
         modifier = modifier
-            .height(60.dp)
+            .height(44.dp)
+            .semantics { contentDescription = label }
             .then(
                 if (enabled) {
                     Modifier.clickable(role = Role.Button, onClick = onClick)
@@ -418,19 +416,11 @@ private fun DirectoryToolbarButton(
         },
         contentColor = contentColor,
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+        Box(
+            modifier = Modifier.padding(8.dp),
+            contentAlignment = Alignment.Center,
         ) {
             icon()
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }
