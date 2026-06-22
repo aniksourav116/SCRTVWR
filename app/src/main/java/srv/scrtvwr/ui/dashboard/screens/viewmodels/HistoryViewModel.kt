@@ -82,11 +82,14 @@ enum class HistoryFilter(val label: String) {
 private fun List<srv.scrtvwr.preferences.LastMediaSession>.mediaHistoryItems(): List<HistoryDirectoryItem> =
     mapNotNull { session ->
         val directory = File(session.directoryPath)
-        if (!directory.exists() || !directory.isDirectory) return@mapNotNull null
+        val mediaPath = session.mediaPath ?: return@mapNotNull null
+        if (!directory.exists() || !directory.isDirectory || !File(mediaPath.substringBefore("::")).isFile) {
+            return@mapNotNull null
+        }
             HistoryDirectoryItem(
                 name = directory.name.ifBlank { directory.absolutePath },
                 path = directory.absolutePath,
-                mediaPath = session.mediaPath,
+                mediaPath = mediaPath,
             )
     }
 

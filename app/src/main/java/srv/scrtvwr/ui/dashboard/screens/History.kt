@@ -1,16 +1,22 @@
 package srv.scrtvwr.ui.dashboard.screens
 
+import android.content.Intent
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.ImageNotSupported
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
@@ -21,8 +27,13 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -35,11 +46,15 @@ import srv.scrtvwr.ui.dashboard.screens.viewmodels.HistoryFilter
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HistoryUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HistoryViewModel
 import srv.scrtvwr.R
+import srv.scrtvwr.MediaViewerActivity
+import srv.scrtvwr.media.MediaPreviewLoader
+import srv.scrtvwr.media.PreviewResult
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.HistoryDirectoryItem
+import java.io.File
 
 @Composable
 fun History(
     modifier: Modifier = Modifier,
-    onOpenDirectory: (String, String?) -> Unit = { _, _ -> },
     viewModel: HistoryViewModel = viewModel(),
 ) {
     LaunchedEffect(Unit) {
@@ -55,10 +70,16 @@ fun History(
     }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     HistoryScreen(
         uiState = uiState,
         onFilterSelected = viewModel::selectFilter,
-        onOpenDirectory = onOpenDirectory,
+        onOpenDirectory = { directoryPath, mediaPath ->
+            context.startActivity(Intent(context, MediaViewerActivity::class.java).apply {
+                putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, directoryPath)
+                putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, mediaPath)
+            })
+        },
         modifier = modifier,
     )
 }
@@ -105,7 +126,7 @@ fun HistoryScreen(
                     ListItem(
                         headlineContent = { Text(directory.name) },
                         supportingContent = { Text(directory.path) },
-                        leadingContent = { Icon(Icons.Default.Folder, contentDescription = null) },
+                        leadingContent = { HistoryThumbnail(directory) },
                         modifier = Modifier.clickable(role = Role.Button) {
                             onOpenDirectory(directory.path, directory.mediaPath)
                         },
@@ -115,6 +136,49 @@ fun HistoryScreen(
         }
     }
 }
+
+@Composable
+private fun HistoryThumbnail(
+    item: HistoryDirectoryItem,
+    modifier: Modifier = Modifier.size(56.dp),
+) {
+    val mediaPath = item.mediaPath
+    val sourceFile = mediaPath?.substringBefore("::")?.let(::File)
+    val isVideo = sourceFile?.extension?.lowercase() in VIDEO_EXTENSIONS
+    val preview by produceState(
+        initialValue = PreviewResult(),
+        key1 = mediaPath,
+        key2 = sourceFile?.lastModified(),
+    ) {
+        value = when {
+            mediaPath == null || sourceFile == null -> PreviewResult()
+            isVideo -> MediaPreviewLoader.loadVideoFrame(mediaPath, sourceFile.lastModified(), 112)
+            else -> MediaPreviewLoader.loadImage(mediaPath, sourceFile.lastModified(), 112)
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .clip(MaterialTheme.shapes.small)
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center,
+    ) {
+        val bitmap = preview.bitmap
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+            if (isVideo) Icon(Icons.Default.PlayCircle, contentDescription = null)
+        } else {
+            Icon(Icons.Default.ImageNotSupported, contentDescription = null)
+        }
+    }
+}
+
+private val VIDEO_EXTENSIONS = setOf("mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v")
 
 private fun HistoryFilter.labelResource(): Int = when (this) {
     HistoryFilter.ALL -> R.string.all

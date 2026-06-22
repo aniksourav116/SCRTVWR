@@ -120,14 +120,12 @@ fun ScrtvwrApp(viewModel: DashboardViewModel = viewModel()) {
                     AppDestination.DIRECTORY -> Directory(
                         modifier = Modifier.fillMaxSize(),
                         targetDirectoryPath = state.pendingDirectoryPath,
-                        targetMediaPath = state.pendingMediaPath,
                         onTargetDirectoryConsumed = viewModel::clearPendingDirectoryPath,
                         backHandlerEnabled = visibleDestination == AppDestination.DIRECTORY,
                         isVisible = visibleDestination == AppDestination.DIRECTORY,
                     )
                     AppDestination.HISTORY -> History(
                         modifier = Modifier.fillMaxSize(),
-                        onOpenDirectory = viewModel::openDirectoryFromHistory,
                     )
                     AppDestination.OTHERS -> Others(Modifier.fillMaxSize())
                 }

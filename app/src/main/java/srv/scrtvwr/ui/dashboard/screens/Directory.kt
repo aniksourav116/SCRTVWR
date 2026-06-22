@@ -101,7 +101,6 @@ import java.io.File
 fun Directory(
     modifier: Modifier = Modifier,
     targetDirectoryPath: String? = null,
-    targetMediaPath: String? = null,
     onTargetDirectoryConsumed: () -> Unit = {},
     backHandlerEnabled: Boolean = true,
     isVisible: Boolean = true,
@@ -128,22 +127,9 @@ fun Directory(
             ?.getStringExtra(MediaViewerActivity.RESULT_DIRECTORY_PATH)
             ?.let(viewModel::openDirectoryPath)
     }
-    LaunchedEffect(targetDirectoryPath, targetMediaPath) {
+    LaunchedEffect(targetDirectoryPath) {
         val directoryPath = targetDirectoryPath ?: return@LaunchedEffect
         viewModel.openDirectoryPath(directoryPath)
-        if (targetMediaPath != null) {
-            val isVideo = targetMediaPath.substringAfterLast('.', "").lowercase() in VIDEO_EXTENSIONS
-            val activityClass = if (isVideo) VideoPlayerActivity::class.java else MediaViewerActivity::class.java
-            mediaLauncher.launch(Intent(context, activityClass).apply {
-                if (isVideo) {
-                    putExtra(VideoPlayerActivity.EXTRA_DIRECTORY_PATH, directoryPath)
-                    putExtra(VideoPlayerActivity.EXTRA_VIDEO_PATH, targetMediaPath)
-                } else {
-                    putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, directoryPath)
-                    putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, targetMediaPath)
-                }
-            })
-        }
         onTargetDirectoryConsumed()
     }
     BackHandler(enabled = backHandlerEnabled && uiState.canNavigateUp) {
