@@ -1,5 +1,6 @@
 package srv.scrtvwr
 
+import android.app.Activity
 import android.os.Bundle
 import android.content.Intent
 import android.view.WindowManager
@@ -120,6 +121,12 @@ class MediaViewerActivity : ComponentActivity() {
                     directoryPath = directoryPath,
                     selectedPath = mediaPath,
                     onBack = ::finish,
+                    onDirectoryChanged = { path ->
+                        setResult(
+                            Activity.RESULT_OK,
+                            Intent().putExtra(RESULT_DIRECTORY_PATH, path),
+                        )
+                    },
                 )
             }
         }
@@ -128,6 +135,7 @@ class MediaViewerActivity : ComponentActivity() {
     companion object {
         const val EXTRA_DIRECTORY_PATH = "srv.scrtvwr.extra.DIRECTORY_PATH"
         const val EXTRA_MEDIA_PATH = "srv.scrtvwr.extra.MEDIA_PATH"
+        const val RESULT_DIRECTORY_PATH = "srv.scrtvwr.result.MEDIA_DIRECTORY_PATH"
     }
 }
 
@@ -136,6 +144,7 @@ private fun MediaViewerRoute(
     directoryPath: String?,
     selectedPath: String?,
     onBack: () -> Unit,
+    onDirectoryChanged: (String) -> Unit,
     viewModel: MediaViewerViewModel = viewModel(),
 ) {
     LaunchedEffect(directoryPath, selectedPath) {
@@ -143,6 +152,9 @@ private fun MediaViewerRoute(
     }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    LaunchedEffect(uiState.sourceDirectoryPath) {
+        uiState.sourceDirectoryPath?.let(onDirectoryChanged)
+    }
     MediaViewerScreen(
         uiState = uiState,
         onPageChanged = viewModel::selectPage,

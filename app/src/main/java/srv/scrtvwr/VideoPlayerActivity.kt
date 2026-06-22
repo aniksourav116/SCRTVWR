@@ -8,6 +8,7 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -83,6 +84,22 @@ import java.io.File
 import java.util.Locale
 
 class VideoPlayerActivity : ComponentActivity() {
+    private var pendingImageDirectory: String? = null
+    private val imageViewerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val directoryPath = result.data
+            ?.getStringExtra(MediaViewerActivity.RESULT_DIRECTORY_PATH)
+            ?: pendingImageDirectory
+        if (directoryPath != null) {
+            setResult(
+                Activity.RESULT_OK,
+                Intent().putExtra(RESULT_DIRECTORY_PATH, directoryPath),
+            )
+        }
+        finish()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -105,6 +122,19 @@ class VideoPlayerActivity : ComponentActivity() {
                             Intent().putExtra(RESULT_DIRECTORY_PATH, path),
                         )
                     },
+                    onOpenImageDirectory = { directory, imagePath ->
+                        pendingImageDirectory = directory
+                        setResult(
+                            Activity.RESULT_OK,
+                            Intent().putExtra(RESULT_DIRECTORY_PATH, directory),
+                        )
+                        imageViewerLauncher.launch(
+                            Intent(this, MediaViewerActivity::class.java).apply {
+                                putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, directory)
+                                putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, imagePath)
+                            },
+                        )
+                    },
                 )
             }
         }
@@ -113,7 +143,7 @@ class VideoPlayerActivity : ComponentActivity() {
     companion object {
         const val EXTRA_DIRECTORY_PATH = "srv.scrtvwr.extra.VIDEO_DIRECTORY_PATH"
         const val EXTRA_VIDEO_PATH = "srv.scrtvwr.extra.VIDEO_PATH"
-        const val RESULT_DIRECTORY_PATH = "srv.scrtvwr.result.VIDEO_DIRECTORY_PATH"
+        const val RESULT_DIRECTORY_PATH = MediaViewerActivity.RESULT_DIRECTORY_PATH
     }
 }
 
@@ -123,6 +153,7 @@ private fun VideoPagerScreen(
     selectedPath: String?,
     onBack: () -> Unit,
     onDirectoryChanged: (String) -> Unit,
+    onOpenImageDirectory: (String, String) -> Unit,
 ) {
     val context = LocalContext.current
     val sortOrder = remember { ScrtvwrPreferences(context).getDirectorySortOrder() }
@@ -198,8 +229,12 @@ private fun VideoPagerScreen(
                     NextVideoDirectoryPage(
                         directory = nextDirectory,
                         onMove = {
-                            currentDirectoryPath = nextDirectory.path
-                            onDirectoryChanged(nextDirectory.path)
+                            if (nextDirectory.type == VideoDirectoryType.Video) {
+                                currentDirectoryPath = nextDirectory.path
+                                onDirectoryChanged(nextDirectory.path)
+                            } else {
+                                onOpenImageDirectory(nextDirectory.path, nextDirectory.selectedMediaPath)
+                            }
                         },
                     )
                 }
@@ -521,7 +556,7 @@ private fun loadVideoDirectory(
     }
     return VideoDirectory(
         videos = fallbackVideos,
-        nextDirectory = directory?.findNextVideoDirectory(sortOrder),
+        nextDirectory = directory?.findNextMediaDirectory(sortOrder),
     )
 }
 
@@ -534,7 +569,7 @@ private fun File?.listVideos(sortOrder: DirectorySortOrder): List<VideoItem> = t
         ?.toList()
         .orEmpty()
 
-private fun File.findNextVideoDirectory(sortOrder: DirectorySortOrder): VideoDirectoryTarget? {
+private fun File.findNextMediaDirectory(sortOrder: DirectorySortOrder): VideoDirectoryTarget? {
     val currentPath = runCatching { canonicalPath }.getOrElse { absolutePath }
     return parentFile
         ?.listFiles()
@@ -545,9 +580,36 @@ private fun File.findNextVideoDirectory(sortOrder: DirectorySortOrder): VideoDir
             runCatching { candidate.canonicalPath }.getOrElse { candidate.absolutePath } != currentPath
         }
         ?.drop(1)
-        ?.firstOrNull { it.listVideos(sortOrder).isNotEmpty() }
-        ?.let { VideoDirectoryTarget(it.name.ifBlank { it.absolutePath }, it.absolutePath) }
+        ?.mapNotNull { candidate ->
+            val videos = candidate.listVideos(sortOrder)
+            if (videos.isNotEmpty()) {
+                VideoDirectoryTarget(
+                    name = candidate.name.ifBlank { candidate.absolutePath },
+                    path = candidate.absolutePath,
+                    type = VideoDirectoryType.Video,
+                    selectedMediaPath = videos.first().path,
+                )
+            } else {
+                candidate.listImages(sortOrder).firstOrNull()?.let { image ->
+                    VideoDirectoryTarget(
+                        name = candidate.name.ifBlank { candidate.absolutePath },
+                        path = candidate.absolutePath,
+                        type = VideoDirectoryType.Image,
+                        selectedMediaPath = image.absolutePath,
+                    )
+                }
+            }
+        }
+        ?.firstOrNull()
 }
+
+private fun File.listImages(sortOrder: DirectorySortOrder): List<File> = listFiles()
+    ?.asSequence()
+    ?.filter(File::isFile)
+    ?.filter { it.extension.lowercase() in IMAGE_EXTENSIONS }
+    ?.sortedWith(sortOrder.fileComparator(directoriesFirst = false))
+    ?.toList()
+    .orEmpty()
 
 private fun formatVideoTime(millis: Long): String {
     val totalSeconds = millis.coerceAtLeast(0L) / 1_000
@@ -562,11 +624,18 @@ private fun formatSpeed(speed: Float): String = "${speed}x"
 
 private data class VideoItem(val name: String, val path: String)
 private data class VideoDirectory(val videos: List<VideoItem>, val nextDirectory: VideoDirectoryTarget?)
-private data class VideoDirectoryTarget(val name: String, val path: String)
+private data class VideoDirectoryTarget(
+    val name: String,
+    val path: String,
+    val type: VideoDirectoryType,
+    val selectedMediaPath: String,
+)
 
 private enum class VideoRepeatMode { None, One, All }
+private enum class VideoDirectoryType { Video, Image }
 
 private val VIDEO_EXTENSIONS = setOf("mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v")
+private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif")
 private val PLAYBACK_SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 private const val SHORT_SEEK_MILLIS = 2_000L
 private const val DOUBLE_TAP_SEEK_MILLIS = 10_000L

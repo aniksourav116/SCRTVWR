@@ -124,11 +124,11 @@ fun Directory(
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val videoLauncher = rememberLauncherForActivityResult(
+    val mediaLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
     ) { result ->
         result.data
-            ?.getStringExtra(VideoPlayerActivity.RESULT_DIRECTORY_PATH)
+            ?.getStringExtra(MediaViewerActivity.RESULT_DIRECTORY_PATH)
             ?.let(viewModel::openDirectoryPath)
     }
     BackHandler(enabled = backHandlerEnabled && uiState.canNavigateUp) {
@@ -157,8 +157,7 @@ fun Directory(
                         putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, entry.path)
                     }
                 }
-            if (entry.mediaType == DirectoryMediaType.Video) videoLauncher.launch(intent)
-            else context.startActivity(intent)
+            mediaLauncher.launch(intent)
         },
         onResumeMedia = {
             uiState.lastMediaSession?.let { session ->
@@ -173,7 +172,7 @@ fun Directory(
                             putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, session.mediaPath)
                         }
                     }
-                if (isVideo) videoLauncher.launch(intent) else context.startActivity(intent)
+                mediaLauncher.launch(intent)
             }
         },
         onNavigateUp = viewModel::navigateUp,
