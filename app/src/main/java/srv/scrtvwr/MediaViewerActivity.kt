@@ -186,7 +186,7 @@ private fun MediaViewerScreen(
     onBack: () -> Unit,
 ) {
     val pagerState = rememberPagerState(
-        initialPage = uiState.initialPage,
+        initialPage = uiState.selectedPage,
         pageCount = { uiState.pageCount.coerceAtLeast(1) },
     )
     val coroutineScope = rememberCoroutineScope()
@@ -212,9 +212,12 @@ private fun MediaViewerScreen(
         }
     }
 
-    LaunchedEffect(uiState.initialPage, uiState.pageCount) {
+    LaunchedEffect(uiState.selectedPage, uiState.pageCount) {
         if (uiState.items.isNotEmpty()) {
-            pagerState.scrollToPage(uiState.initialPage.coerceIn(0, uiState.lastPageIndex))
+            val selectedPage = uiState.selectedPage.coerceIn(0, uiState.lastPageIndex)
+            if (pagerState.currentPage != selectedPage) {
+                pagerState.scrollToPage(selectedPage)
+            }
         }
     }
 

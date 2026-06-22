@@ -53,6 +53,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -160,6 +161,9 @@ private fun VideoPagerScreen(
     var currentDirectoryPath by rememberSaveable(directoryPath, selectedPath) {
         mutableStateOf(directoryPath ?: selectedPath?.let(::File)?.parent)
     }
+    var selectedVideoPath by rememberSaveable(directoryPath, selectedPath) {
+        mutableStateOf(selectedPath)
+    }
     val loadedDirectory by produceState<VideoDirectory?>(initialValue = null, currentDirectoryPath, selectedPath) {
         value = withContext(Dispatchers.IO) {
             loadVideoDirectory(
@@ -172,8 +176,8 @@ private fun VideoPagerScreen(
     val videos = loadedDirectory?.videos.orEmpty()
     val nextDirectory = loadedDirectory?.nextDirectory
     var repeatMode by rememberSaveable { mutableStateOf(VideoRepeatMode.None) }
-    val initialPage = remember(videos, selectedPath) {
-        videos.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
+    val initialPage = remember(videos, selectedVideoPath) {
+        videos.indexOfFirst { it.path == selectedVideoPath }.coerceAtLeast(0)
     }
     val pagerState = rememberPagerState(
         initialPage = initialPage,
@@ -181,10 +185,17 @@ private fun VideoPagerScreen(
     )
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(loadedDirectory, selectedPath) {
+    LaunchedEffect(loadedDirectory, selectedVideoPath) {
         if (videos.isNotEmpty() && pagerState.currentPage != initialPage) {
             pagerState.scrollToPage(initialPage)
         }
+    }
+
+    LaunchedEffect(pagerState, videos) {
+        snapshotFlow { pagerState.currentPage }
+            .collect { page ->
+                videos.getOrNull(page)?.let { selectedVideoPath = it.path }
+            }
     }
 
     Box(
@@ -231,6 +242,7 @@ private fun VideoPagerScreen(
                         onMove = {
                             if (nextDirectory.type == VideoDirectoryType.Video) {
                                 currentDirectoryPath = nextDirectory.path
+                                selectedVideoPath = nextDirectory.selectedMediaPath
                                 onDirectoryChanged(nextDirectory.path)
                             } else {
                                 onOpenImageDirectory(nextDirectory.path, nextDirectory.selectedMediaPath)
@@ -254,9 +266,11 @@ private fun VideoPage(
     onEnded: () -> Unit,
 ) {
     val context = LocalContext.current
+    var savedPlaybackPosition by rememberSaveable(item.path) { mutableLongStateOf(0L) }
     val player = remember(item.path) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(Uri.fromFile(File(item.path))))
+            if (savedPlaybackPosition > 0L) seekTo(savedPlaybackPosition)
             playWhenReady = true
             prepare()
         }
@@ -290,6 +304,7 @@ private fun VideoPage(
         player.addListener(listener)
         onDispose {
             player.removeListener(listener)
+            savedPlaybackPosition = player.currentPosition.coerceAtLeast(0L)
             player.release()
         }
     }
@@ -299,6 +314,7 @@ private fun VideoPage(
     LaunchedEffect(player) {
         while (true) {
             position = player.currentPosition.coerceAtLeast(0L)
+            savedPlaybackPosition = position
             if (player.duration > 0) duration = player.duration
             delay(250)
         }
