@@ -117,7 +117,9 @@ class MediaViewerViewModel(
                 isLoading = false,
             )
         }
-        rememberMediaSession(sourceDirectoryPath, items.getOrNull(initialPage)?.path ?: selectedPath)
+        items.getOrNull(initialPage)?.path?.let { mediaPath ->
+            rememberMediaSession(sourceDirectoryPath, mediaPath)
+        }
     }
 
     fun selectPage(page: Int) {

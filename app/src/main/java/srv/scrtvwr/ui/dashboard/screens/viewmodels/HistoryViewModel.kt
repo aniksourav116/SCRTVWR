@@ -34,11 +34,11 @@ class HistoryViewModel(
             ?: HistoryFilter.ALL,
     ): HistoryUiState = HistoryUiState(
         selectedFilter = filter,
-        directories = preferences.getRecentDirectories().historyDirectoryItems(),
+        directories = preferences.getMediaHistory().mediaHistoryItems(),
         favoriteDirectories = preferences.getBookmarkedMedia()
-            .mapNotNull(String::bookmarkDirectory)
-            .distinct()
-            .historyDirectoryItems(),
+            .mapNotNull(String::bookmarkSession)
+            .distinctBy { it.directoryPath }
+            .mediaHistoryItems(),
     )
 
     private companion object {
@@ -70,6 +70,7 @@ data class HistoryUiState(
 data class HistoryDirectoryItem(
     val name: String,
     val path: String,
+    val mediaPath: String? = null,
 )
 
 enum class HistoryFilter(val label: String) {
@@ -78,17 +79,19 @@ enum class HistoryFilter(val label: String) {
     FAVORITES("Favorites"),
 }
 
-private fun List<String>.historyDirectoryItems(): List<HistoryDirectoryItem> =
-    map(::File)
-        .filter { it.exists() && it.isDirectory }
-        .map { directory ->
+private fun List<srv.scrtvwr.preferences.LastMediaSession>.mediaHistoryItems(): List<HistoryDirectoryItem> =
+    mapNotNull { session ->
+        val directory = File(session.directoryPath)
+        if (!directory.exists() || !directory.isDirectory) return@mapNotNull null
             HistoryDirectoryItem(
                 name = directory.name.ifBlank { directory.absolutePath },
                 path = directory.absolutePath,
+                mediaPath = session.mediaPath,
             )
-        }
+    }
 
-private fun String.bookmarkDirectory(): String? {
+private fun String.bookmarkSession(): srv.scrtvwr.preferences.LastMediaSession? {
     val source = substringBefore("::")
-    return File(source).parentFile?.absolutePath
+    val directory = File(source).parentFile?.absolutePath ?: return null
+    return srv.scrtvwr.preferences.LastMediaSession(directory, this)
 }

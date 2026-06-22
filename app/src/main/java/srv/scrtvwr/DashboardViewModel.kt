@@ -28,8 +28,14 @@ class DashboardViewModel(private val savedStateHandle: SavedStateHandle) : ViewM
         _uiState.update { it.copy(currentDestination = destination) }
     }
 
-    fun openDirectoryFromHistory(path: String) {
-        openDirectory(path)
+    fun openDirectoryFromHistory(path: String, mediaPath: String?) {
+        _uiState.update {
+            it.copy(
+                currentDestination = AppDestination.DIRECTORY,
+                pendingDirectoryPath = path,
+                pendingMediaPath = mediaPath,
+            )
+        }
     }
 
     fun openDirectoryFromStorage(path: String) {
@@ -46,7 +52,7 @@ class DashboardViewModel(private val savedStateHandle: SavedStateHandle) : ViewM
     }
 
     fun clearPendingDirectoryPath() {
-        _uiState.update { it.copy(pendingDirectoryPath = null) }
+        _uiState.update { it.copy(pendingDirectoryPath = null, pendingMediaPath = null) }
     }
 
     private companion object {
@@ -58,6 +64,7 @@ data class DashboardUiState(
     val currentDestination: AppDestination = AppDestination.STORAGE,
     val destinations: List<AppDestination> = AppDestination.entries,
     val pendingDirectoryPath: String? = null,
+    val pendingMediaPath: String? = null,
 )
 
 enum class AppDestination(

@@ -60,7 +60,7 @@ class DirectoryViewModel(
     private var scanJob: Job? = null
 
     init {
-        rememberDirectory(initialDirectory)
+        saveLastDirectory(initialDirectory)
         scanDirectory()
     }
 
@@ -102,7 +102,7 @@ class DirectoryViewModel(
                 canNavigateUp = directory.isDifferentDirectory(root),
             )
         }
-        rememberDirectory(directory)
+        saveLastDirectory(directory)
         scanDirectory()
     }
 
@@ -119,7 +119,7 @@ class DirectoryViewModel(
                     canNavigateUp = parentDirectory.isDifferentDirectory(state.rootDirectory),
                 )
             }
-            rememberDirectory(parentDirectory)
+            saveLastDirectory(parentDirectory)
             scanDirectory()
         }
     }
@@ -135,11 +135,8 @@ class DirectoryViewModel(
         scanDirectory()
     }
 
-    private fun rememberDirectory(directory: File) {
-        preferences.rememberDirectory(directory.absolutePath)
-        _uiState.update {
-            it.copy(recentDirectories = preferences.getRecentDirectories().validDirectories())
-        }
+    private fun saveLastDirectory(directory: File) {
+        preferences.saveLastDirectory(directory.absolutePath)
     }
 
     private fun scanDirectory(delayMillis: Long = 0L) {

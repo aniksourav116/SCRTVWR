@@ -157,7 +157,8 @@ private fun VideoPagerScreen(
     onOpenImageDirectory: (String, String) -> Unit,
 ) {
     val context = LocalContext.current
-    val sortOrder = remember { ScrtvwrPreferences(context).getDirectorySortOrder() }
+    val preferences = remember { ScrtvwrPreferences(context) }
+    val sortOrder = remember { preferences.getDirectorySortOrder() }
     var currentDirectoryPath by rememberSaveable(directoryPath, selectedPath) {
         mutableStateOf(directoryPath ?: selectedPath?.let(::File)?.parent)
     }
@@ -194,7 +195,10 @@ private fun VideoPagerScreen(
     LaunchedEffect(pagerState, videos) {
         snapshotFlow { pagerState.currentPage }
             .collect { page ->
-                videos.getOrNull(page)?.let { selectedVideoPath = it.path }
+                videos.getOrNull(page)?.let { video ->
+                    selectedVideoPath = video.path
+                    currentDirectoryPath?.let { preferences.saveLastMediaSession(it, video.path) }
+                }
             }
     }
 

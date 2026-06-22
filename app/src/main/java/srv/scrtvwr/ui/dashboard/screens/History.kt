@@ -39,7 +39,7 @@ import srv.scrtvwr.R
 @Composable
 fun History(
     modifier: Modifier = Modifier,
-    onOpenDirectory: (String) -> Unit = {},
+    onOpenDirectory: (String, String?) -> Unit = { _, _ -> },
     viewModel: HistoryViewModel = viewModel(),
 ) {
     LaunchedEffect(Unit) {
@@ -67,7 +67,7 @@ fun History(
 fun HistoryScreen(
     uiState: HistoryUiState,
     onFilterSelected: (HistoryFilter) -> Unit,
-    onOpenDirectory: (String) -> Unit,
+    onOpenDirectory: (String, String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -106,7 +106,9 @@ fun HistoryScreen(
                         headlineContent = { Text(directory.name) },
                         supportingContent = { Text(directory.path) },
                         leadingContent = { Icon(Icons.Default.Folder, contentDescription = null) },
-                        modifier = Modifier.clickable(role = Role.Button) { onOpenDirectory(directory.path) },
+                        modifier = Modifier.clickable(role = Role.Button) {
+                            onOpenDirectory(directory.path, directory.mediaPath)
+                        },
                     )
                 }
             }

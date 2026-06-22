@@ -52,15 +52,10 @@ class ScrtvwrPreferences(context: Context) {
         path != null && path in getBookmarkedMedia()
 
     fun getRecentDirectories(): List<String> =
-        preferences.getString(KEY_RECENT_DIRECTORIES, null)
-            ?.let(::decodeStringList)
-            .orEmpty()
+        getMediaHistory().map(LastMediaSession::directoryPath)
 
-    fun rememberDirectory(path: String) {
-        val recentDirectories = (listOf(path) + getRecentDirectories().filterNot { it == path })
-            .take(MAX_RECENT_DIRECTORIES)
+    fun saveLastDirectory(path: String) {
         preferences.edit()
-            .putString(KEY_RECENT_DIRECTORIES, encodeStringList(recentDirectories))
             .putString(KEY_LAST_DIRECTORY, path)
             .apply()
     }
@@ -86,23 +81,40 @@ class ScrtvwrPreferences(context: Context) {
     }
 
     fun saveLastMediaSession(directoryPath: String, mediaPath: String?) {
+        val history = (listOf(LastMediaSession(directoryPath, mediaPath)) +
+            getMediaHistory().filterNot { it.directoryPath == directoryPath })
+            .take(MAX_RECENT_DIRECTORIES)
         preferences.edit()
             .putString(KEY_LAST_MEDIA_DIRECTORY, directoryPath)
             .putString(KEY_LAST_MEDIA_PATH, mediaPath)
+            .putString(KEY_MEDIA_HISTORY, encodeMediaHistory(history))
             .apply()
     }
 
-    private fun encodeStringList(values: List<String>): String {
+    fun getMediaHistory(): List<LastMediaSession> =
+        preferences.getString(KEY_MEDIA_HISTORY, null)
+            ?.let(::decodeMediaHistory)
+            .orEmpty()
+
+    private fun encodeMediaHistory(values: List<LastMediaSession>): String {
         val json = JSONArray()
-        values.forEach(json::put)
+        values.forEach { session ->
+            json.put(JSONArray().put(session.directoryPath).put(session.mediaPath))
+        }
         return json.toString()
     }
 
-    private fun decodeStringList(value: String): List<String> =
+    private fun decodeMediaHistory(value: String): List<LastMediaSession> =
         runCatching {
             val json = JSONArray(value)
-            List(json.length()) { index -> json.optString(index) }
-                .filter(String::isNotBlank)
+            List(json.length()) { index ->
+                json.optJSONArray(index)?.let { session ->
+                    LastMediaSession(
+                        directoryPath = session.optString(0),
+                        mediaPath = session.optString(1).takeIf(String::isNotBlank),
+                    )
+                }
+            }.filterNotNull().filter { it.directoryPath.isNotBlank() }
         }.getOrDefault(emptyList())
 
     private companion object {
@@ -112,7 +124,7 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_IMAGE_PRELOAD_DISTANCE = "image_preload_distance"
         const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
         const val KEY_BOOKMARKED_MEDIA = "bookmarked_media"
-        const val KEY_RECENT_DIRECTORIES = "recent_directories"
+        const val KEY_MEDIA_HISTORY = "media_history"
         const val KEY_LAST_DIRECTORY = "last_directory"
         const val KEY_DIRECTORY_SORT_ORDER = "directory_sort_order"
         const val KEY_LAST_MEDIA_DIRECTORY = "last_media_directory"
