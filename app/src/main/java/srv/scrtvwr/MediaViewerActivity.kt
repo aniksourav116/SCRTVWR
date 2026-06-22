@@ -10,6 +10,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Arrangement
@@ -100,6 +103,7 @@ import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.util.time.TimeUtil
 import timber.log.Timber
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.math.pow
 
 class MediaViewerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -179,7 +183,15 @@ private fun MediaViewerScreen(
     var detailsDialogVisible by rememberSaveable { mutableStateOf(false) }
     var slideShowStayText by rememberSaveable { mutableStateOf(uiState.slideShowStayMillis.toString()) }
     var verticalDrag by remember { mutableFloatStateOf(0f) }
+    var isPseudoSlideShowRunning by remember { mutableStateOf(false) }
+    var pseudoSlideShowStayMillis by remember { mutableStateOf(uiState.slideShowStayMillis) }
     val readyMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
+    val isAnySlideShowRunning = uiState.isSlideShowRunning || isPseudoSlideShowRunning
+    val activeSlideShowStayMillis = if (isPseudoSlideShowRunning) {
+        pseudoSlideShowStayMillis
+    } else {
+        uiState.slideShowStayMillis
+    }
 
     LaunchedEffect(slideShowDialogVisible, uiState.slideShowStayMillis) {
         if (slideShowDialogVisible) {
@@ -200,16 +212,17 @@ private fun MediaViewerScreen(
     }
 
     LaunchedEffect(
-        uiState.isSlideShowRunning,
-        uiState.slideShowStayMillis,
+        isAnySlideShowRunning,
+        activeSlideShowStayMillis,
+        isPseudoSlideShowRunning,
         uiState.items,
         pagerState.currentPage,
     ) {
-        if (uiState.isSlideShowRunning) {
+        if (isAnySlideShowRunning) {
             val currentPage = pagerState.currentPage
             val currentItem = uiState.items.getOrNull(currentPage)
             if (currentItem == null) {
-                onSlideShowStop()
+                if (!isPseudoSlideShowRunning) onSlideShowStop()
                 return@LaunchedEffect
             }
 
@@ -217,12 +230,12 @@ private fun MediaViewerScreen(
                 .first { it }
             // Give the loaded bitmap a render frame before even a very short stay begins.
             withFrameNanos { }
-            delay(uiState.slideShowStayMillis.milliseconds)
+            delay(activeSlideShowStayMillis.milliseconds)
 
             if (pagerState.currentPage == currentPage) {
                 val nextPage = currentPage + 1
                 if (nextPage >= uiState.items.size) {
-                    onSlideShowStop()
+                    if (!isPseudoSlideShowRunning) onSlideShowStop()
                 } else {
                     pagerState.scrollToPage(nextPage)
                 }
@@ -382,6 +395,41 @@ private fun MediaViewerScreen(
                                     verticalDrag = 0f
                                 },
                             )
+                        }
+                        .pointerInput(uiState.pageCount, uiState.isSlideShowRunning, uiState.slideShowStayMillis) {
+                            if (uiState.isSlideShowRunning) return@pointerInput
+
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                val startedInMiddle = down.position.x in size.width * 0.25f..size.width * 0.75f &&
+                                    down.position.y in size.height * 0.25f..size.height * 0.75f
+                                if (!startedInMiddle) return@awaitEachGesture
+
+                                val longPress = awaitLongPressOrCancellation(down.id)
+                                    ?: return@awaitEachGesture
+                                longPress.consume()
+                                val baseStayMillis = uiState.slideShowStayMillis
+                                pseudoSlideShowStayMillis = baseStayMillis
+                                isPseudoSlideShowRunning = true
+
+                                try {
+                                    do {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull { it.id == down.id }
+                                            ?: break
+                                        val horizontalFraction = (
+                                            (change.position.x - down.position.x) / (size.width * 0.5f)
+                                        ).coerceIn(-1f, 1f)
+                                        pseudoSlideShowStayMillis = adjustedPseudoStayMillis(
+                                            baseStayMillis = baseStayMillis,
+                                            horizontalFraction = horizontalFraction,
+                                        )
+                                        change.consume()
+                                    } while (change.pressed)
+                                } finally {
+                                    isPseudoSlideShowRunning = false
+                                }
+                            }
                         }
                         .pointerInput(uiState.pageCount) {
                             awaitPointerEventScope {
@@ -660,6 +708,16 @@ private fun MediaPage(
 
 private val MediaViewerItem.readinessKey: String
     get() = "$path:$lastModifiedMillis"
+
+private fun adjustedPseudoStayMillis(baseStayMillis: Long, horizontalFraction: Float): Long {
+    val speedMultiplier = 4.0.pow(horizontalFraction.toDouble())
+    return (baseStayMillis / speedMultiplier)
+        .toLong()
+        .coerceIn(MIN_PSEUDO_STAY_MILLIS, MAX_PSEUDO_STAY_MILLIS)
+}
+
+private const val MIN_PSEUDO_STAY_MILLIS = 1L
+private const val MAX_PSEUDO_STAY_MILLIS = 3_600_000L
 
 @Composable
 private fun MediaDetailsDialog(item: MediaViewerItem, onDismiss: () -> Unit) {
