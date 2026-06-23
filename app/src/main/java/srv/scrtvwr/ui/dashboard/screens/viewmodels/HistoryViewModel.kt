@@ -83,11 +83,16 @@ private fun List<srv.scrtvwr.preferences.LastMediaSession>.mediaHistoryItems(): 
     mapNotNull { session ->
         val directory = File(session.directoryPath)
         val mediaPath = session.mediaPath ?: return@mapNotNull null
-        if (!directory.exists() || !directory.isDirectory || !File(mediaPath.substringBefore("::")).isFile) {
+        val mediaFile = File(mediaPath.substringBefore("::"))
+        if (!directory.exists() || !directory.isDirectory || !mediaFile.isFile) {
             return@mapNotNull null
         }
             HistoryDirectoryItem(
-                name = directory.name.ifBlank { directory.absolutePath },
+                name = if (mediaPath.contains("::")) {
+                    mediaFile.name.ifBlank { mediaFile.absolutePath }
+                } else {
+                    directory.name.ifBlank { directory.absolutePath }
+                },
                 path = directory.absolutePath,
                 mediaPath = mediaPath,
             )
