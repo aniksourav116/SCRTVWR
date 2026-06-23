@@ -92,6 +92,8 @@
     <string name="close">Close</string>
     <string name="move_previous_directory">Move to previous directory</string>
     <string name="move_next_directory">Move to next directory</string>
+    <string name="move_first_item">Move to first item</string>
+    <string name="move_last_item">Move to last item</string>
     <string name="previous_directory">Previous directory</string>
     <string name="next_directory">Next directory</string>
     <string name="previous_archive">Previous archive</string>

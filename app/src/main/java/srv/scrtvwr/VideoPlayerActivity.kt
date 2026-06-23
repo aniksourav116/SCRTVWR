@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.Forward
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Speed
@@ -239,6 +240,16 @@ private fun VideoPagerScreen(
                         repeatMode = repeatMode,
                         onRepeatModeChange = { repeatMode = it },
                         onBack = onBack,
+                        onMoveToFirst = {
+                            scope.launch {
+                                pagerState.animateScrollToPage(firstVideoPageIndex)
+                            }
+                        },
+                        onMoveToLast = {
+                            scope.launch {
+                                pagerState.animateScrollToPage(firstVideoPageIndex + videos.lastIndex)
+                            }
+                        },
                         onEnded = {
                             if (repeatMode == VideoRepeatMode.All) {
                                 scope.launch {
@@ -295,6 +306,8 @@ private fun VideoPage(
     repeatMode: VideoRepeatMode,
     onRepeatModeChange: (VideoRepeatMode) -> Unit,
     onBack: () -> Unit,
+    onMoveToFirst: () -> Unit,
+    onMoveToLast: () -> Unit,
     onEnded: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -316,6 +329,7 @@ private fun VideoPage(
     var horizontalDrag by remember { mutableFloatStateOf(0f) }
     var speed by rememberSaveable { mutableFloatStateOf(1f) }
     var speedMenuOpen by remember { mutableStateOf(false) }
+    var optionsMenuOpen by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     DisposableEffect(player) {
@@ -453,7 +467,11 @@ private fun VideoPage(
                 onSpeedChange = { speed = it },
                 speedMenuOpen = speedMenuOpen,
                 onSpeedMenuChange = { speedMenuOpen = it },
+                optionsMenuOpen = optionsMenuOpen,
+                onOptionsMenuChange = { optionsMenuOpen = it },
                 onBack = onBack,
+                onMoveToFirst = onMoveToFirst,
+                onMoveToLast = onMoveToLast,
             )
         }
     }
@@ -474,7 +492,11 @@ private fun BoxScope.VideoControls(
     onSpeedChange: (Float) -> Unit,
     speedMenuOpen: Boolean,
     onSpeedMenuChange: (Boolean) -> Unit,
+    optionsMenuOpen: Boolean,
+    onOptionsMenuChange: (Boolean) -> Unit,
     onBack: () -> Unit,
+    onMoveToFirst: () -> Unit,
+    onMoveToLast: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.55f)).padding(top = 24.dp, end = 8.dp),
@@ -485,6 +507,29 @@ private fun BoxScope.VideoControls(
         }
         Text(item.name, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         Text(stringResource(R.string.video_count, page + 1, pageCount), color = Color.White)
+        Box {
+            IconButton(onClick = { onOptionsMenuChange(true) }) {
+                Icon(Icons.Default.MoreVert, stringResource(R.string.more_options), tint = Color.White)
+            }
+            DropdownMenu(expanded = optionsMenuOpen, onDismissRequest = { onOptionsMenuChange(false) }) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.move_first_item)) },
+                    enabled = pageCount > 0 && page != 0,
+                    onClick = {
+                        onMoveToFirst()
+                        onOptionsMenuChange(false)
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.move_last_item)) },
+                    enabled = pageCount > 0 && page != pageCount - 1,
+                    onClick = {
+                        onMoveToLast()
+                        onOptionsMenuChange(false)
+                    },
+                )
+            }
+        }
     }
 
     Column(

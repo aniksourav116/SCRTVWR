@@ -320,6 +320,27 @@ private fun MediaViewerScreen(
                                     },
                                 )
                                 DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.move_first_item)) },
+                                    enabled = uiState.items.isNotEmpty() && pagerState.currentPage != uiState.firstItemPageIndex,
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            pagerState.animateScrollToPage(uiState.firstItemPageIndex)
+                                        }
+                                        menuExpanded = false
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.move_last_item)) },
+                                    enabled = uiState.items.isNotEmpty() &&
+                                        pagerState.currentPage != uiState.firstItemPageIndex + uiState.items.lastIndex,
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            pagerState.animateScrollToPage(uiState.firstItemPageIndex + uiState.items.lastIndex)
+                                        }
+                                        menuExpanded = false
+                                    },
+                                )
+                                DropdownMenuItem(
                                     text = { Text(stringResource(R.string.details)) },
                                     onClick = {
                                         detailsDialogVisible = true
