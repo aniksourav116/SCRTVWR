@@ -70,7 +70,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -199,10 +198,8 @@ private fun MediaViewerScreen(
     var slideShowStayText by rememberSaveable { mutableStateOf(uiState.slideShowStayMillis.toString()) }
     var verticalDrag by remember { mutableFloatStateOf(0f) }
     var isPseudoSlideShowRunning by remember { mutableStateOf(false) }
-    var pseudoSlideShowDirection by remember { mutableStateOf(1) }
     var pseudoSlideShowStayMillis by remember { mutableStateOf(uiState.slideShowStayMillis) }
     var pseudoSlideShowHorizontalFraction by remember { mutableFloatStateOf(0f) }
-    var pseudoSlideShowVisualizerVisible by remember { mutableStateOf(false) }
     val readyMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
     val isAnySlideShowRunning = uiState.isSlideShowRunning || isPseudoSlideShowRunning
     val activeSlideShowStayMillis = if (isPseudoSlideShowRunning) {
@@ -236,7 +233,6 @@ private fun MediaViewerScreen(
         isAnySlideShowRunning,
         activeSlideShowStayMillis,
         isPseudoSlideShowRunning,
-        pseudoSlideShowDirection,
         uiState.items,
         pagerState.currentPage,
     ) {
@@ -255,11 +251,8 @@ private fun MediaViewerScreen(
             delay(activeSlideShowStayMillis.milliseconds)
 
             if (pagerState.currentPage == currentPage) {
-                val direction = if (isPseudoSlideShowRunning) pseudoSlideShowDirection else 1
-                val nextPage = currentPage + direction
-                val firstMediaPage = uiState.firstItemPageIndex
-                val lastMediaPage = uiState.firstItemPageIndex + uiState.items.lastIndex
-                if (nextPage !in firstMediaPage..lastMediaPage) {
+                val nextPage = currentPage + 1
+                if (nextPage >= uiState.firstItemPageIndex + uiState.items.size) {
                     if (!isPseudoSlideShowRunning) onSlideShowStop()
                 } else {
                     pagerState.scrollToPage(nextPage)
@@ -445,10 +438,8 @@ private fun MediaViewerScreen(
                                     ?: return@awaitEachGesture
                                 longPress.consume()
                                 val baseStayMillis = uiState.slideShowStayMillis
-                                pseudoSlideShowDirection = 1
                                 pseudoSlideShowStayMillis = baseStayMillis
                                 pseudoSlideShowHorizontalFraction = 0f
-                                pseudoSlideShowVisualizerVisible = true
                                 isPseudoSlideShowRunning = true
 
                                 try {
@@ -468,7 +459,6 @@ private fun MediaViewerScreen(
                                     } while (change.pressed)
                                 } finally {
                                     isPseudoSlideShowRunning = false
-                                    pseudoSlideShowVisualizerVisible = false
                                     pseudoSlideShowHorizontalFraction = 0f
                                 }
                             }
@@ -555,34 +545,16 @@ private fun MediaViewerScreen(
                                 pagerState.scrollToPage(previousPage)
                             }
                         },
-                        onPreviousPressStart = {
-                            pseudoSlideShowDirection = -1
-                            pseudoSlideShowStayMillis = uiState.slideShowStayMillis
-                            pseudoSlideShowVisualizerVisible = false
-                            isPseudoSlideShowRunning = true
-                        },
-                        onPreviousPressEnd = {
-                            isPseudoSlideShowRunning = false
-                        },
                         onNextClick = {
                             val nextPage = (pagerState.currentPage + 1).coerceAtMost(uiState.lastPageIndex)
                             coroutineScope.launch {
                                 pagerState.scrollToPage(nextPage)
                             }
                         },
-                        onNextPressStart = {
-                            pseudoSlideShowDirection = 1
-                            pseudoSlideShowStayMillis = uiState.slideShowStayMillis
-                            pseudoSlideShowVisualizerVisible = false
-                            isPseudoSlideShowRunning = true
-                        },
-                        onNextPressEnd = {
-                            isPseudoSlideShowRunning = false
-                        },
                     )
                 }
 
-                if (isPseudoSlideShowRunning && pseudoSlideShowVisualizerVisible) {
+                if (isPseudoSlideShowRunning) {
                     PseudoSlideShowVisualizer(
                         stayMillis = pseudoSlideShowStayMillis,
                         horizontalFraction = pseudoSlideShowHorizontalFraction,
@@ -875,7 +847,6 @@ private fun adjustedPseudoStayMillis(baseStayMillis: Long, horizontalFraction: F
 
 private const val MIN_PSEUDO_STAY_MILLIS = 1L
 private const val MAX_PSEUDO_STAY_MILLIS = 3_600_000L
-private const val HIDDEN_NAVIGATION_TAP_MILLIS = 250L
 
 @Composable
 private fun MediaDetailsDialog(item: MediaViewerItem, onDismiss: () -> Unit) {
@@ -966,11 +937,7 @@ private fun BoxScope.HiddenNavigationButtons(
     currentPage: Int,
     pageCount: Int,
     onPreviousClick: () -> Unit,
-    onPreviousPressStart: () -> Unit,
-    onPreviousPressEnd: () -> Unit,
     onNextClick: () -> Unit,
-    onNextPressStart: () -> Unit,
-    onNextPressEnd: () -> Unit,
 ) {
     Box(
         modifier = Modifier
@@ -989,8 +956,6 @@ private fun BoxScope.HiddenNavigationButtons(
                     .weight(1f)
                     .fillMaxHeight(),
                 onClick = onPreviousClick,
-                onPressStart = onPreviousPressStart,
-                onPressEnd = onPreviousPressEnd,
             )
 
             HiddenNavigationButton(
@@ -1000,8 +965,6 @@ private fun BoxScope.HiddenNavigationButtons(
                     .weight(1f)
                     .fillMaxHeight(),
                 onClick = onNextClick,
-                onPressStart = onNextPressStart,
-                onPressEnd = onNextPressEnd,
             )
         }
 
@@ -1024,36 +987,12 @@ private fun HiddenNavigationButton(
     contentDescription: String,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
-    onPressStart: () -> Unit = {},
-    onPressEnd: () -> Unit = {},
 ) {
-    val currentOnClick by rememberUpdatedState(onClick)
-    val currentOnPressStart by rememberUpdatedState(onPressStart)
-    val currentOnPressEnd by rememberUpdatedState(onPressEnd)
     Box(
         modifier = modifier
             .alpha(0.11f)
             .background(MaterialTheme.colorScheme.surface)
-            .pointerInput(contentDescription) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    val startedAt = System.currentTimeMillis()
-                    currentOnPressStart()
-                    try {
-                        do {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id }
-                                ?: break
-                            change.consume()
-                        } while (change.pressed)
-                    } finally {
-                        currentOnPressEnd()
-                    }
-                    if (System.currentTimeMillis() - startedAt < HIDDEN_NAVIGATION_TAP_MILLIS) {
-                        currentOnClick()
-                    }
-                }
-            },
+            .clickable(onClickLabel = contentDescription, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(
