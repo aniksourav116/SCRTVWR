@@ -4,7 +4,9 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
+import android.media.ThumbnailUtils
 import android.os.Bundle
+import android.provider.MediaStore
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -194,11 +196,11 @@ private fun MediaViewerScreen(
             .collect(onPageChanged)
     }
 
-    LaunchedEffect(uiState.isSlideShowRunning, uiState.slideShowStayMillis, uiState.items.size) {
+    LaunchedEffect(uiState.isSlideShowRunning, uiState.slideShowStayMillis, uiState.pageCount) {
         while (uiState.isSlideShowRunning && uiState.items.isNotEmpty()) {
             delay(uiState.slideShowStayMillis.milliseconds)
             val nextPage = pagerState.currentPage + 1
-            if (nextPage >= uiState.items.size) {
+            if (nextPage >= uiState.pageCount) {
                 onSlideShowStop()
             } else {
                 pagerState.scrollToPage(nextPage)
@@ -539,15 +541,16 @@ private fun MediaPage(
                     .scale(scaleX = if (flipped) -1f else 1f, scaleY = 1f),
                 contentScale = if (fillFrame) ContentScale.Crop else ContentScale.Fit,
             )
-            if (item.type == MediaViewerType.Video) {
-                IconButton(onClick = onVideoPlayClick) {
-                    Icon(
-                        Icons.Default.PlayCircle,
-                        contentDescription = "Play video",
-                        tint = Color.White,
-                        modifier = Modifier.size(64.dp),
-                    )
-                }
+        }
+
+        if (item.type == MediaViewerType.Video) {
+            IconButton(onClick = onVideoPlayClick) {
+                Icon(
+                    Icons.Default.PlayCircle,
+                    contentDescription = "Play video",
+                    tint = Color.White,
+                    modifier = Modifier.size(64.dp),
+                )
             }
         }
     }
@@ -699,13 +702,39 @@ private suspend fun loadVideoPreview(path: String): Bitmap? = withContext(Dispat
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(path)
-            retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            retriever.firstAvailableFrame()
+                ?: createLegacyVideoThumbnail(path)
+                ?: retriever.embeddedPicture
+                    ?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
         } finally {
             retriever.release()
         }
     }.getOrNull()
 }
 
+private fun MediaMetadataRetriever.firstAvailableFrame(): Bitmap? {
+    val durationMicros = extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+        ?.toLongOrNull()
+        ?.let { it * 1_000L }
+        ?: 0L
+    val middleMicros = durationMicros.takeIf { it > 0L }?.div(2L) ?: 1_000_000L
+    val frameTimes = listOf(0L, 1_000_000L, middleMicros).distinct()
+    val options = listOf(
+        MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+        MediaMetadataRetriever.OPTION_CLOSEST,
+    )
+
+    frameTimes.forEach { time ->
+        options.forEach { option ->
+            getFrameAtTime(time, option)?.let { return it }
+        }
+    }
+    return frameAtTime
+}
+
+@Suppress("DEPRECATION")
+private fun createLegacyVideoThumbnail(path: String): Bitmap? =
+    ThumbnailUtils.createVideoThumbnail(path, MediaStore.Video.Thumbnails.MINI_KIND)
 private fun BitmapFactory.Options.previewSampleSize(): Int {
     var sampleSize = 1
     val maxDimension = 1600
@@ -714,3 +743,4 @@ private fun BitmapFactory.Options.previewSampleSize(): Int {
     }
     return sampleSize
 }
+
