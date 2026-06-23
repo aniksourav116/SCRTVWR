@@ -240,8 +240,6 @@ private fun VideoPagerScreen(
                             }
                         },
                     )
-                } else if (item != null) {
-                    Box(Modifier.fillMaxSize().background(Color.Black))
                 } else if (nextDirectory != null) {
                     NextVideoDirectoryPage(
                         directory = nextDirectory,

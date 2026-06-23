@@ -152,7 +152,8 @@ fun OthersScreen(
         )
         ListItem(
             modifier = Modifier.fillMaxWidth(),
-            headlineContent = { Text(stringResource(R.string.hold_slideshow)) },            supportingContent = { Text(stringResource(R.string.hold_slideshow_summary)) },
+            headlineContent = { Text(stringResource(R.string.hold_slideshow)) },
+            supportingContent = { Text(stringResource(R.string.hold_slideshow_summary)) },
             leadingContent = { Icon(Icons.Default.Slideshow, contentDescription = null) },
             trailingContent = {
                 Switch(

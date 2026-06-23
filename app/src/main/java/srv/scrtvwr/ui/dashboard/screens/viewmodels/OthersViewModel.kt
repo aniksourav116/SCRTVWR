@@ -46,7 +46,8 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
         val boundedDistance = distance.coerceAtLeast(0)
         preferences.saveVideoPreloadDistance(boundedDistance)
         _uiState.update { it.copy(videoPreloadDistance = boundedDistance) }
-    }}
+    }
+}
 
 data class OthersUiState(
     val showHiddenFiles: Boolean = false,

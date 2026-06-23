@@ -40,6 +40,7 @@ class ScrtvwrPreferences(context: Context) {
             .putInt(KEY_VIDEO_PRELOAD_DISTANCE, distance.coerceAtLeast(0))
             .apply()
     }
+
     fun getShowHiddenFiles(): Boolean =
         preferences.getBoolean(KEY_SHOW_HIDDEN_FILES, false)
 
