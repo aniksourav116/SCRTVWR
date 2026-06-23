@@ -7,9 +7,11 @@ import android.media.MediaMetadataRetriever
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.GridView
@@ -42,6 +45,7 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
@@ -442,6 +446,7 @@ private fun DirectoryList(
                     title = "..",
                     subtitle = stringResource(R.string.go_up),
                     thumbnail = { Icon(Icons.Default.ArrowUpward, contentDescription = null) },
+                    style = navigationEntryVisualStyle(),
                     onClick = onNavigateUp,
                 )
             }
@@ -454,10 +459,12 @@ private fun DirectoryList(
         }
 
         items(uiState.entries, key = DirectoryEntry::path) { entry ->
+            val style = entry.entryVisualStyle()
             DirectoryListRow(
                 title = entry.name,
                 subtitle = entry.supportingText(),
-                thumbnail = { EntryThumbnail(entry, size = 48) },
+                thumbnail = { EntryThumbnail(entry, size = 48, style = style) },
+                style = style,
                 onClick = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
                     {
                         if (entry.isDirectory) {
@@ -479,12 +486,14 @@ private fun DirectoryListRow(
     title: String,
     subtitle: String,
     thumbnail: @Composable () -> Unit,
+    style: EntryVisualStyle,
     onClick: (() -> Unit)?,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
+            .background(style.containerColor)
             .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -534,6 +543,7 @@ private fun DirectoryGrid(
     ) {
         if (uiState.canNavigateUp) {
             item(key = "parent") {
+                val style = navigationEntryVisualStyle()
                 DirectoryGridCard(
                     title = "..",
                     subtitle = stringResource(R.string.go_up),
@@ -542,12 +552,17 @@ private fun DirectoryGrid(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(4f / 3f)
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                                .background(style.thumbnailColor),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Icon(Icons.Default.ArrowUpward, contentDescription = null)
+                            Icon(
+                                Icons.Default.ArrowUpward,
+                                contentDescription = null,
+                                tint = style.accentColor,
+                            )
                         }
                     },
+                    style = style,
                     onClick = onNavigateUp,
                 )
             }
@@ -560,6 +575,7 @@ private fun DirectoryGrid(
         }
 
         items(uiState.entries, key = DirectoryEntry::path) { entry ->
+            val style = entry.entryVisualStyle()
             DirectoryGridCard(
                 title = entry.name,
                 subtitle = entry.supportingText(),
@@ -567,11 +583,13 @@ private fun DirectoryGrid(
                     EntryThumbnail(
                         entry = entry,
                         size = 128,
+                        style = style,
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(4f / 3f),
                     )
                 },
+                style = style,
                 onClick = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
                     {
                         if (entry.isDirectory) {
@@ -593,13 +611,18 @@ private fun DirectoryGridCard(
     title: String,
     subtitle: String,
     thumbnail: @Composable () -> Unit,
+    style: EntryVisualStyle,
     onClick: (() -> Unit)?,
 ) {
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
             .defaultMinSize(minHeight = 132.dp)
+            .border(BorderStroke(1.dp, style.borderColor), MaterialTheme.shapes.medium)
             .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = style.containerColor,
+        ),
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -612,7 +635,7 @@ private fun DirectoryGridCard(
                 Text(title, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(
                     subtitle,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = style.supportingColor,
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -626,6 +649,7 @@ private fun DirectoryGridCard(
 private fun EntryThumbnail(
     entry: DirectoryEntry,
     size: Int,
+    style: EntryVisualStyle,
     modifier: Modifier = Modifier.size(size.dp),
 ) {
     val preview by produceState<PreviewResult?>(
@@ -645,7 +669,7 @@ private fun EntryThumbnail(
     Box(
         modifier = modifier
             .clip(MaterialTheme.shapes.small)
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .background(style.thumbnailColor),
         contentAlignment = Alignment.Center,
     ) {
         val previewResult = preview
@@ -672,13 +696,80 @@ private fun EntryThumbnail(
             Icon(
                 imageVector = if (entry.isDirectory) {
                     Icons.Default.Folder
+                } else if (entry.mediaType == DirectoryMediaType.Archive) {
+                    Icons.Default.Archive
                 } else {
                     Icons.AutoMirrored.Filled.InsertDriveFile
                 },
                 contentDescription = null,
+                tint = style.accentColor,
             )
         }
     }
+}
+
+private data class EntryVisualStyle(
+    val containerColor: Color,
+    val thumbnailColor: Color,
+    val borderColor: Color,
+    val accentColor: Color,
+    val supportingColor: Color,
+)
+
+@Composable
+private fun DirectoryEntry.entryVisualStyle(): EntryVisualStyle {
+    val colors = MaterialTheme.colorScheme
+    return when {
+        isDirectory -> EntryVisualStyle(
+            containerColor = colors.primaryContainer.copy(alpha = 0.24f),
+            thumbnailColor = colors.primaryContainer.copy(alpha = 0.62f),
+            borderColor = colors.primary.copy(alpha = 0.32f),
+            accentColor = colors.primary,
+            supportingColor = colors.onPrimaryContainer.copy(alpha = 0.76f),
+        )
+
+        mediaType == DirectoryMediaType.Image || mediaType == DirectoryMediaType.Video -> EntryVisualStyle(
+            containerColor = colors.tertiaryContainer.copy(alpha = 0.22f),
+            thumbnailColor = colors.tertiaryContainer.copy(alpha = 0.56f),
+            borderColor = colors.tertiary.copy(alpha = 0.30f),
+            accentColor = colors.tertiary,
+            supportingColor = colors.onTertiaryContainer.copy(alpha = 0.76f),
+        )
+
+        mediaType == DirectoryMediaType.Archive -> EntryVisualStyle(
+            containerColor = colors.secondaryContainer.copy(alpha = 0.22f),
+            thumbnailColor = colors.secondaryContainer.copy(alpha = 0.58f),
+            borderColor = colors.secondary.copy(alpha = 0.32f),
+            accentColor = colors.secondary,
+            supportingColor = colors.onSecondaryContainer.copy(alpha = 0.76f),
+        )
+
+        else -> defaultEntryVisualStyle()
+    }
+}
+
+@Composable
+private fun navigationEntryVisualStyle(): EntryVisualStyle {
+    val colors = MaterialTheme.colorScheme
+    return EntryVisualStyle(
+        containerColor = colors.surfaceVariant.copy(alpha = 0.32f),
+        thumbnailColor = colors.surfaceVariant,
+        borderColor = colors.outlineVariant.copy(alpha = 0.5f),
+        accentColor = colors.onSurfaceVariant,
+        supportingColor = colors.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun defaultEntryVisualStyle(): EntryVisualStyle {
+    val colors = MaterialTheme.colorScheme
+    return EntryVisualStyle(
+        containerColor = colors.surface,
+        thumbnailColor = colors.surfaceVariant,
+        borderColor = colors.outlineVariant.copy(alpha = 0.35f),
+        accentColor = colors.onSurfaceVariant,
+        supportingColor = colors.onSurfaceVariant,
+    )
 }
 
 @Composable

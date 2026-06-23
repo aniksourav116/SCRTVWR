@@ -48,16 +48,43 @@ object MediaCatalog {
     }
 
     suspend fun nextDirectory(directory: File, sortOrder: DirectorySortOrder): MediaViewerSource? {
+        return adjacentDirectory(
+            directory = directory,
+            sortOrder = sortOrder,
+            candidateSelector = { directories, currentPath ->
+                directories
+                    .dropWhile { it.canonicalPathOrAbsolute() != currentPath }
+                    .drop(1)
+            },
+        )
+    }
+
+    suspend fun previousDirectory(directory: File, sortOrder: DirectorySortOrder): MediaViewerSource? {
+        return adjacentDirectory(
+            directory = directory,
+            sortOrder = sortOrder,
+            candidateSelector = { directories, currentPath ->
+                directories
+                    .takeWhile { it.canonicalPathOrAbsolute() != currentPath }
+                    .asReversed()
+            },
+        )
+    }
+
+    private suspend fun adjacentDirectory(
+        directory: File,
+        sortOrder: DirectorySortOrder,
+        candidateSelector: (List<File>, String) -> List<File>,
+    ): MediaViewerSource? {
         val currentPath = directory.canonicalPathOrAbsolute()
-        val candidates = directory.parentFile
+        val directories = directory.parentFile
             ?.listFiles()
             ?.asSequence()
             ?.filter(File::isDirectory)
             ?.sortedWith(sortOrder.fileComparator(directoriesFirst = false))
-            ?.dropWhile { it.canonicalPathOrAbsolute() != currentPath }
-            ?.drop(1)
             ?.toList()
             .orEmpty()
+        val candidates = candidateSelector(directories, currentPath)
         for (candidate in candidates) {
             currentCoroutineContext().ensureActive()
             if (listDirectory(candidate, sortOrder).isNotEmpty()) {
@@ -68,17 +95,44 @@ object MediaCatalog {
     }
 
     suspend fun nextArchive(file: File, sortOrder: DirectorySortOrder): MediaViewerSource? {
+        return adjacentArchive(
+            file = file,
+            sortOrder = sortOrder,
+            candidateSelector = { archives, currentPath ->
+                archives
+                    .dropWhile { it.canonicalPathOrAbsolute() != currentPath }
+                    .drop(1)
+            },
+        )
+    }
+
+    suspend fun previousArchive(file: File, sortOrder: DirectorySortOrder): MediaViewerSource? {
+        return adjacentArchive(
+            file = file,
+            sortOrder = sortOrder,
+            candidateSelector = { archives, currentPath ->
+                archives
+                    .takeWhile { it.canonicalPathOrAbsolute() != currentPath }
+                    .asReversed()
+            },
+        )
+    }
+
+    private suspend fun adjacentArchive(
+        file: File,
+        sortOrder: DirectorySortOrder,
+        candidateSelector: (List<File>, String) -> List<File>,
+    ): MediaViewerSource? {
         val currentPath = file.canonicalPathOrAbsolute()
-        val candidates = file.parentFile
+        val archives = file.parentFile
             ?.listFiles()
             ?.asSequence()
             ?.filter(File::isFile)
             ?.filter { isArchive(it.path) }
             ?.sortedWith(sortOrder.fileComparator(directoriesFirst = false))
-            ?.dropWhile { it.canonicalPathOrAbsolute() != currentPath }
-            ?.drop(1)
             ?.toList()
             .orEmpty()
+        val candidates = candidateSelector(archives, currentPath)
         for (candidate in candidates) {
             currentCoroutineContext().ensureActive()
             val hasImages = runCatching { listArchive(candidate).isNotEmpty() }.getOrDefault(false)

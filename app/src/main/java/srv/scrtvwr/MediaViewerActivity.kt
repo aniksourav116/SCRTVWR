@@ -163,6 +163,7 @@ private fun MediaViewerRoute(
         onFlipClick = viewModel::toggleFlip,
         onBookmarkClick = viewModel::toggleBookmark,
         onChromeToggle = viewModel::toggleChrome,
+        onPreviousSourceClick = viewModel::loadPreviousSource,
         onNextSourceClick = viewModel::loadNextSource,
         onSlideShowStart = viewModel::startSlideShow,
         onSlideShowStop = viewModel::stopSlideShow,
@@ -180,6 +181,7 @@ private fun MediaViewerScreen(
     onFlipClick: () -> Unit,
     onBookmarkClick: () -> Unit,
     onChromeToggle: () -> Unit,
+    onPreviousSourceClick: () -> Unit,
     onNextSourceClick: () -> Unit,
     onSlideShowStart: (Long) -> Unit,
     onSlideShowStop: () -> Unit,
@@ -236,7 +238,7 @@ private fun MediaViewerScreen(
     ) {
         if (isAnySlideShowRunning) {
             val currentPage = pagerState.currentPage
-            val currentItem = uiState.items.getOrNull(currentPage)
+            val currentItem = uiState.itemForPage(currentPage)
             if (currentItem == null) {
                 if (!isPseudoSlideShowRunning) onSlideShowStop()
                 return@LaunchedEffect
@@ -250,7 +252,7 @@ private fun MediaViewerScreen(
 
             if (pagerState.currentPage == currentPage) {
                 val nextPage = currentPage + 1
-                if (nextPage >= uiState.items.size) {
+                if (nextPage >= uiState.firstItemPageIndex + uiState.items.size) {
                     if (!isPseudoSlideShowRunning) onSlideShowStop()
                 } else {
                     pagerState.scrollToPage(nextPage)
@@ -259,7 +261,7 @@ private fun MediaViewerScreen(
         }
     }
 
-    val selectedItem = uiState.items.getOrNull(pagerState.currentPage)
+    val selectedItem = uiState.itemForPage(pagerState.currentPage)
     Timber.d("name ${selectedItem?.name}")
     val splits = selectedItem?.name?.split("_") ?: emptyList()
     Timber.d("splits $splits")
@@ -507,8 +509,9 @@ private fun MediaViewerScreen(
                             }
                         },
                 ) { page ->
-                    uiState.items.getOrNull(page)?.let { item ->
-                        MediaPage(
+                    val item = uiState.itemForPage(page)
+                    when {
+                        item != null -> MediaPage(
                             item = item,
                             fillFrame = uiState.fillFrame,
                             rotation = uiState.rotation,
@@ -516,14 +519,19 @@ private fun MediaViewerScreen(
                             onReady = { readyMedia[item.readinessKey] = true },
                             onContentClick = onChromeToggle,
                         )
-                    } ?: if (page == uiState.nextSourcePageIndex) {
-                        NextSourcePage(
+                        page == uiState.previousSourcePageIndex -> SourcePage(
+                            sourceName = uiState.previousSource?.name.orEmpty(),
+                            isArchive = uiState.previousSource?.isArchive == true,
+                            direction = SourceDirection.Previous,
+                            onClick = onPreviousSourceClick,
+                        )
+                        page == uiState.nextSourcePageIndex -> SourcePage(
                             sourceName = uiState.nextSource?.name.orEmpty(),
                             isArchive = uiState.nextSource?.isArchive == true,
+                            direction = SourceDirection.Next,
                             onClick = onNextSourceClick,
                         )
-                    } else {
-                        EmptyViewerMessage()
+                        else -> EmptyViewerMessage()
                     }
                 }
 
@@ -868,9 +876,10 @@ private fun formatMediaBytes(bytes: Long): String {
 }
 
 @Composable
-private fun NextSourcePage(
+private fun SourcePage(
     sourceName: String,
     isArchive: Boolean,
+    direction: SourceDirection,
     onClick: () -> Unit,
 ) {
     Box(
@@ -891,7 +900,7 @@ private fun NextSourcePage(
                 modifier = Modifier.size(52.dp),
             )
             Text(
-                text = stringResource(if (isArchive) R.string.next_archive else R.string.next_directory),
+                text = stringResource(direction.titleStringRes(isArchive)),
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium,
             )
@@ -902,10 +911,25 @@ private fun NextSourcePage(
                 overflow = TextOverflow.Ellipsis,
             )
             Button(onClick = onClick) {
-                Text(stringResource(if (isArchive) R.string.move_next_archive else R.string.move_next_directory))
+                Text(stringResource(direction.moveStringRes(isArchive)))
             }
         }
     }
+}
+
+private enum class SourceDirection {
+    Previous,
+    Next,
+}
+
+private fun SourceDirection.titleStringRes(isArchive: Boolean): Int = when (this) {
+    SourceDirection.Previous -> if (isArchive) R.string.previous_archive else R.string.previous_directory
+    SourceDirection.Next -> if (isArchive) R.string.next_archive else R.string.next_directory
+}
+
+private fun SourceDirection.moveStringRes(isArchive: Boolean): Int = when (this) {
+    SourceDirection.Previous -> if (isArchive) R.string.move_previous_archive else R.string.move_previous_directory
+    SourceDirection.Next -> if (isArchive) R.string.move_next_archive else R.string.move_next_directory
 }
 
 @Composable

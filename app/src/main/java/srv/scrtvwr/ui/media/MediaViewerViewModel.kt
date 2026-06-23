@@ -57,6 +57,7 @@ class MediaViewerViewModel(
         val items: List<MediaViewerItem>
         val sourceDirectoryPath: String?
         var initialPage: Int
+        val previousSource: MediaViewerSource?
         val nextSource: MediaViewerSource?
         val sortOrder = preferences.getDirectorySortOrder()
 
@@ -73,6 +74,7 @@ class MediaViewerViewModel(
             } else {
                 0
             }
+            previousSource = MediaCatalog.previousArchive(archiveFile, sortOrder)
             nextSource = MediaCatalog.nextArchive(archiveFile, sortOrder)
         } else {
             val directory = directoryPath?.let(::File)
@@ -89,13 +91,20 @@ class MediaViewerViewModel(
 
             sourceDirectoryPath = sourceDirectory?.absolutePath ?: directoryPath
             initialPage = items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
+            previousSource = sourceDirectory?.let { MediaCatalog.previousDirectory(it, sortOrder) }
             nextSource = sourceDirectory?.let { MediaCatalog.nextDirectory(it, sortOrder) }
         }
 
+        val firstItemPageIndex = if (previousSource != null) 1 else 0
+        initialPage += firstItemPageIndex
+
         val sourceKey = "${directoryPath.orEmpty()}|${selectedPath.orEmpty()}"
+        val pageCount = items.size +
+            (if (previousSource != null) 1 else 0) +
+            (if (nextSource != null) 1 else 0)
         if (savedStateHandle.get<String>(STATE_SOURCE) == sourceKey) {
             initialPage = savedStateHandle.get<Int>(STATE_SELECTED_PAGE)
-                ?.coerceIn(0, (items.lastIndex).coerceAtLeast(0))
+                ?.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
                 ?: initialPage
         } else {
             savedStateHandle[STATE_SOURCE] = sourceKey
@@ -107,17 +116,18 @@ class MediaViewerViewModel(
                 sourceDirectoryPath = sourceDirectoryPath,
                 selectedPath = selectedPath,
                 items = items,
+                previousSource = previousSource,
                 nextSource = nextSource,
                 initialPage = initialPage,
                 selectedPage = initialPage,
                 slideShowStayMillis = preferences.getSlideShowStayMillis(),
                 holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
                 imagePreloadDistance = preferences.getImagePreloadDistance(),
-                bookmarked = preferences.isMediaBookmarked(items.getOrNull(initialPage)?.path ?: selectedPath),
+                bookmarked = preferences.isMediaBookmarked(items.getOrNull(initialPage - firstItemPageIndex)?.path ?: selectedPath),
                 isLoading = false,
             )
         }
-        items.getOrNull(initialPage)?.path?.let { mediaPath ->
+        items.getOrNull(initialPage - firstItemPageIndex)?.path?.let { mediaPath ->
             rememberMediaSession(sourceDirectoryPath, mediaPath)
         }
     }
@@ -125,7 +135,7 @@ class MediaViewerViewModel(
     fun selectPage(page: Int) {
         _uiState.update { state ->
             val boundedPage = page.coerceIn(0, state.lastPageIndex)
-            val selectedPath = state.items.getOrNull(boundedPage)?.path
+            val selectedPath = state.itemForPage(boundedPage)?.path
             rememberMediaSession(state.sourceDirectoryPath, selectedPath)
             savedStateHandle[STATE_SELECTED_PAGE] = boundedPage
             state.copy(
@@ -135,6 +145,15 @@ class MediaViewerViewModel(
                 flipped = false,
                 bookmarked = preferences.isMediaBookmarked(selectedPath),
             )
+        }
+    }
+
+    fun loadPreviousSource() {
+        val previousSource = _uiState.value.previousSource ?: return
+        if (previousSource.isArchive) {
+            load(File(previousSource.path).parentFile?.absolutePath, previousSource.path)
+        } else {
+            load(previousSource.path, null)
         }
     }
 
@@ -208,6 +227,7 @@ data class MediaViewerUiState(
     val sourceDirectoryPath: String? = null,
     val selectedPath: String? = null,
     val items: List<MediaViewerItem> = emptyList(),
+    val previousSource: MediaViewerSource? = null,
     val nextSource: MediaViewerSource? = null,
     val initialPage: Int = 0,
     val selectedPage: Int = 0,
@@ -224,13 +244,24 @@ data class MediaViewerUiState(
     val errorMessage: String? = null,
 ) {
     val pageCount: Int
-        get() = items.size + if (nextSource != null) 1 else 0
+        get() = items.size +
+            (if (previousSource != null) 1 else 0) +
+            (if (nextSource != null) 1 else 0)
 
     val lastPageIndex: Int
         get() = (pageCount - 1).coerceAtLeast(0)
 
+    val previousSourcePageIndex: Int?
+        get() = previousSource?.let { 0 }
+
+    val firstItemPageIndex: Int
+        get() = if (previousSource != null) 1 else 0
+
     val nextSourcePageIndex: Int?
-        get() = nextSource?.let { items.size }
+        get() = nextSource?.let { firstItemPageIndex + items.size }
+
+    fun itemForPage(page: Int): MediaViewerItem? =
+        items.getOrNull(page - firstItemPageIndex)
 }
 
 data class MediaViewerSource(

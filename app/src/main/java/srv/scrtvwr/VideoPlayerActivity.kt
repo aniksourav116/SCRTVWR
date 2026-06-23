@@ -176,14 +176,20 @@ private fun VideoPagerScreen(
         }
     }
     val videos = loadedDirectory?.videos.orEmpty()
+    val previousDirectory = loadedDirectory?.previousDirectory
     val nextDirectory = loadedDirectory?.nextDirectory
+    val firstVideoPageIndex = if (previousDirectory != null) 1 else 0
     var repeatMode by rememberSaveable { mutableStateOf(VideoRepeatMode.None) }
-    val initialPage = remember(videos, selectedVideoPath) {
-        videos.indexOfFirst { it.path == selectedVideoPath }.coerceAtLeast(0)
+    val initialPage = remember(videos, selectedVideoPath, firstVideoPageIndex) {
+        videos.indexOfFirst { it.path == selectedVideoPath }.coerceAtLeast(0) + firstVideoPageIndex
     }
     val pagerState = rememberPagerState(
         initialPage = initialPage,
-        pageCount = { videos.size + if (nextDirectory != null) 1 else 0 },
+        pageCount = {
+            videos.size +
+                (if (previousDirectory != null) 1 else 0) +
+                (if (nextDirectory != null) 1 else 0)
+        },
     )
     val scope = rememberCoroutineScope()
 
@@ -196,7 +202,7 @@ private fun VideoPagerScreen(
     LaunchedEffect(pagerState, videos) {
         snapshotFlow { pagerState.currentPage }
             .collect { page ->
-                videos.getOrNull(page)?.let { video ->
+                videos.getOrNull(page - firstVideoPageIndex)?.let { video ->
                     selectedVideoPath = video.path
                     currentDirectoryPath?.let { preferences.saveLastMediaSession(it, video.path) }
                 }
@@ -222,11 +228,12 @@ private fun VideoPagerScreen(
                 modifier = Modifier.fillMaxSize(),
                 beyondViewportPageCount = minOf(videoPreloadDistance, pagerState.pageCount - 1),
             ) { page ->
-                val item = videos.getOrNull(page)
+                val videoIndex = page - firstVideoPageIndex
+                val item = videos.getOrNull(videoIndex)
                 if (item != null) {
                     VideoPage(
                         item = item,
-                        page = page,
+                        page = videoIndex,
                         pageCount = videos.size,
                         isActive = page == pagerState.currentPage,
                         repeatMode = repeatMode,
@@ -235,14 +242,34 @@ private fun VideoPagerScreen(
                         onEnded = {
                             if (repeatMode == VideoRepeatMode.All) {
                                 scope.launch {
-                                    pagerState.animateScrollToPage((page + 1) % videos.size)
+                                    val nextVideoPage = if (videoIndex == videos.lastIndex) {
+                                        firstVideoPageIndex
+                                    } else {
+                                        page + 1
+                                    }
+                                    pagerState.animateScrollToPage(nextVideoPage)
                                 }
                             }
                         },
                     )
+                } else if (page == 0 && previousDirectory != null) {
+                    VideoDirectoryPage(
+                        directory = previousDirectory,
+                        direction = VideoDirectoryDirection.Previous,
+                        onMove = {
+                            if (previousDirectory.type == VideoDirectoryType.Video) {
+                                currentDirectoryPath = previousDirectory.path
+                                selectedVideoPath = previousDirectory.selectedMediaPath
+                                onDirectoryChanged(previousDirectory.path)
+                            } else {
+                                onOpenImageDirectory(previousDirectory.path, previousDirectory.selectedMediaPath)
+                            }
+                        },
+                    )
                 } else if (nextDirectory != null) {
-                    NextVideoDirectoryPage(
+                    VideoDirectoryPage(
                         directory = nextDirectory,
+                        direction = VideoDirectoryDirection.Next,
                         onMove = {
                             if (nextDirectory.type == VideoDirectoryType.Video) {
                                 currentDirectoryPath = nextDirectory.path
@@ -535,8 +562,9 @@ private fun VideoRepeatMode.next(): VideoRepeatMode = when (this) {
 }
 
 @Composable
-private fun NextVideoDirectoryPage(
+private fun VideoDirectoryPage(
     directory: VideoDirectoryTarget,
+    direction: VideoDirectoryDirection,
     onMove: () -> Unit,
 ) {
     Box(
@@ -554,7 +582,7 @@ private fun NextVideoDirectoryPage(
                 tint = Color.White.copy(alpha = 0.75f),
             )
             Text(
-                stringResource(R.string.next_directory),
+                stringResource(direction.titleStringRes(isArchive = false)),
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium,
             )
@@ -565,7 +593,7 @@ private fun NextVideoDirectoryPage(
                 overflow = TextOverflow.Ellipsis,
             )
             Button(onClick = onMove) {
-                Text(stringResource(R.string.move_next_directory))
+                Text(stringResource(direction.moveStringRes(isArchive = false)))
             }
         }
     }
@@ -586,6 +614,7 @@ private fun loadVideoDirectory(
     }
     return VideoDirectory(
         videos = fallbackVideos,
+        previousDirectory = directory?.findPreviousMediaDirectory(sortOrder),
         nextDirectory = directory?.findNextMediaDirectory(sortOrder),
     )
 }
@@ -600,17 +629,46 @@ private fun File?.listVideos(sortOrder: DirectorySortOrder): List<VideoItem> = t
         .orEmpty()
 
 private fun File.findNextMediaDirectory(sortOrder: DirectorySortOrder): VideoDirectoryTarget? {
+    return findAdjacentMediaDirectory(
+        sortOrder = sortOrder,
+        candidateSelector = { directories, currentPath ->
+            directories
+                .dropWhile { candidate ->
+                    runCatching { candidate.canonicalPath }.getOrElse { candidate.absolutePath } != currentPath
+                }
+                .drop(1)
+        },
+    )
+}
+
+private fun File.findPreviousMediaDirectory(sortOrder: DirectorySortOrder): VideoDirectoryTarget? {
+    return findAdjacentMediaDirectory(
+        sortOrder = sortOrder,
+        candidateSelector = { directories, currentPath ->
+            directories
+                .takeWhile { candidate ->
+                    runCatching { candidate.canonicalPath }.getOrElse { candidate.absolutePath } != currentPath
+                }
+                .asReversed()
+        },
+    )
+}
+
+private fun File.findAdjacentMediaDirectory(
+    sortOrder: DirectorySortOrder,
+    candidateSelector: (List<File>, String) -> List<File>,
+): VideoDirectoryTarget? {
     val currentPath = runCatching { canonicalPath }.getOrElse { absolutePath }
-    return parentFile
+    val directories = parentFile
         ?.listFiles()
         ?.asSequence()
         ?.filter(File::isDirectory)
         ?.sortedWith(sortOrder.fileComparator(directoriesFirst = false))
-        ?.dropWhile { candidate ->
-            runCatching { candidate.canonicalPath }.getOrElse { candidate.absolutePath } != currentPath
-        }
-        ?.drop(1)
-        ?.mapNotNull { candidate ->
+        ?.toList()
+        .orEmpty()
+    return candidateSelector(directories, currentPath)
+        .asSequence()
+        .mapNotNull { candidate ->
             val videos = candidate.listVideos(sortOrder)
             if (videos.isNotEmpty()) {
                 VideoDirectoryTarget(
@@ -630,7 +688,7 @@ private fun File.findNextMediaDirectory(sortOrder: DirectorySortOrder): VideoDir
                 }
             }
         }
-        ?.firstOrNull()
+        .firstOrNull()
 }
 
 private fun File.listImages(sortOrder: DirectorySortOrder): List<File> = listFiles()
@@ -653,13 +711,32 @@ private fun formatVideoTime(millis: Long): String {
 private fun formatSpeed(speed: Float): String = "${speed}x"
 
 private data class VideoItem(val name: String, val path: String)
-private data class VideoDirectory(val videos: List<VideoItem>, val nextDirectory: VideoDirectoryTarget?)
+private data class VideoDirectory(
+    val videos: List<VideoItem>,
+    val previousDirectory: VideoDirectoryTarget?,
+    val nextDirectory: VideoDirectoryTarget?,
+)
 private data class VideoDirectoryTarget(
     val name: String,
     val path: String,
     val type: VideoDirectoryType,
     val selectedMediaPath: String,
 )
+
+private enum class VideoDirectoryDirection {
+    Previous,
+    Next,
+}
+
+private fun VideoDirectoryDirection.titleStringRes(isArchive: Boolean): Int = when (this) {
+    VideoDirectoryDirection.Previous -> if (isArchive) R.string.previous_archive else R.string.previous_directory
+    VideoDirectoryDirection.Next -> if (isArchive) R.string.next_archive else R.string.next_directory
+}
+
+private fun VideoDirectoryDirection.moveStringRes(isArchive: Boolean): Int = when (this) {
+    VideoDirectoryDirection.Previous -> if (isArchive) R.string.move_previous_archive else R.string.move_previous_directory
+    VideoDirectoryDirection.Next -> if (isArchive) R.string.move_next_archive else R.string.move_next_directory
+}
 
 private enum class VideoRepeatMode { None, One, All }
 private enum class VideoDirectoryType { Video, Image }
