@@ -159,6 +159,7 @@ private fun VideoPagerScreen(
     val context = LocalContext.current
     val preferences = remember { ScrtvwrPreferences(context) }
     val sortOrder = remember { preferences.getDirectorySortOrder() }
+    val videoPreloadDistance = remember { preferences.getVideoPreloadDistance() }
     var currentDirectoryPath by rememberSaveable(directoryPath, selectedPath) {
         mutableStateOf(directoryPath ?: selectedPath?.let(::File)?.parent)
     }
@@ -219,14 +220,15 @@ private fun VideoPagerScreen(
             else -> VerticalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
-                beyondViewportPageCount = 0,
+                beyondViewportPageCount = minOf(videoPreloadDistance, pagerState.pageCount - 1),
             ) { page ->
                 val item = videos.getOrNull(page)
-                if (item != null && page == pagerState.currentPage) {
+                if (item != null) {
                     VideoPage(
                         item = item,
                         page = page,
                         pageCount = videos.size,
+                        isActive = page == pagerState.currentPage,
                         repeatMode = repeatMode,
                         onRepeatModeChange = { repeatMode = it },
                         onBack = onBack,
@@ -264,6 +266,7 @@ private fun VideoPage(
     item: VideoItem,
     page: Int,
     pageCount: Int,
+    isActive: Boolean,
     repeatMode: VideoRepeatMode,
     onRepeatModeChange: (VideoRepeatMode) -> Unit,
     onBack: () -> Unit,
@@ -275,7 +278,7 @@ private fun VideoPage(
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(Uri.fromFile(File(item.path))))
             if (savedPlaybackPosition > 0L) seekTo(savedPlaybackPosition)
-            playWhenReady = true
+            playWhenReady = isActive
             prepare()
         }
     }
@@ -314,6 +317,15 @@ private fun VideoPage(
     }
 
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { player.pause() }
+
+    LaunchedEffect(isActive, player) {
+        if (isActive) {
+            player.playWhenReady = true
+            if (player.playbackState != Player.STATE_ENDED) player.play()
+        } else {
+            player.pause()
+        }
+    }
 
     LaunchedEffect(player) {
         while (true) {
@@ -401,7 +413,7 @@ private fun VideoPage(
             )
         }
 
-        if (controlsVisible) {
+        if (isActive && controlsVisible) {
             VideoControls(
                 item = item,
                 page = page,

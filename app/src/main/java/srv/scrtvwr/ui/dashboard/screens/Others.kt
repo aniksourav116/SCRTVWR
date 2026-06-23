@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Icon
@@ -45,6 +46,7 @@ fun Others(
         onSlideShowStayMillisChange = viewModel::setSlideShowStayMillis,
         onHoldSlideShowEnabledChange = viewModel::setHoldSlideShowEnabled,
         onImagePreloadDistanceChange = viewModel::setImagePreloadDistance,
+        onVideoPreloadDistanceChange = viewModel::setVideoPreloadDistance,
         modifier = modifier,
     )
 }
@@ -56,17 +58,19 @@ fun OthersScreen(
     onSlideShowStayMillisChange: (Long) -> Unit,
     onHoldSlideShowEnabledChange: (Boolean) -> Unit,
     onImagePreloadDistanceChange: (Int) -> Unit,
+    onVideoPreloadDistanceChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var slideShowStayMillisText by rememberSaveable { mutableStateOf(uiState.slideShowStayMillis.toString()) }
     var imagePreloadDistanceText by rememberSaveable { mutableStateOf(uiState.imagePreloadDistance.toString()) }
+    var videoPreloadDistanceText by rememberSaveable { mutableStateOf(uiState.videoPreloadDistance.toString()) }
     val slideShowWarning = when (slideShowStayMillisText.toLongOrNull()) {
         null -> stringResource(R.string.invalid_whole_number)
         in 1L..99L -> stringResource(R.string.short_slideshow_warning)
         in 600_001L..Long.MAX_VALUE -> stringResource(R.string.long_slideshow_warning)
         else -> null
     }
-    val preloadWarning = when (imagePreloadDistanceText.toIntOrNull()) {
+    val imagePreloadWarning = when (imagePreloadDistanceText.toIntOrNull()) {
         null -> stringResource(R.string.invalid_whole_number)
         in 11..Int.MAX_VALUE -> stringResource(R.string.large_preload_warning)
         else -> null
@@ -84,6 +88,17 @@ fun OthersScreen(
         }
     }
 
+    val videoPreloadWarning = when (videoPreloadDistanceText.toIntOrNull()) {
+        null -> stringResource(R.string.invalid_whole_number)
+        in 11..Int.MAX_VALUE -> stringResource(R.string.large_preload_warning)
+        else -> null
+    }
+
+    LaunchedEffect(uiState.videoPreloadDistance) {
+        if (videoPreloadDistanceText.toIntOrNull() != uiState.videoPreloadDistance) {
+            videoPreloadDistanceText = uiState.videoPreloadDistance.toString()
+        }
+    }
     Column(
         modifier = modifier.fillMaxSize().padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -122,12 +137,22 @@ fun OthersScreen(
                 imagePreloadDistanceText.toIntOrNull()?.let(onImagePreloadDistanceChange)
             },
             leadingContent = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
-            warning = preloadWarning,
+            warning = imagePreloadWarning,
+        )
+        NumericPreferenceListItem(
+            headline = stringResource(R.string.video_preload_distance),
+            supporting = stringResource(R.string.video_preload_summary),
+            value = videoPreloadDistanceText,
+            onValueChange = { value ->
+                videoPreloadDistanceText = value.filter(Char::isDigit)
+                videoPreloadDistanceText.toIntOrNull()?.let(onVideoPreloadDistanceChange)
+            },
+            leadingContent = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
+            warning = videoPreloadWarning,
         )
         ListItem(
             modifier = Modifier.fillMaxWidth(),
-            headlineContent = { Text(stringResource(R.string.hold_slideshow)) },
-            supportingContent = { Text(stringResource(R.string.hold_slideshow_summary)) },
+            headlineContent = { Text(stringResource(R.string.hold_slideshow)) },            supportingContent = { Text(stringResource(R.string.hold_slideshow_summary)) },
             leadingContent = { Icon(Icons.Default.Slideshow, contentDescription = null) },
             trailingContent = {
                 Switch(

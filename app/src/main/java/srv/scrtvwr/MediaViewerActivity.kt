@@ -787,12 +787,12 @@ private fun MediaPage(
         }
         return
     }
-    val preview by produceState(initialValue = PreviewResult(), key1 = item.path, key2 = item.lastModifiedMillis) {
+    val preview by produceState<PreviewResult?>(initialValue = null, key1 = item.path, key2 = item.lastModifiedMillis) {
         value = MediaPreviewLoader.loadImage(item.path, item.lastModifiedMillis, 1600)
     }
 
-    LaunchedEffect(preview.bitmap, item.path, item.lastModifiedMillis) {
-        if (preview.bitmap != null) onReady()
+    LaunchedEffect(preview?.bitmap, item.path, item.lastModifiedMillis) {
+        if (preview?.bitmap != null) onReady()
     }
 
     Box(
@@ -801,18 +801,21 @@ private fun MediaPage(
             .clickable(onClick = onContentClick),
         contentAlignment = Alignment.Center,
     ) {
-        if (preview.bitmap == null) {
+        val previewResult = preview
+        if (previewResult == null) {
+            CircularProgressIndicator(color = Color.White)
+        } else if (previewResult.bitmap == null) {
             Icon(
                 Icons.Default.ImageNotSupported,
                 contentDescription = null,
                 tint = Color.White.copy(alpha = 0.7f),
             )
-            preview.error?.let {
+            previewResult.error?.let {
                 Text(it, color = Color.White, modifier = Modifier.padding(top = 64.dp, start = 24.dp, end = 24.dp))
             }
         } else {
             Image(
-                bitmap = preview.bitmap!!.asImageBitmap(),
+                bitmap = previewResult.bitmap!!.asImageBitmap(),
                 contentDescription = item.name,
                 modifier = Modifier
                     .fillMaxSize()
