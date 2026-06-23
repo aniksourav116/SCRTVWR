@@ -2,9 +2,10 @@ package srv.scrtvwr.ui.dashboard.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
@@ -18,10 +19,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -99,69 +98,82 @@ fun OthersScreen(
             videoPreloadDistanceText = uiState.videoPreloadDistance.toString()
         }
     }
-    Column(
-        modifier = modifier.fillMaxSize().padding(20.dp),
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(stringResource(R.string.other_options), style = MaterialTheme.typography.headlineSmall)
-        ListItem(
-            modifier = Modifier.fillMaxWidth(),
-            headlineContent = { Text(stringResource(R.string.show_hidden_files)) },
-            supportingContent = { Text(stringResource(R.string.show_hidden_files_summary)) },
-            leadingContent = { Icon(Icons.Default.Visibility, contentDescription = null) },
-            trailingContent = {
-                Switch(
-                    checked = uiState.showHiddenFiles,
-                    onCheckedChange = onShowHiddenFilesChange,
-                )
-            },
-        )
-        NumericPreferenceListItem(
-            headline = stringResource(R.string.slideshow_speed),
-            supporting = stringResource(R.string.slideshow_speed_summary),
-            value = slideShowStayMillisText,
-            onValueChange = { value ->
-                slideShowStayMillisText = value.filter(Char::isDigit)
-                slideShowStayMillisText.toLongOrNull()?.let(onSlideShowStayMillisChange)
-            },
-            leadingContent = { Icon(Icons.Default.Slideshow, contentDescription = null) },
-            suffix = "ms",
-            warning = slideShowWarning,
-        )
-        NumericPreferenceListItem(
-            headline = stringResource(R.string.image_preload_distance),
-            supporting = stringResource(R.string.image_preload_summary),
-            value = imagePreloadDistanceText,
-            onValueChange = { value ->
-                imagePreloadDistanceText = value.filter(Char::isDigit)
-                imagePreloadDistanceText.toIntOrNull()?.let(onImagePreloadDistanceChange)
-            },
-            leadingContent = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
-            warning = imagePreloadWarning,
-        )
-        NumericPreferenceListItem(
-            headline = stringResource(R.string.video_preload_distance),
-            supporting = stringResource(R.string.video_preload_summary),
-            value = videoPreloadDistanceText,
-            onValueChange = { value ->
-                videoPreloadDistanceText = value.filter(Char::isDigit)
-                videoPreloadDistanceText.toIntOrNull()?.let(onVideoPreloadDistanceChange)
-            },
-            leadingContent = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
-            warning = videoPreloadWarning,
-        )
-        ListItem(
-            modifier = Modifier.fillMaxWidth(),
-            headlineContent = { Text(stringResource(R.string.hold_slideshow)) },
-            supportingContent = { Text(stringResource(R.string.hold_slideshow_summary)) },
-            leadingContent = { Icon(Icons.Default.Slideshow, contentDescription = null) },
-            trailingContent = {
-                Switch(
-                    checked = uiState.holdSlideShowEnabled,
-                    onCheckedChange = onHoldSlideShowEnabledChange,
-                )
-            },
-        )
+        item {
+            Text(stringResource(R.string.other_options), style = MaterialTheme.typography.headlineSmall)
+        }
+        item {
+            ListItem(
+                modifier = Modifier.fillMaxWidth(),
+                headlineContent = { Text(stringResource(R.string.show_hidden_files)) },
+                supportingContent = { Text(stringResource(R.string.show_hidden_files_summary)) },
+                leadingContent = { Icon(Icons.Default.Visibility, contentDescription = null) },
+                trailingContent = {
+                    Switch(
+                        checked = uiState.showHiddenFiles,
+                        onCheckedChange = onShowHiddenFilesChange,
+                    )
+                },
+            )
+        }
+        item {
+            NumericPreferenceListItem(
+                headline = stringResource(R.string.slideshow_speed),
+                supporting = stringResource(R.string.slideshow_speed_summary),
+                value = slideShowStayMillisText,
+                onValueChange = { value ->
+                    slideShowStayMillisText = value.filter(Char::isDigit)
+                    slideShowStayMillisText.toLongOrNull()?.let(onSlideShowStayMillisChange)
+                },
+                leadingContent = { Icon(Icons.Default.Slideshow, contentDescription = null) },
+                suffix = "ms",
+                warning = slideShowWarning,
+            )
+        }
+        item {
+            NumericPreferenceListItem(
+                headline = stringResource(R.string.image_preload_distance),
+                supporting = stringResource(R.string.image_preload_summary),
+                value = imagePreloadDistanceText,
+                onValueChange = { value ->
+                    imagePreloadDistanceText = value.filter(Char::isDigit)
+                    imagePreloadDistanceText.toIntOrNull()?.let(onImagePreloadDistanceChange)
+                },
+                leadingContent = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
+                warning = imagePreloadWarning,
+            )
+        }
+        item {
+            NumericPreferenceListItem(
+                headline = stringResource(R.string.video_preload_distance),
+                supporting = stringResource(R.string.video_preload_summary),
+                value = videoPreloadDistanceText,
+                onValueChange = { value ->
+                    videoPreloadDistanceText = value.filter(Char::isDigit)
+                    videoPreloadDistanceText.toIntOrNull()?.let(onVideoPreloadDistanceChange)
+                },
+                leadingContent = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
+                warning = videoPreloadWarning,
+            )
+        }
+        item {
+            ListItem(
+                modifier = Modifier.fillMaxWidth(),
+                headlineContent = { Text(stringResource(R.string.hold_slideshow)) },
+                supportingContent = { Text(stringResource(R.string.hold_slideshow_summary)) },
+                leadingContent = { Icon(Icons.Default.Slideshow, contentDescription = null) },
+                trailingContent = {
+                    Switch(
+                        checked = uiState.holdSlideShowEnabled,
+                        onCheckedChange = onHoldSlideShowEnabledChange,
+                    )
+                },
+            )
+        }
     }
 }
 
