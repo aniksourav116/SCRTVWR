@@ -48,6 +48,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -512,11 +513,16 @@ private fun MediaPage(
     onContentClick: () -> Unit,
     onVideoPlayClick: () -> Unit,
 ) {
-    val bitmap by produceState<Bitmap?>(initialValue = null, key1 = item.path, key2 = item.lastModifiedMillis) {
-        value = when (item.type) {
+    val previewState by produceState<MediaPreviewState>(
+        initialValue = MediaPreviewState.Loading,
+        key1 = item.path,
+        key2 = item.lastModifiedMillis,
+    ) {
+        val bitmap = when (item.type) {
             MediaViewerType.Image -> loadImagePreview(item.path)
             MediaViewerType.Video -> loadVideoPreview(item.path)
         }
+        value = bitmap?.let(MediaPreviewState::Loaded) ?: MediaPreviewState.Error
     }
 
     Box(
@@ -525,22 +531,30 @@ private fun MediaPage(
             .clickable(onClick = onContentClick),
         contentAlignment = Alignment.Center,
     ) {
-        if (bitmap == null) {
-            Icon(
-                Icons.Default.ImageNotSupported,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.7f),
-            )
-        } else {
-            Image(
-                bitmap = bitmap!!.asImageBitmap(),
-                contentDescription = item.name,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer(rotationZ = rotation.toFloat())
-                    .scale(scaleX = if (flipped) -1f else 1f, scaleY = 1f),
-                contentScale = if (fillFrame) ContentScale.Crop else ContentScale.Fit,
-            )
+        when (val state = previewState) {
+            MediaPreviewState.Loading -> {
+                CircularProgressIndicator(color = Color.White.copy(alpha = 0.85f))
+            }
+
+            MediaPreviewState.Error -> {
+                Icon(
+                    Icons.Default.ImageNotSupported,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.7f),
+                )
+            }
+
+            is MediaPreviewState.Loaded -> {
+                Image(
+                    bitmap = state.bitmap.asImageBitmap(),
+                    contentDescription = item.name,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer(rotationZ = rotation.toFloat())
+                        .scale(scaleX = if (flipped) -1f else 1f, scaleY = 1f),
+                    contentScale = if (fillFrame) ContentScale.Crop else ContentScale.Fit,
+                )
+            }
         }
 
         if (item.type == MediaViewerType.Video) {
@@ -554,6 +568,12 @@ private fun MediaPage(
             }
         }
     }
+}
+
+private sealed interface MediaPreviewState {
+    data object Loading : MediaPreviewState
+    data object Error : MediaPreviewState
+    data class Loaded(val bitmap: Bitmap) : MediaPreviewState
 }
 
 @Composable
