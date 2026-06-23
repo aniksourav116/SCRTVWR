@@ -40,6 +40,8 @@
     <string name="slideshow_interval">%1$d ms</string>
     <string name="image_preload_distance">Image preload distance</string>
     <string name="image_preload_summary">How many nearby pages are prepared in the viewer.</string>
+    <string name="video_preload_distance">Video preload distance</string>
+    <string name="video_preload_summary">How many nearby video pages are prepared in the player.</string>
     <string name="invalid_whole_number">Enter a valid whole number.</string>
     <string name="short_slideshow_warning">Very short intervals may make controls difficult to use.</string>
     <string name="long_slideshow_warning">Very long intervals may look like the slideshow has stopped.</string>

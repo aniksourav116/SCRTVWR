@@ -628,8 +628,8 @@ private fun EntryThumbnail(
     size: Int,
     modifier: Modifier = Modifier.size(size.dp),
 ) {
-    val preview by produceState<PreviewResult>(
-        initialValue = PreviewResult(),
+    val preview by produceState<PreviewResult?>(
+        initialValue = null,
         key1 = entry.path,
         key2 = entry.lastModifiedMillis,
         key3 = entry.isDirectory,
@@ -648,9 +648,15 @@ private fun EntryThumbnail(
             .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
-        if (preview.bitmap != null) {
+        val previewResult = preview
+        if (previewResult == null) {
+            CircularProgressIndicator(
+                modifier = Modifier.size((size / 4).coerceAtLeast(20).dp),
+                strokeWidth = 2.dp,
+            )
+        } else if (previewResult.bitmap != null) {
             Image(
-                bitmap = preview.bitmap!!.asImageBitmap(),
+                bitmap = previewResult.bitmap!!.asImageBitmap(),
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,

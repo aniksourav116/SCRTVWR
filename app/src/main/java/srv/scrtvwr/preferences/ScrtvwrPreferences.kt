@@ -32,6 +32,15 @@ class ScrtvwrPreferences(context: Context) {
             .apply()
     }
 
+    fun getVideoPreloadDistance(): Int =
+        preferences.getInt(KEY_VIDEO_PRELOAD_DISTANCE, DEFAULT_VIDEO_PRELOAD_DISTANCE)
+
+    fun saveVideoPreloadDistance(distance: Int) {
+        preferences.edit()
+            .putInt(KEY_VIDEO_PRELOAD_DISTANCE, distance.coerceAtLeast(0))
+            .apply()
+    }
+
     fun getShowHiddenFiles(): Boolean =
         preferences.getBoolean(KEY_SHOW_HIDDEN_FILES, false)
 
@@ -122,6 +131,7 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_SLIDE_SHOW_STAY_MILLIS = "slide_show_stay_millis"
         const val KEY_HOLD_SLIDE_SHOW_ENABLED = "hold_slide_show_enabled"
         const val KEY_IMAGE_PRELOAD_DISTANCE = "image_preload_distance"
+        const val KEY_VIDEO_PRELOAD_DISTANCE = "video_preload_distance"
         const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
         const val KEY_BOOKMARKED_MEDIA = "bookmarked_media"
         const val KEY_MEDIA_HISTORY = "media_history"
@@ -131,6 +141,7 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_LAST_MEDIA_PATH = "last_media_path"
         const val DEFAULT_SLIDE_SHOW_STAY_MILLIS = 50L
         const val DEFAULT_IMAGE_PRELOAD_DISTANCE = 5
+        const val DEFAULT_VIDEO_PRELOAD_DISTANCE = 0
         const val MAX_RECENT_DIRECTORIES = 100
     }
 }

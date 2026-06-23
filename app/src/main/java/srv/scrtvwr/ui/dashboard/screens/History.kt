@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
@@ -145,8 +146,8 @@ private fun HistoryThumbnail(
     val mediaPath = item.mediaPath
     val sourceFile = mediaPath?.substringBefore("::")?.let(::File)
     val isVideo = sourceFile?.extension?.lowercase() in VIDEO_EXTENSIONS
-    val preview by produceState(
-        initialValue = PreviewResult(),
+    val preview by produceState<PreviewResult?>(
+        initialValue = null,
         key1 = mediaPath,
         key2 = sourceFile?.lastModified(),
     ) {
@@ -163,8 +164,13 @@ private fun HistoryThumbnail(
             .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
-        val bitmap = preview.bitmap
-        if (bitmap != null) {
+        val bitmap = preview?.bitmap
+        if (preview == null) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp,
+            )
+        } else if (bitmap != null) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = null,

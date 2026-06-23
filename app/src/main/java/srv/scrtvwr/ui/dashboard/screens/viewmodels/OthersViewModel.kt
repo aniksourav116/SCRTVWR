@@ -14,6 +14,7 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
             slideShowStayMillis = preferences.getSlideShowStayMillis(),
             holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
             imagePreloadDistance = preferences.getImagePreloadDistance(),
+            videoPreloadDistance = preferences.getVideoPreloadDistance(),
             showHiddenFiles = preferences.getShowHiddenFiles(),
         ),
     )
@@ -40,6 +41,12 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
         preferences.saveImagePreloadDistance(boundedDistance)
         _uiState.update { it.copy(imagePreloadDistance = boundedDistance) }
     }
+
+    fun setVideoPreloadDistance(distance: Int) {
+        val boundedDistance = distance.coerceAtLeast(0)
+        preferences.saveVideoPreloadDistance(boundedDistance)
+        _uiState.update { it.copy(videoPreloadDistance = boundedDistance) }
+    }
 }
 
 data class OthersUiState(
@@ -47,4 +54,5 @@ data class OthersUiState(
     val slideShowStayMillis: Long = 50L,
     val holdSlideShowEnabled: Boolean = false,
     val imagePreloadDistance: Int = 5,
+    val videoPreloadDistance: Int = 0,
 )
