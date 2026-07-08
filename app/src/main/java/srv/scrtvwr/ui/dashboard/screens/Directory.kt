@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
@@ -22,17 +23,21 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.Sort
@@ -63,6 +68,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,7 +78,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -81,6 +89,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -100,8 +109,10 @@ import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewMode
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.roundToInt
 
 @Composable
 fun Directory(
@@ -443,49 +454,65 @@ private fun DirectoryList(
     onOpenMedia: (DirectoryEntry) -> Unit,
     onNavigateUp: () -> Unit,
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        if (uiState.canNavigateUp) {
-            item(key = "parent") {
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp, end = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (uiState.canNavigateUp) {
+                item(key = "parent") {
+                    DirectoryListRow(
+                        title = "..",
+                        subtitle = stringResource(R.string.go_up),
+                        thumbnail = { Icon(Icons.Default.ArrowUpward, contentDescription = null) },
+                        style = navigationEntryVisualStyle(),
+                        onClick = onNavigateUp,
+                    )
+                }
+            }
+
+            if (uiState.entries.isEmpty()) {
+                item(key = "empty") {
+                    EmptyDirectoryMessage(uiState)
+                }
+            }
+
+            items(uiState.entries, key = DirectoryEntry::path) { entry ->
+                val style = entry.entryVisualStyle()
                 DirectoryListRow(
-                    title = "..",
-                    subtitle = stringResource(R.string.go_up),
-                    thumbnail = { Icon(Icons.Default.ArrowUpward, contentDescription = null) },
-                    style = navigationEntryVisualStyle(),
-                    onClick = onNavigateUp,
+                    title = entry.name,
+                    subtitle = entry.supportingText(),
+                    thumbnail = { EntryThumbnail(entry, size = 48, style = style) },
+                    style = style,
+                    onClick = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
+                        {
+                            if (entry.isDirectory) {
+                                onOpenDirectory(entry)
+                            } else {
+                                onOpenMedia(entry)
+                            }
+                        }
+                    } else {
+                        null
+                    },
                 )
             }
         }
 
-        if (uiState.entries.isEmpty()) {
-            item(key = "empty") {
-                EmptyDirectoryMessage(uiState)
-            }
-        }
-
-        items(uiState.entries, key = DirectoryEntry::path) { entry ->
-            val style = entry.entryVisualStyle()
-            DirectoryListRow(
-                title = entry.name,
-                subtitle = entry.supportingText(),
-                thumbnail = { EntryThumbnail(entry, size = 48, style = style) },
-                style = style,
-                onClick = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
-                    {
-                        if (entry.isDirectory) {
-                            onOpenDirectory(entry)
-                        } else {
-                            onOpenMedia(entry)
-                        }
-                    }
-                } else {
-                    null
-                },
-            )
-        }
+        DirectoryFastScroller(
+            totalItems = listState.layoutInfo.totalItemsCount,
+            visibleItems = listState.layoutInfo.visibleItemsInfo.size,
+            firstVisibleItemIndex = listState.firstVisibleItemIndex,
+            onScrollToItem = { index ->
+                coroutineScope.launch { listState.scrollToItem(index) }
+            },
+            modifier = Modifier.align(Alignment.CenterEnd),
+        )
     }
 }
 
@@ -542,74 +569,149 @@ private fun DirectoryGrid(
     onOpenMedia: (DirectoryEntry) -> Unit,
     onNavigateUp: () -> Unit,
 ) {
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(112.dp),
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        if (uiState.canNavigateUp) {
-            item(key = "parent") {
-                val style = navigationEntryVisualStyle()
+    val gridState = rememberLazyGridState()
+    val coroutineScope = rememberCoroutineScope()
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyVerticalGrid(
+            state = gridState,
+            columns = GridCells.Adaptive(112.dp),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 4.dp, end = 28.dp, bottom = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            if (uiState.canNavigateUp) {
+                item(key = "parent") {
+                    val style = navigationEntryVisualStyle()
+                    DirectoryGridCard(
+                        title = "..",
+                        subtitle = stringResource(R.string.go_up),
+                        thumbnail = {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(1f)
+                                    .background(style.thumbnailColor),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Default.ArrowUpward,
+                                    contentDescription = null,
+                                    tint = style.accentColor,
+                                )
+                            }
+                        },
+                        onClick = onNavigateUp,
+                    )
+                }
+            }
+
+            if (uiState.entries.isEmpty()) {
+                item(key = "empty") {
+                    EmptyDirectoryMessage(uiState)
+                }
+            }
+
+            items(uiState.entries, key = DirectoryEntry::path) { entry ->
+                val style = entry.entryVisualStyle()
                 DirectoryGridCard(
-                    title = "..",
-                    subtitle = stringResource(R.string.go_up),
+                    title = entry.name,
+                    subtitle = entry.typeText(),
                     thumbnail = {
-                        Box(
+                        EntryThumbnail(
+                            entry = entry,
+                            size = 128,
+                            style = style,
+                            showFolderBadge = entry.isDirectory,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .aspectRatio(1f)
-                                .background(style.thumbnailColor),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Default.ArrowUpward,
-                                contentDescription = null,
-                                tint = style.accentColor,
-                            )
-                        }
+                                .aspectRatio(1f),
+                        )
                     },
-                    onClick = onNavigateUp,
+                    onClick = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
+                        {
+                            if (entry.isDirectory) {
+                                onOpenDirectory(entry)
+                            } else {
+                                onOpenMedia(entry)
+                            }
+                        }
+                    } else {
+                        null
+                    },
                 )
             }
         }
 
-        if (uiState.entries.isEmpty()) {
-            item(key = "empty") {
-                EmptyDirectoryMessage(uiState)
-            }
-        }
+        DirectoryFastScroller(
+            totalItems = gridState.layoutInfo.totalItemsCount,
+            visibleItems = gridState.layoutInfo.visibleItemsInfo.size,
+            firstVisibleItemIndex = gridState.firstVisibleItemIndex,
+            onScrollToItem = { index ->
+                coroutineScope.launch { gridState.scrollToItem(index) }
+            },
+            modifier = Modifier.align(Alignment.CenterEnd),
+        )
+    }
+}
 
-        items(uiState.entries, key = DirectoryEntry::path) { entry ->
-            val style = entry.entryVisualStyle()
-            DirectoryGridCard(
-                title = entry.name,
-                subtitle = entry.typeText(),
-                thumbnail = {
-                    EntryThumbnail(
-                        entry = entry,
-                        size = 128,
-                        style = style,
-                        showFolderBadge = entry.isDirectory,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f),
-                    )
-                },
-                onClick = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
-                    {
-                        if (entry.isDirectory) {
-                            onOpenDirectory(entry)
-                        } else {
-                            onOpenMedia(entry)
-                        }
-                    }
-                } else {
-                    null
-                },
-            )
-        }
+@Composable
+private fun DirectoryFastScroller(
+    totalItems: Int,
+    visibleItems: Int,
+    firstVisibleItemIndex: Int,
+    onScrollToItem: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val maxIndex = (totalItems - visibleItems).coerceAtLeast(0)
+    if (totalItems <= 0 || maxIndex == 0) return
+
+    var trackHeightPx by remember { mutableStateOf(0) }
+    val density = LocalDensity.current
+    val handleHeight = 52.dp
+    val handleHeightPx = with(density) { handleHeight.toPx() }
+    val progress = firstVisibleItemIndex.coerceIn(0, maxIndex) / maxIndex.toFloat()
+    val handleOffset = ((trackHeightPx - handleHeightPx).coerceAtLeast(0f) * progress).roundToInt()
+
+    fun scrollToOffset(y: Float) {
+        val travel = (trackHeightPx - handleHeightPx).coerceAtLeast(1f)
+        val targetProgress = ((y - handleHeightPx / 2f) / travel).coerceIn(0f, 1f)
+        onScrollToItem((targetProgress * maxIndex).roundToInt())
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(28.dp)
+            .padding(vertical = 8.dp)
+            .onSizeChanged { trackHeightPx = it.height }
+            .pointerInput(totalItems, visibleItems, trackHeightPx) {
+                detectDragGestures(
+                    onDragStart = { offset -> scrollToOffset(offset.y) },
+                    onDrag = { change, _ -> scrollToOffset(change.position.y) },
+                )
+            },
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .fillMaxHeight()
+                .clip(MaterialTheme.shapes.extraSmall)
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+        )
+        Surface(
+            modifier = Modifier
+                .padding(horizontal = 4.dp)
+                .fillMaxWidth()
+                .height(handleHeight)
+                .align(Alignment.TopCenter)
+                .offset { IntOffset(0, handleOffset) },
+            shape = MaterialTheme.shapes.extraSmall,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.72f),
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+        ) {}
     }
 }
 
