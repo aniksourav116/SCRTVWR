@@ -76,6 +76,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -217,6 +218,7 @@ private fun MediaViewerScreen(
     var isPseudoSlideShowRunning by remember { mutableStateOf(false) }
     var pseudoSlideShowStayMillis by remember { mutableStateOf(uiState.slideShowStayMillis) }
     var pseudoSlideShowHorizontalFraction by remember { mutableFloatStateOf(0f) }
+    var pseudoSlideShowPageOffset by remember { mutableStateOf(1) }
     val readyMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
     val zoomedMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
     var zoomCommand by remember { mutableStateOf<ZoomCommand?>(null) }
@@ -225,6 +227,11 @@ private fun MediaViewerScreen(
         pseudoSlideShowStayMillis
     } else {
         uiState.slideShowStayMillis
+    }
+    val activeSlideShowPageOffset = if (isPseudoSlideShowRunning) {
+        pseudoSlideShowPageOffset
+    } else {
+        1
     }
     fun showEdgeDialog(direction: SourceDirection) {
         if (uiState.items.isNotEmpty()) {
@@ -245,6 +252,20 @@ private fun MediaViewerScreen(
                 }
             }
         }
+    }
+
+    fun startPseudoSlideShow(pageOffset: Int) {
+        if (uiState.items.isEmpty() || uiState.isSlideShowRunning) return
+        pseudoSlideShowStayMillis = uiState.slideShowStayMillis
+        pseudoSlideShowHorizontalFraction = 0f
+        pseudoSlideShowPageOffset = pageOffset
+        isPseudoSlideShowRunning = true
+    }
+
+    fun stopPseudoSlideShow() {
+        isPseudoSlideShowRunning = false
+        pseudoSlideShowHorizontalFraction = 0f
+        pseudoSlideShowPageOffset = 1
     }
 
     LaunchedEffect(slideShowDialogVisible, uiState.slideShowStayMillis) {
@@ -271,6 +292,7 @@ private fun MediaViewerScreen(
     LaunchedEffect(
         isAnySlideShowRunning,
         activeSlideShowStayMillis,
+        activeSlideShowPageOffset,
         isPseudoSlideShowRunning,
         uiState.items,
         pagerState.currentPage,
@@ -290,11 +312,15 @@ private fun MediaViewerScreen(
             delay(activeSlideShowStayMillis.milliseconds)
 
             if (pagerState.currentPage == currentPage) {
-                val nextPage = currentPage + 1
-                if (nextPage >= uiState.items.size) {
-                    if (!isPseudoSlideShowRunning) onSlideShowStop()
+                val requestedPage = currentPage + activeSlideShowPageOffset
+                if (requestedPage !in uiState.items.indices) {
+                    if (isPseudoSlideShowRunning) {
+                        stopPseudoSlideShow()
+                    } else {
+                        onSlideShowStop()
+                    }
                 } else {
-                    pagerState.scrollToPage(nextPage)
+                    pagerState.scrollToPage(requestedPage)
                 }
             }
         }
@@ -511,9 +537,7 @@ private fun MediaViewerScreen(
                                     ?: return@awaitEachGesture
                                 longPress.consume()
                                 val baseStayMillis = uiState.slideShowStayMillis
-                                pseudoSlideShowStayMillis = baseStayMillis
-                                pseudoSlideShowHorizontalFraction = 0f
-                                isPseudoSlideShowRunning = true
+                                startPseudoSlideShow(pageOffset = 1)
 
                                 try {
                                     do {
@@ -531,8 +555,7 @@ private fun MediaViewerScreen(
                                         change.consume()
                                     } while (change.pressed)
                                 } finally {
-                                    isPseudoSlideShowRunning = false
-                                    pseudoSlideShowHorizontalFraction = 0f
+                                    stopPseudoSlideShow()
                                 }
                             }
                         }
@@ -644,12 +667,9 @@ private fun MediaViewerScreen(
                     HiddenNavigationButtons(
                         currentPage = pagerState.currentPage,
                         pageCount = uiState.pageCount,
-                        onPreviousClick = {
-                            navigateFromCurrentPage(-1, animated = false)
-                        },
-                        onNextClick = {
-                            navigateFromCurrentPage(1, animated = false)
-                        },
+                        onPreviousPressStart = { startPseudoSlideShow(pageOffset = -1) },
+                        onNextPressStart = { startPseudoSlideShow(pageOffset = 1) },
+                        onPressEnd = { stopPseudoSlideShow() },
                     )
                 }
 
@@ -1350,8 +1370,9 @@ private fun SortDialog(
 private fun BoxScope.HiddenNavigationButtons(
     currentPage: Int,
     pageCount: Int,
-    onPreviousClick: () -> Unit,
-    onNextClick: () -> Unit,
+    onPreviousPressStart: () -> Unit,
+    onNextPressStart: () -> Unit,
+    onPressEnd: () -> Unit,
 ) {
     Box(
         modifier = Modifier
@@ -1369,7 +1390,8 @@ private fun BoxScope.HiddenNavigationButtons(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
-                onClick = onPreviousClick,
+                onPressStart = onPreviousPressStart,
+                onPressEnd = onPressEnd,
             )
 
             HiddenNavigationButton(
@@ -1378,7 +1400,8 @@ private fun BoxScope.HiddenNavigationButtons(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
-                onClick = onNextClick,
+                onPressStart = onNextPressStart,
+                onPressEnd = onPressEnd,
             )
         }
 
@@ -1400,13 +1423,32 @@ private fun HiddenNavigationButton(
     text: String,
     contentDescription: String,
     modifier: Modifier = Modifier,
-    onClick: () -> Unit,
+    onPressStart: () -> Unit,
+    onPressEnd: () -> Unit,
 ) {
+    val currentOnPressStart by rememberUpdatedState(onPressStart)
+    val currentOnPressEnd by rememberUpdatedState(onPressEnd)
     Box(
         modifier = modifier
             .alpha(0.11f)
             .background(MaterialTheme.colorScheme.surface)
-            .clickable(onClickLabel = contentDescription, onClick = onClick),
+            .pointerInput(contentDescription) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    currentOnPressStart()
+                    try {
+                        do {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                                ?: break
+                            change.consume()
+                        } while (change.pressed)
+                    } finally {
+                        currentOnPressEnd()
+                    }
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
         Text(
