@@ -92,6 +92,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -727,7 +728,7 @@ private fun PseudoSlideShowVisualizer(
                 .fillMaxWidth()
                 .height(72.dp)
                 .align(Alignment.BottomCenter)
-                .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(20.dp))
+                .background(Color.Black.copy(alpha = 0.27f), RoundedCornerShape(20.dp))
                 .padding(horizontal = 18.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
@@ -1414,17 +1415,65 @@ private fun ViewerTimeline(
     }
 }
 
+//@Preview(showBackground = true)
+//@Composable
+//private fun HiddenNavigationButtonPreview() {
+//    SCRTVWRTheme {
+//        HiddenNavigationButton(
+//            text = "+",
+//            contentDescription = "Previous media",
+//            modifier = Modifier.width(64.dp),
+//            onClick = {}
+//        )
+//    }
+//}
+
 @Preview(showBackground = true)
 @Composable
-private fun HiddenNavigationButtonPreview() {
+private fun MediaViewerScreenPreview() {
+    TimeUtil.initialize(LocalContext.current)
+    val sampleItem = MediaViewerItem(
+        name = "image.jpg",
+        path = "/storage/emulated/0/Pictures/image.jpg",
+        type = MediaViewerType.Image,
+        lastModifiedMillis = System.currentTimeMillis(),
+        sizeBytes = 1024 * 1024
+    )
+    val sampleUiState = MediaViewerUiState(
+        sourceDirectoryPath = "/storage/emulated/0/Pictures",
+        selectedPath = "/storage/emulated/0/Pictures/image.jpg",
+        items = listOf(sampleItem),
+        previousSource = null,
+        nextSource = null,
+        initialPage = 0,
+        selectedPage = 0,
+        fillFrame = false,
+        rotation = 0,
+        flipped = false,
+        bookmarked = false,
+        isChromeHidden = false,
+        isSlideShowRunning = false,
+        slideShowStayMillis = 3000L,
+        holdSlideShowEnabled = true,
+        imagePreloadDistance = 1,
+        edgeDialogStyle = MediaEdgeDialogStyle.Bottom,
+        isLoading = false,
+        errorMessage = null
+    )
     SCRTVWRTheme {
-        HiddenNavigationButton(
-            text = "+",
-            contentDescription = "Previous media",
-            modifier = Modifier.width(64.dp),
-            onClick = {}
+        MediaViewerScreen(
+            uiState = sampleUiState,
+            onPageChanged = {},
+            onFitClick = {},
+            onRotateClick = {},
+            onFlipClick = {},
+            onBookmarkClick = {},
+            onChromeToggle = {},
+            onPreviousSourceClick = {},
+            onNextSourceClick = {},
+            onSlideShowStart = {},
+            onSlideShowStop = {},
+            onBack = {}
         )
     }
 }
-
-
