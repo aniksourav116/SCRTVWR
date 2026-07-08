@@ -4,6 +4,8 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
+import android.text.TextPaint
+import android.text.TextUtils
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,6 +15,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -69,9 +73,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -585,6 +591,7 @@ private fun DirectoryGrid(
                         entry = entry,
                         size = 128,
                         style = style,
+                        showFolderBadge = entry.isDirectory,
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(1f),
@@ -622,12 +629,9 @@ private fun DirectoryGridCard(
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         thumbnail()
-        Text(
+        MiddleEllipsizedText(
             text = title,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
         )
         Text(
             text = subtitle,
@@ -644,6 +648,7 @@ private fun EntryThumbnail(
     entry: DirectoryEntry,
     size: Int,
     style: EntryVisualStyle,
+    showFolderBadge: Boolean = false,
     modifier: Modifier = Modifier.size(size.dp),
 ) {
     val preview by produceState<PreviewResult?>(
@@ -686,6 +691,9 @@ private fun EntryThumbnail(
                     tint = MaterialTheme.colorScheme.onPrimary,
                 )
             }
+            if (showFolderBadge) {
+                FolderPreviewBadge(style)
+            }
         } else {
             Icon(
                 imageVector = if (entry.isDirectory) {
@@ -699,6 +707,61 @@ private fun EntryThumbnail(
                 tint = style.accentColor,
             )
         }
+    }
+}
+
+@Composable
+private fun BoxScope.FolderPreviewBadge(style: EntryVisualStyle) {
+    Surface(
+        modifier = Modifier
+            .align(Alignment.BottomStart)
+            .padding(6.dp)
+            .size(28.dp),
+        shape = MaterialTheme.shapes.extraSmall,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+        contentColor = style.accentColor,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                Icons.Default.Folder,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MiddleEllipsizedText(
+    text: String,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+) {
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val density = LocalDensity.current
+        val maxWidthPx = with(density) { maxWidth.toPx() }
+        val fontSizePx = with(density) { style.fontSize.toPx() }
+        val displayText = remember(text, maxWidthPx, fontSizePx) {
+            if (maxWidthPx > 0f) {
+                TextUtils.ellipsize(
+                    text,
+                    TextPaint().apply { textSize = fontSizePx },
+                    maxWidthPx,
+                    TextUtils.TruncateAt.MIDDLE,
+                ).toString()
+            } else {
+                text
+            }
+        }
+
+        Text(
+            text = displayText,
+            style = style,
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Clip,
+        )
     }
 }
 
