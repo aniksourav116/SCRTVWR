@@ -10,13 +10,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Slideshow
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,13 +28,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.OthersUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.OthersViewModel
+import srv.scrtvwr.ui.components.SimpleDropdown
+import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
+import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.R
 
 @Composable
@@ -46,6 +55,7 @@ fun Others(
         onHoldSlideShowEnabledChange = viewModel::setHoldSlideShowEnabled,
         onImagePreloadDistanceChange = viewModel::setImagePreloadDistance,
         onVideoPreloadDistanceChange = viewModel::setVideoPreloadDistance,
+        onMediaEdgeDialogStyleChange = viewModel::setMediaEdgeDialogStyle,
         modifier = modifier,
     )
 }
@@ -58,6 +68,7 @@ fun OthersScreen(
     onHoldSlideShowEnabledChange: (Boolean) -> Unit,
     onImagePreloadDistanceChange: (Int) -> Unit,
     onVideoPreloadDistanceChange: (Int) -> Unit,
+    onMediaEdgeDialogStyleChange: (MediaEdgeDialogStyle) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var slideShowStayMillisText by rememberSaveable { mutableStateOf(uiState.slideShowStayMillis.toString()) }
@@ -174,6 +185,49 @@ fun OthersScreen(
                 },
             )
         }
+        item {
+            val bottomDialogLabel = stringResource(R.string.edge_dialog_style_bottom)
+            val centerDialogLabel = stringResource(R.string.edge_dialog_style_center)
+            ListItem(
+                modifier = Modifier.fillMaxWidth(),
+                headlineContent = { Text(stringResource(R.string.edge_dialog_style)) },
+                supportingContent = { Text(stringResource(R.string.edge_dialog_style_summary)) },
+                leadingContent = { Icon(Icons.Default.Info, contentDescription = null) },
+                trailingContent = {
+                    SimpleDropdown(
+                        label = stringResource(R.string.edge_dialog_style),
+                        items = MediaEdgeDialogStyle.entries,
+                        selected = uiState.mediaEdgeDialogStyle,
+                        onSelected = onMediaEdgeDialogStyleChange,
+                        modifier = Modifier.fillMaxWidth(0.46f),
+                        itemLabel = { style ->
+                            when (style) {
+                                MediaEdgeDialogStyle.Bottom -> bottomDialogLabel
+                                MediaEdgeDialogStyle.Center -> centerDialogLabel
+                            }
+                        },
+                    )
+                },
+            )
+        }
+        item {
+            val context = LocalContext.current
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            val versionName = packageInfo.versionName ?: "Unknown"
+
+            OutlinedCard(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                ListItem(
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    headlineContent = { Text(stringResource(R.string.version)) },
+                    supportingContent = { Text(versionName) },
+                    leadingContent = {
+                        Icon(Icons.Default.Info, contentDescription = null)
+                    }
+                )
+            }
+        }
     }
 }
 
@@ -211,4 +265,27 @@ private fun NumericPreferenceListItem(
             )
         },
     )
+}
+
+@Preview(showBackground = true)
+@Composable
+fun OthersPreview() {
+    SCRTVWRTheme {
+        OthersScreen(
+            uiState = OthersUiState(
+                showHiddenFiles = true,
+                slideShowStayMillis = 3000L,
+                holdSlideShowEnabled = true,
+                imagePreloadDistance = 5,
+                videoPreloadDistance = 1,
+                mediaEdgeDialogStyle = MediaEdgeDialogStyle.Bottom,
+            ),
+            onShowHiddenFilesChange = {},
+            onSlideShowStayMillisChange = {},
+            onHoldSlideShowEnabledChange = {},
+            onImagePreloadDistanceChange = {},
+            onVideoPreloadDistanceChange = {},
+            onMediaEdgeDialogStyleChange = {},
+        )
+    }
 }

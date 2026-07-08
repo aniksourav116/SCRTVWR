@@ -27,6 +27,7 @@ class MediaViewerViewModel(
             slideShowStayMillis = preferences.getSlideShowStayMillis(),
             holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
             imagePreloadDistance = preferences.getImagePreloadDistance(),
+            edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
         ),
     )
     val uiState = _uiState.asStateFlow()
@@ -95,13 +96,8 @@ class MediaViewerViewModel(
             nextSource = sourceDirectory?.let { MediaCatalog.nextDirectory(it, sortOrder) }
         }
 
-        val firstItemPageIndex = if (previousSource != null) 1 else 0
-        initialPage += firstItemPageIndex
-
         val sourceKey = "${directoryPath.orEmpty()}|${selectedPath.orEmpty()}"
-        val pageCount = items.size +
-            (if (previousSource != null) 1 else 0) +
-            (if (nextSource != null) 1 else 0)
+        val pageCount = items.size
         if (savedStateHandle.get<String>(STATE_SOURCE) == sourceKey) {
             initialPage = savedStateHandle.get<Int>(STATE_SELECTED_PAGE)
                 ?.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
@@ -123,11 +119,12 @@ class MediaViewerViewModel(
                 slideShowStayMillis = preferences.getSlideShowStayMillis(),
                 holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
                 imagePreloadDistance = preferences.getImagePreloadDistance(),
-                bookmarked = preferences.isMediaBookmarked(items.getOrNull(initialPage - firstItemPageIndex)?.path ?: selectedPath),
+                edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
+                bookmarked = preferences.isMediaBookmarked(items.getOrNull(initialPage)?.path ?: selectedPath),
                 isLoading = false,
             )
         }
-        items.getOrNull(initialPage - firstItemPageIndex)?.path?.let { mediaPath ->
+        items.getOrNull(initialPage)?.path?.let { mediaPath ->
             rememberMediaSession(sourceDirectoryPath, mediaPath)
         }
     }
@@ -240,28 +237,18 @@ data class MediaViewerUiState(
     val slideShowStayMillis: Long = 50L,
     val holdSlideShowEnabled: Boolean = false,
     val imagePreloadDistance: Int = 5,
+    val edgeDialogStyle: MediaEdgeDialogStyle = MediaEdgeDialogStyle.Bottom,
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
 ) {
     val pageCount: Int
-        get() = items.size +
-            (if (previousSource != null) 1 else 0) +
-            (if (nextSource != null) 1 else 0)
+        get() = items.size
 
     val lastPageIndex: Int
         get() = (pageCount - 1).coerceAtLeast(0)
 
-    val previousSourcePageIndex: Int?
-        get() = previousSource?.let { 0 }
-
-    val firstItemPageIndex: Int
-        get() = if (previousSource != null) 1 else 0
-
-    val nextSourcePageIndex: Int?
-        get() = nextSource?.let { firstItemPageIndex + items.size }
-
     fun itemForPage(page: Int): MediaViewerItem? =
-        items.getOrNull(page - firstItemPageIndex)
+        items.getOrNull(page)
 }
 
 data class MediaViewerSource(

@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -262,7 +263,7 @@ fun DirectoryScreen(
                     }
 
                     DirectoryToolbarButton(
-                        icon = { Icon(Icons.Default.Restore, contentDescription = null) },
+                        icon = { Icon(Icons.Default.PlayCircle, contentDescription = null) },
                         label = stringResource(R.string.resume),
                         onClick = onResumeMedia,
                         enabled = uiState.lastMediaSession != null,
@@ -310,19 +311,18 @@ fun DirectoryScreen(
                     }
 
                     DirectoryToolbarButton(
-                        icon = { Icon(Icons.AutoMirrored.Filled.ViewList, contentDescription = null) },
-                        label = stringResource(R.string.list_view),
-                        selected = uiState.viewMode == DirectoryViewMode.List,
-                        onClick = { onViewModeChange(DirectoryViewMode.List) },
-                        modifier = Modifier.weight(1f),
-                    )
-
-                    DirectoryToolbarButton(
-                        icon = { Icon(Icons.Default.GridView, contentDescription = null) },
-                        label = stringResource(R.string.grid_view),
-                        selected = uiState.viewMode == DirectoryViewMode.Grid,
-                        onClick = { onViewModeChange(DirectoryViewMode.Grid) },
-                        modifier = Modifier.weight(1f),
+                        icon = {
+                            Icon(
+                                imageVector = if (uiState.viewMode == DirectoryViewMode.List) Icons.Default.GridView else Icons.AutoMirrored.Filled.ViewList,
+                                contentDescription = null
+                            )
+                        },
+                        label = stringResource(if (uiState.viewMode == DirectoryViewMode.List) R.string.grid_view else R.string.list_view),
+                        onClick = {
+                            val newMode = if (uiState.viewMode == DirectoryViewMode.List) DirectoryViewMode.Grid else DirectoryViewMode.List
+                            onViewModeChange(newMode)
+                        },
+                        modifier = Modifier.weight(0.8f),
                     )
                 }
             }
@@ -336,7 +336,7 @@ fun DirectoryScreen(
             singleLine = true,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp),
+                .wrapContentHeight(),
         )
 
         if (uiState.isLoading && uiState.entries.isEmpty()) {
@@ -402,7 +402,6 @@ private fun DirectoryToolbarButton(
 
     Surface(
         modifier = modifier
-            .height(44.dp)
             .semantics { contentDescription = label }
             .then(
                 if (enabled) {
@@ -423,7 +422,15 @@ private fun DirectoryToolbarButton(
             modifier = Modifier.padding(8.dp),
             contentAlignment = Alignment.Center,
         ) {
-            icon()
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                icon()
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

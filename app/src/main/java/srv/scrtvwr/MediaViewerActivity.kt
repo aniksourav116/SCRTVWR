@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,10 +35,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.FormatIndentDecrease
-import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.FitScreen
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInFull
@@ -57,6 +56,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -88,6 +88,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
@@ -96,7 +98,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.PreviewResult
+import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.MediaViewerItem
+import srv.scrtvwr.ui.media.MediaViewerSource
 import srv.scrtvwr.ui.media.MediaViewerType
 import srv.scrtvwr.ui.media.MediaViewerUiState
 import srv.scrtvwr.ui.media.MediaViewerViewModel
@@ -195,6 +199,7 @@ private fun MediaViewerScreen(
     var menuExpanded by rememberSaveable { mutableStateOf(false) }
     var slideShowDialogVisible by rememberSaveable { mutableStateOf(false) }
     var detailsDialogVisible by rememberSaveable { mutableStateOf(false) }
+    var edgeDialogDirection by rememberSaveable { mutableStateOf<SourceDirection?>(null) }
     var slideShowStayText by rememberSaveable { mutableStateOf(uiState.slideShowStayMillis.toString()) }
     var verticalDrag by remember { mutableFloatStateOf(0f) }
     var isPseudoSlideShowRunning by remember { mutableStateOf(false) }
@@ -206,6 +211,26 @@ private fun MediaViewerScreen(
         pseudoSlideShowStayMillis
     } else {
         uiState.slideShowStayMillis
+    }
+    fun showEdgeDialog(direction: SourceDirection) {
+        if (uiState.items.isNotEmpty()) {
+            edgeDialogDirection = direction
+        }
+    }
+
+    fun navigateFromCurrentPage(offset: Int, animated: Boolean) {
+        val requestedPage = pagerState.currentPage + offset
+        when {
+            requestedPage < 0 -> showEdgeDialog(SourceDirection.Previous)
+            requestedPage > uiState.lastPageIndex -> showEdgeDialog(SourceDirection.Next)
+            requestedPage != pagerState.currentPage -> coroutineScope.launch {
+                if (animated) {
+                    pagerState.animateScrollToPage(requestedPage)
+                } else {
+                    pagerState.scrollToPage(requestedPage)
+                }
+            }
+        }
     }
 
     LaunchedEffect(slideShowDialogVisible, uiState.slideShowStayMillis) {
@@ -252,7 +277,7 @@ private fun MediaViewerScreen(
 
             if (pagerState.currentPage == currentPage) {
                 val nextPage = currentPage + 1
-                if (nextPage >= uiState.firstItemPageIndex + uiState.items.size) {
+                if (nextPage >= uiState.items.size) {
                     if (!isPseudoSlideShowRunning) onSlideShowStop()
                 } else {
                     pagerState.scrollToPage(nextPage)
@@ -321,10 +346,10 @@ private fun MediaViewerScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.move_first_item)) },
-                                    enabled = uiState.items.isNotEmpty() && pagerState.currentPage != uiState.firstItemPageIndex,
+                                    enabled = uiState.items.isNotEmpty() && pagerState.currentPage != 0,
                                     onClick = {
                                         coroutineScope.launch {
-                                            pagerState.animateScrollToPage(uiState.firstItemPageIndex)
+                                            pagerState.animateScrollToPage(0)
                                         }
                                         menuExpanded = false
                                     },
@@ -332,10 +357,10 @@ private fun MediaViewerScreen(
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.move_last_item)) },
                                     enabled = uiState.items.isNotEmpty() &&
-                                        pagerState.currentPage != uiState.firstItemPageIndex + uiState.items.lastIndex,
+                                        pagerState.currentPage != uiState.items.lastIndex,
                                     onClick = {
                                         coroutineScope.launch {
-                                            pagerState.animateScrollToPage(uiState.firstItemPageIndex + uiState.items.lastIndex)
+                                            pagerState.animateScrollToPage(uiState.items.lastIndex)
                                         }
                                         menuExpanded = false
                                     },
@@ -420,16 +445,9 @@ private fun MediaViewerScreen(
                                 onDragStart = { verticalDrag = 0f },
                                 onVerticalDrag = { _, dragAmount -> verticalDrag += dragAmount },
                                 onDragEnd = {
-                                    val nextPage = when {
-                                        verticalDrag < -80f -> pagerState.currentPage + 1
-                                        verticalDrag > 80f -> pagerState.currentPage - 1
-                                        else -> pagerState.currentPage
-                                    }.coerceIn(0, uiState.lastPageIndex)
-
-                                    if (nextPage != pagerState.currentPage) {
-                                        coroutineScope.launch {
-                                            pagerState.animateScrollToPage(nextPage)
-                                        }
+                                    when {
+                                        verticalDrag < -80f -> navigateFromCurrentPage(1, animated = true)
+                                        verticalDrag > 80f -> navigateFromCurrentPage(-1, animated = true)
                                     }
                                     verticalDrag = 0f
                                 },
@@ -485,6 +503,38 @@ private fun MediaViewerScreen(
                             }
                         }
                         .pointerInput(uiState.pageCount) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                var totalX = 0f
+                                var totalY = 0f
+                                var notified = false
+                                do {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                        ?: break
+                                    totalX += change.position.x - change.previousPosition.x
+                                    totalY += change.position.y - change.previousPosition.y
+
+                                    if (
+                                        !notified &&
+                                        kotlin.math.abs(totalX) > 80f &&
+                                        kotlin.math.abs(totalX) > kotlin.math.abs(totalY) * 1.5f
+                                    ) {
+                                        when {
+                                            pagerState.currentPage == 0 && totalX > 0f -> {
+                                                showEdgeDialog(SourceDirection.Previous)
+                                                notified = true
+                                            }
+                                            pagerState.currentPage == uiState.lastPageIndex && totalX < 0f -> {
+                                                showEdgeDialog(SourceDirection.Next)
+                                                notified = true
+                                            }
+                                        }
+                                    }
+                                } while (change.pressed)
+                            }
+                        }
+                        .pointerInput(uiState.pageCount) {
                             awaitPointerEventScope {
                                 var lastScrollTime = 0L
                                 var acceleration = 1f
@@ -510,12 +560,14 @@ private fun MediaViewerScreen(
                                             if (it == 0) (if (delta > 0) 1 else -1) else it
                                         }
 
-                                        val nextPage = (pagerState.currentPage + skip).coerceIn(
-                                            0,
-                                            uiState.lastPageIndex
-                                        )
+                                        val requestedPage = pagerState.currentPage + skip
+                                        val nextPage = requestedPage.coerceIn(0, uiState.lastPageIndex)
 
-                                        if (nextPage != pagerState.currentPage) {
+                                        if (requestedPage < 0) {
+                                            showEdgeDialog(SourceDirection.Previous)
+                                        } else if (requestedPage > uiState.lastPageIndex) {
+                                            showEdgeDialog(SourceDirection.Next)
+                                        } else if (nextPage != pagerState.currentPage) {
                                             coroutineScope.launch {
                                                 // Use instant scroll for high speed to keep UI responsive
                                                 if (kotlin.math.abs(skip) > 1) {
@@ -540,37 +592,19 @@ private fun MediaViewerScreen(
                             onReady = { readyMedia[item.readinessKey] = true },
                             onContentClick = onChromeToggle,
                         )
-                        page == uiState.previousSourcePageIndex -> SourcePage(
-                            sourceName = uiState.previousSource?.name.orEmpty(),
-                            isArchive = uiState.previousSource?.isArchive == true,
-                            direction = SourceDirection.Previous,
-                            onClick = onPreviousSourceClick,
-                        )
-                        page == uiState.nextSourcePageIndex -> SourcePage(
-                            sourceName = uiState.nextSource?.name.orEmpty(),
-                            isArchive = uiState.nextSource?.isArchive == true,
-                            direction = SourceDirection.Next,
-                            onClick = onNextSourceClick,
-                        )
                         else -> EmptyViewerMessage()
                     }
                 }
 
-                if (uiState.isChromeHidden && uiState.pageCount > 1) {
+                if (uiState.isChromeHidden && uiState.pageCount > 0) {
                     HiddenNavigationButtons(
                         currentPage = pagerState.currentPage,
                         pageCount = uiState.pageCount,
                         onPreviousClick = {
-                            val previousPage = (pagerState.currentPage - 1).coerceAtLeast(0)
-                            coroutineScope.launch {
-                                pagerState.scrollToPage(previousPage)
-                            }
+                            navigateFromCurrentPage(-1, animated = false)
                         },
                         onNextClick = {
-                            val nextPage = (pagerState.currentPage + 1).coerceAtMost(uiState.lastPageIndex)
-                            coroutineScope.launch {
-                                pagerState.scrollToPage(nextPage)
-                            }
+                            navigateFromCurrentPage(1, animated = false)
                         },
                     )
                 }
@@ -623,6 +657,24 @@ private fun MediaViewerScreen(
     }
     if (detailsDialogVisible && selectedItem != null) {
         MediaDetailsDialog(item = selectedItem, onDismiss = { detailsDialogVisible = false })
+    }
+    edgeDialogDirection?.let { direction ->
+        SourceEdgeDialog(
+            direction = direction,
+            source = when (direction) {
+                SourceDirection.Previous -> uiState.previousSource
+                SourceDirection.Next -> uiState.nextSource
+            },
+            style = uiState.edgeDialogStyle,
+            onDismiss = { edgeDialogDirection = null },
+            onMove = {
+                edgeDialogDirection = null
+                when (direction) {
+                    SourceDirection.Previous -> onPreviousSourceClick()
+                    SourceDirection.Next -> onNextSourceClick()
+                }
+            },
+        )
     }
 }
 
@@ -897,42 +949,140 @@ private fun formatMediaBytes(bytes: Long): String {
 }
 
 @Composable
-private fun SourcePage(
-    sourceName: String,
-    isArchive: Boolean,
+private fun SourceEdgeDialog(
     direction: SourceDirection,
-    onClick: () -> Unit,
+    source: MediaViewerSource?,
+    style: MediaEdgeDialogStyle,
+    onDismiss: () -> Unit,
+    onMove: () -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black),
-        contentAlignment = Alignment.Center,
+    val isArchive = source?.isArchive == true
+    val title = if (source != null) {
+        stringResource(direction.titleStringRes(isArchive))
+    } else {
+        stringResource(direction.edgeReachedTitleStringRes())
+    }
+    val message = if (source != null) {
+        source.name
+    } else {
+        stringResource(direction.edgeReachedMessageStringRes())
+    }
+    val detail = source?.path
+    val moveLabel = source?.let { stringResource(direction.moveStringRes(isArchive)) }
+
+    if (style == MediaEdgeDialogStyle.Bottom) {
+        BottomSourceEdgeDialog(
+            title = title,
+            message = message,
+            detail = null,
+            moveLabel = moveLabel,
+            onDismiss = onDismiss,
+            onMove = onMove,
+        )
+        return
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            if (source != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(message)
+                    Text(detail.orEmpty(), style = MaterialTheme.typography.bodySmall)
+                }
+            } else {
+                Text(message)
+            }
+        },
+        confirmButton = {
+            if (source != null) {
+                Button(onClick = onMove) {
+                    Text(moveLabel.orEmpty())
+                }
+            } else {
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.close))
+                }
+            }
+        },
+        dismissButton = {
+            if (source != null) {
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun BottomSourceEdgeDialog(
+    title: String,
+    message: String,
+    detail: String?,
+    moveLabel: String?,
+    onDismiss: () -> Unit,
+    onMove: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-            modifier = Modifier.padding(24.dp),
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            contentAlignment = Alignment.BottomCenter,
         ) {
-            Icon(
-                if (isArchive) Icons.Default.Archive else Icons.Default.Folder,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.75f),
-                modifier = Modifier.size(52.dp),
-            )
-            Text(
-                text = stringResource(direction.titleStringRes(isArchive)),
-                color = Color.White,
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = sourceName,
-                color = Color.White.copy(alpha = 0.7f),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Button(onClick = onClick) {
-                Text(stringResource(direction.moveStringRes(isArchive)))
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                tonalElevation = 6.dp,
+                color = MaterialTheme.colorScheme.surface,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 14.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(1.dp),
+                    ) {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        detail?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.MiddleEllipsis,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(if (moveLabel == null) R.string.close else R.string.cancel))
+                    }
+                    moveLabel?.let {
+                        Button(onClick = onMove) {
+                            Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
             }
         }
     }
@@ -951,6 +1101,16 @@ private fun SourceDirection.titleStringRes(isArchive: Boolean): Int = when (this
 private fun SourceDirection.moveStringRes(isArchive: Boolean): Int = when (this) {
     SourceDirection.Previous -> if (isArchive) R.string.move_previous_archive else R.string.move_previous_directory
     SourceDirection.Next -> if (isArchive) R.string.move_next_archive else R.string.move_next_directory
+}
+
+private fun SourceDirection.edgeReachedTitleStringRes(): Int = when (this) {
+    SourceDirection.Previous -> R.string.reached_first_media
+    SourceDirection.Next -> R.string.reached_last_media
+}
+
+private fun SourceDirection.edgeReachedMessageStringRes(): Int = when (this) {
+    SourceDirection.Previous -> R.string.no_previous_source
+    SourceDirection.Next -> R.string.no_next_source
 }
 
 @Composable
