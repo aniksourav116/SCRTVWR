@@ -862,7 +862,7 @@ private fun MiddleEllipsizedText(
             style = style,
             color = color,
             maxLines = 1,
-            overflow = TextOverflow.Clip,
+            overflow = TextOverflow.MiddleEllipsis,
         )
     }
 }
@@ -995,8 +995,8 @@ fun DirectoryScreenPreview() {
                 directoryListing = DirectoryListing(
                     entries = listOf(
                         DirectoryEntry(
-                            name = "Recordings",
-                            path = "/storage/emulated/0/Movies/Recordings",
+                            name = "Recordings of when we went fishing or something",
+                            path = "/storage/emulated/0/Movies/Recordings of when we went fishing or something",
                             isDirectory = true,
                             sizeBytes = 0L,
                             lastModifiedMillis = 0L,
@@ -1008,9 +1008,17 @@ fun DirectoryScreenPreview() {
                             sizeBytes = 24_000_000L,
                             lastModifiedMillis = 0L,
                         ),
+                        DirectoryEntry(
+                            name = "megamind_78681236172_81736172371276.mp3",
+                            path = "/storage/emulated/0/Movies/megamind_78681236172_81736172371276.mp3",
+                            isDirectory = false,
+                            sizeBytes = 24_000_000L,
+                            lastModifiedMillis = 0L,
+                        ),
                     ),
                 ),
                 canNavigateUp = true,
+                viewMode = DirectoryViewMode.Grid,
             ),
             onSearchQueryChange = {},
             onViewModeChange = {},
