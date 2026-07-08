@@ -313,12 +313,10 @@ private fun VideoPage(
 ) {
     val context = LocalContext.current
     var savedPlaybackPosition by rememberSaveable(item.path) { mutableLongStateOf(0L) }
+    val mediaItem = remember(item.path) { MediaItem.fromUri(Uri.fromFile(File(item.path))) }
     val player = remember(item.path) {
         ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(Uri.fromFile(File(item.path))))
-            if (savedPlaybackPosition > 0L) seekTo(savedPlaybackPosition)
-            playWhenReady = isActive
-            prepare()
+            setMediaItem(mediaItem)
         }
     }
     var controlsVisible by rememberSaveable(item.path) { mutableStateOf(true) }
@@ -332,8 +330,27 @@ private fun VideoPage(
     var speedMenuOpen by remember { mutableStateOf(false) }
     var optionsMenuOpen by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var prepareRequested by remember { mutableStateOf(false) }
     var reloadWhenActive by remember { mutableStateOf(false) }
+    var activeReloadAttempts by remember(item.path) { mutableStateOf(0) }
     val latestIsActive by rememberUpdatedState(isActive)
+
+    fun saveCurrentPosition() {
+        if (prepareRequested || player.playbackState != Player.STATE_IDLE) {
+            val currentPosition = player.currentPosition.coerceAtLeast(0L)
+            savedPlaybackPosition = currentPosition
+            position = currentPosition
+        }
+    }
+
+    fun preparePlayerForActivePlayback() {
+        error = null
+        reloadWhenActive = false
+        player.setMediaItem(mediaItem)
+        if (savedPlaybackPosition > 0L) player.seekTo(savedPlaybackPosition)
+        player.prepare()
+        prepareRequested = true
+    }
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -346,44 +363,62 @@ private fun VideoPage(
                     duration = player.duration.coerceAtLeast(0L)
                     error = null
                     reloadWhenActive = false
+                    activeReloadAttempts = 0
                 }
                 if (state == Player.STATE_ENDED) onEnded()
             }
 
             override fun onPlayerError(playbackError: PlaybackException) {
-                error = playbackError.localizedMessage ?: playbackError.errorCodeName
-                if (!latestIsActive) reloadWhenActive = true
+                prepareRequested = false
+                if (latestIsActive && activeReloadAttempts < ACTIVE_ERROR_RELOAD_ATTEMPTS) {
+                    error = null
+                    reloadWhenActive = true
+                    activeReloadAttempts += 1
+                } else if (latestIsActive) {
+                    error = playbackError.localizedMessage ?: playbackError.errorCodeName
+                } else {
+                    error = null
+                    reloadWhenActive = true
+                }
             }
         }
         player.addListener(listener)
         onDispose {
             player.removeListener(listener)
-            savedPlaybackPosition = player.currentPosition.coerceAtLeast(0L)
+            saveCurrentPosition()
             player.release()
         }
     }
 
-    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { player.pause() }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        saveCurrentPosition()
+        player.pause()
+        player.stop()
+        prepareRequested = false
+    }
 
-    LaunchedEffect(isActive, player) {
+    LaunchedEffect(isActive, reloadWhenActive, player) {
         if (isActive) {
             player.playWhenReady = true
-            if (reloadWhenActive) {
-                reloadWhenActive = false
-                error = null
-                player.seekTo(savedPlaybackPosition.coerceAtLeast(0L))
-                player.prepare()
-                player.play()
-            } else if (player.playbackState != Player.STATE_ENDED) {
+            if (reloadWhenActive || !prepareRequested || player.playbackState == Player.STATE_IDLE) {
+                if (reloadWhenActive) delay(ACTIVE_ERROR_RELOAD_DELAY_MILLIS)
+                preparePlayerForActivePlayback()
+            }
+            if (player.playbackState != Player.STATE_ENDED) {
                 player.play()
             }
         } else {
+            saveCurrentPosition()
             player.pause()
+            if (prepareRequested || player.playbackState != Player.STATE_IDLE) {
+                player.stop()
+                prepareRequested = false
+            }
         }
     }
 
-    LaunchedEffect(player) {
-        while (true) {
+    LaunchedEffect(player, isActive) {
+        while (isActive) {
             position = player.currentPosition.coerceAtLeast(0L)
             savedPlaybackPosition = position
             if (player.duration > 0) duration = player.duration
@@ -808,3 +843,5 @@ private val PLAYBACK_SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 private const val SHORT_SEEK_MILLIS = 2_000L
 private const val DOUBLE_TAP_SEEK_MILLIS = 10_000L
 private const val MAX_SWIPE_SEEK_MILLIS = 300_000L
+private const val ACTIVE_ERROR_RELOAD_ATTEMPTS = 2
+private const val ACTIVE_ERROR_RELOAD_DELAY_MILLIS = 150L
