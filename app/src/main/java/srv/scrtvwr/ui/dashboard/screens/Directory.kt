@@ -7,11 +7,9 @@ import android.media.MediaMetadataRetriever
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
@@ -19,7 +17,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -46,10 +43,8 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.CircularProgressIndicator
@@ -542,11 +537,11 @@ private fun DirectoryGrid(
     onNavigateUp: () -> Unit,
 ) {
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(140.dp),
+        columns = GridCells.Adaptive(112.dp),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         if (uiState.canNavigateUp) {
             item(key = "parent") {
@@ -558,7 +553,7 @@ private fun DirectoryGrid(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .aspectRatio(4f / 3f)
+                                .aspectRatio(1f)
                                 .background(style.thumbnailColor),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -569,7 +564,6 @@ private fun DirectoryGrid(
                             )
                         }
                     },
-                    style = style,
                     onClick = onNavigateUp,
                 )
             }
@@ -585,7 +579,7 @@ private fun DirectoryGrid(
             val style = entry.entryVisualStyle()
             DirectoryGridCard(
                 title = entry.name,
-                subtitle = entry.supportingText(),
+                subtitle = entry.typeText(),
                 thumbnail = {
                     EntryThumbnail(
                         entry = entry,
@@ -593,10 +587,9 @@ private fun DirectoryGrid(
                         style = style,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .aspectRatio(4f / 3f),
+                            .aspectRatio(1f),
                     )
                 },
-                style = style,
                 onClick = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
                     {
                         if (entry.isDirectory) {
@@ -618,37 +611,31 @@ private fun DirectoryGridCard(
     title: String,
     subtitle: String,
     thumbnail: @Composable () -> Unit,
-    style: EntryVisualStyle,
     onClick: (() -> Unit)?,
 ) {
-    ElevatedCard(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .defaultMinSize(minHeight = 132.dp)
-            .border(BorderStroke(1.dp, style.borderColor), MaterialTheme.shapes.medium)
-            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = style.containerColor,
-        ),
+            .clip(MaterialTheme.shapes.small)
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .padding(4.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            thumbnail()
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text(title, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(
-                    subtitle,
-                    color = style.supportingColor,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
+        thumbnail()
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = subtitle,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -718,9 +705,7 @@ private fun EntryThumbnail(
 private data class EntryVisualStyle(
     val containerColor: Color,
     val thumbnailColor: Color,
-    val borderColor: Color,
     val accentColor: Color,
-    val supportingColor: Color,
 )
 
 @Composable
@@ -730,25 +715,19 @@ private fun DirectoryEntry.entryVisualStyle(): EntryVisualStyle {
         isDirectory -> EntryVisualStyle(
             containerColor = colors.primaryContainer.copy(alpha = 0.24f),
             thumbnailColor = colors.primaryContainer.copy(alpha = 0.62f),
-            borderColor = colors.primary.copy(alpha = 0.32f),
             accentColor = colors.primary,
-            supportingColor = colors.onPrimaryContainer.copy(alpha = 0.76f),
         )
 
         mediaType == DirectoryMediaType.Image || mediaType == DirectoryMediaType.Video -> EntryVisualStyle(
             containerColor = colors.tertiaryContainer.copy(alpha = 0.22f),
             thumbnailColor = colors.tertiaryContainer.copy(alpha = 0.56f),
-            borderColor = colors.tertiary.copy(alpha = 0.30f),
             accentColor = colors.tertiary,
-            supportingColor = colors.onTertiaryContainer.copy(alpha = 0.76f),
         )
 
         mediaType == DirectoryMediaType.Archive -> EntryVisualStyle(
             containerColor = colors.secondaryContainer.copy(alpha = 0.22f),
             thumbnailColor = colors.secondaryContainer.copy(alpha = 0.58f),
-            borderColor = colors.secondary.copy(alpha = 0.32f),
             accentColor = colors.secondary,
-            supportingColor = colors.onSecondaryContainer.copy(alpha = 0.76f),
         )
 
         else -> defaultEntryVisualStyle()
@@ -761,9 +740,7 @@ private fun navigationEntryVisualStyle(): EntryVisualStyle {
     return EntryVisualStyle(
         containerColor = colors.surfaceVariant.copy(alpha = 0.32f),
         thumbnailColor = colors.surfaceVariant,
-        borderColor = colors.outlineVariant.copy(alpha = 0.5f),
         accentColor = colors.onSurfaceVariant,
-        supportingColor = colors.onSurfaceVariant,
     )
 }
 
@@ -773,9 +750,7 @@ private fun defaultEntryVisualStyle(): EntryVisualStyle {
     return EntryVisualStyle(
         containerColor = colors.surface,
         thumbnailColor = colors.surfaceVariant,
-        borderColor = colors.outlineVariant.copy(alpha = 0.35f),
         accentColor = colors.onSurfaceVariant,
-        supportingColor = colors.onSurfaceVariant,
     )
 }
 
@@ -807,6 +782,16 @@ private fun DirectoryEntry.supportingText(): String =
         mediaType == DirectoryMediaType.Video -> stringResource(R.string.video_with_size, formatBytes(sizeBytes))
         mediaType == DirectoryMediaType.Archive -> stringResource(R.string.archive_with_size, formatBytes(sizeBytes))
         else -> formatBytes(sizeBytes)
+    }
+
+@Composable
+private fun DirectoryEntry.typeText(): String =
+    when {
+        isDirectory -> stringResource(R.string.folder)
+        mediaType == DirectoryMediaType.Image -> stringResource(R.string.image)
+        mediaType == DirectoryMediaType.Video -> stringResource(R.string.video)
+        mediaType == DirectoryMediaType.Archive -> stringResource(R.string.archive)
+        else -> stringResource(R.string.file)
     }
 
 private fun DirectorySortOrder.labelResource(): Int = when (this) {

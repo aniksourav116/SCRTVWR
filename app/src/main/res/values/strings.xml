@@ -17,6 +17,10 @@
     <string name="search_files_folders">Search files and folders</string>
     <string name="go_up">Go up</string>
     <string name="folder">Folder</string>
+    <string name="image">Image</string>
+    <string name="video">Video</string>
+    <string name="archive">Archive</string>
+    <string name="file">File</string>
     <string name="image_with_size">Image - %1$s</string>
     <string name="video_with_size">Video - %1$s</string>
     <string name="archive_with_size">Archive - %1$s</string>
