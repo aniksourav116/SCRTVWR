@@ -27,6 +27,7 @@ class MediaViewerViewModel(
             slideShowStayMillis = preferences.getSlideShowStayMillis(),
             holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
             imagePreloadDistance = preferences.getImagePreloadDistance(),
+            edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
         ),
     )
     val uiState = _uiState.asStateFlow()
@@ -118,6 +119,7 @@ class MediaViewerViewModel(
                 slideShowStayMillis = preferences.getSlideShowStayMillis(),
                 holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
                 imagePreloadDistance = preferences.getImagePreloadDistance(),
+                edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
                 bookmarked = preferences.isMediaBookmarked(items.getOrNull(initialPage)?.path ?: selectedPath),
                 isLoading = false,
             )
@@ -235,6 +237,7 @@ data class MediaViewerUiState(
     val slideShowStayMillis: Long = 50L,
     val holdSlideShowEnabled: Boolean = false,
     val imagePreloadDistance: Int = 5,
+    val edgeDialogStyle: MediaEdgeDialogStyle = MediaEdgeDialogStyle.Bottom,
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
 ) {

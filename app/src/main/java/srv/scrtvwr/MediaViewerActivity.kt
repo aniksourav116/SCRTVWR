@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -55,6 +56,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -86,6 +88,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
@@ -94,6 +98,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.PreviewResult
+import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.MediaViewerItem
 import srv.scrtvwr.ui.media.MediaViewerSource
 import srv.scrtvwr.ui.media.MediaViewerType
@@ -660,6 +665,7 @@ private fun MediaViewerScreen(
                 SourceDirection.Previous -> uiState.previousSource
                 SourceDirection.Next -> uiState.nextSource
             },
+            style = uiState.edgeDialogStyle,
             onDismiss = { edgeDialogDirection = null },
             onMove = {
                 edgeDialogDirection = null
@@ -946,35 +952,53 @@ private fun formatMediaBytes(bytes: Long): String {
 private fun SourceEdgeDialog(
     direction: SourceDirection,
     source: MediaViewerSource?,
+    style: MediaEdgeDialogStyle,
     onDismiss: () -> Unit,
     onMove: () -> Unit,
 ) {
     val isArchive = source?.isArchive == true
+    val title = if (source != null) {
+        stringResource(direction.titleStringRes(isArchive))
+    } else {
+        stringResource(direction.edgeReachedTitleStringRes())
+    }
+    val message = if (source != null) {
+        source.name
+    } else {
+        stringResource(direction.edgeReachedMessageStringRes())
+    }
+    val detail = source?.path
+    val moveLabel = source?.let { stringResource(direction.moveStringRes(isArchive)) }
+
+    if (style == MediaEdgeDialogStyle.Bottom) {
+        BottomSourceEdgeDialog(
+            title = title,
+            message = message,
+            detail = null,
+            moveLabel = moveLabel,
+            onDismiss = onDismiss,
+            onMove = onMove,
+        )
+        return
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text(
-                if (source != null) {
-                    stringResource(direction.titleStringRes(isArchive))
-                } else {
-                    stringResource(direction.edgeReachedTitleStringRes())
-                },
-            )
-        },
+        title = { Text(title) },
         text = {
             if (source != null) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(source.name)
-                    Text(source.path, style = MaterialTheme.typography.bodySmall)
+                    Text(message)
+                    Text(detail.orEmpty(), style = MaterialTheme.typography.bodySmall)
                 }
             } else {
-                Text(stringResource(direction.edgeReachedMessageStringRes()))
+                Text(message)
             }
         },
         confirmButton = {
             if (source != null) {
                 Button(onClick = onMove) {
-                    Text(stringResource(direction.moveStringRes(isArchive)))
+                    Text(moveLabel.orEmpty())
                 }
             } else {
                 TextButton(onClick = onDismiss) {
@@ -990,6 +1014,78 @@ private fun SourceEdgeDialog(
             }
         },
     )
+}
+
+@Composable
+private fun BottomSourceEdgeDialog(
+    title: String,
+    message: String,
+    detail: String?,
+    moveLabel: String?,
+    onDismiss: () -> Unit,
+    onMove: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                tonalElevation = 6.dp,
+                color = MaterialTheme.colorScheme.surface,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 14.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(1.dp),
+                    ) {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        detail?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.MiddleEllipsis,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(if (moveLabel == null) R.string.close else R.string.cancel))
+                    }
+                    moveLabel?.let {
+                        Button(onClick = onMove) {
+                            Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 private enum class SourceDirection {

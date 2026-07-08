@@ -2,6 +2,7 @@ package srv.scrtvwr.preferences
 
 import android.content.Context
 import org.json.JSONArray
+import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 
 class ScrtvwrPreferences(context: Context) {
@@ -38,6 +39,17 @@ class ScrtvwrPreferences(context: Context) {
     fun saveVideoPreloadDistance(distance: Int) {
         preferences.edit()
             .putInt(KEY_VIDEO_PRELOAD_DISTANCE, distance.coerceAtLeast(0))
+            .apply()
+    }
+
+    fun getMediaEdgeDialogStyle(): MediaEdgeDialogStyle =
+        preferences.getString(KEY_MEDIA_EDGE_DIALOG_STYLE, null)
+            ?.let { value -> MediaEdgeDialogStyle.entries.firstOrNull { it.name == value } }
+            ?: MediaEdgeDialogStyle.Bottom
+
+    fun saveMediaEdgeDialogStyle(style: MediaEdgeDialogStyle) {
+        preferences.edit()
+            .putString(KEY_MEDIA_EDGE_DIALOG_STYLE, style.name)
             .apply()
     }
 
@@ -132,6 +144,7 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_HOLD_SLIDE_SHOW_ENABLED = "hold_slide_show_enabled"
         const val KEY_IMAGE_PRELOAD_DISTANCE = "image_preload_distance"
         const val KEY_VIDEO_PRELOAD_DISTANCE = "video_preload_distance"
+        const val KEY_MEDIA_EDGE_DIALOG_STYLE = "media_edge_dialog_style"
         const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
         const val KEY_BOOKMARKED_MEDIA = "bookmarked_media"
         const val KEY_MEDIA_HISTORY = "media_history"

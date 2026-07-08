@@ -37,6 +37,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.OthersUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.OthersViewModel
+import srv.scrtvwr.ui.components.SimpleDropdown
+import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.R
 
@@ -53,6 +55,7 @@ fun Others(
         onHoldSlideShowEnabledChange = viewModel::setHoldSlideShowEnabled,
         onImagePreloadDistanceChange = viewModel::setImagePreloadDistance,
         onVideoPreloadDistanceChange = viewModel::setVideoPreloadDistance,
+        onMediaEdgeDialogStyleChange = viewModel::setMediaEdgeDialogStyle,
         modifier = modifier,
     )
 }
@@ -65,6 +68,7 @@ fun OthersScreen(
     onHoldSlideShowEnabledChange: (Boolean) -> Unit,
     onImagePreloadDistanceChange: (Int) -> Unit,
     onVideoPreloadDistanceChange: (Int) -> Unit,
+    onMediaEdgeDialogStyleChange: (MediaEdgeDialogStyle) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var slideShowStayMillisText by rememberSaveable { mutableStateOf(uiState.slideShowStayMillis.toString()) }
@@ -182,6 +186,31 @@ fun OthersScreen(
             )
         }
         item {
+            val bottomDialogLabel = stringResource(R.string.edge_dialog_style_bottom)
+            val centerDialogLabel = stringResource(R.string.edge_dialog_style_center)
+            ListItem(
+                modifier = Modifier.fillMaxWidth(),
+                headlineContent = { Text(stringResource(R.string.edge_dialog_style)) },
+                supportingContent = { Text(stringResource(R.string.edge_dialog_style_summary)) },
+                leadingContent = { Icon(Icons.Default.Info, contentDescription = null) },
+                trailingContent = {
+                    SimpleDropdown(
+                        label = stringResource(R.string.edge_dialog_style),
+                        items = MediaEdgeDialogStyle.entries,
+                        selected = uiState.mediaEdgeDialogStyle,
+                        onSelected = onMediaEdgeDialogStyleChange,
+                        modifier = Modifier.fillMaxWidth(0.46f),
+                        itemLabel = { style ->
+                            when (style) {
+                                MediaEdgeDialogStyle.Bottom -> bottomDialogLabel
+                                MediaEdgeDialogStyle.Center -> centerDialogLabel
+                            }
+                        },
+                    )
+                },
+            )
+        }
+        item {
             val context = LocalContext.current
             val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
             val versionName = packageInfo.versionName ?: "Unknown"
@@ -249,12 +278,14 @@ fun OthersPreview() {
                 holdSlideShowEnabled = true,
                 imagePreloadDistance = 5,
                 videoPreloadDistance = 1,
+                mediaEdgeDialogStyle = MediaEdgeDialogStyle.Bottom,
             ),
             onShowHiddenFilesChange = {},
             onSlideShowStayMillisChange = {},
             onHoldSlideShowEnabledChange = {},
             onImagePreloadDistanceChange = {},
             onVideoPreloadDistanceChange = {},
+            onMediaEdgeDialogStyleChange = {},
         )
     }
 }

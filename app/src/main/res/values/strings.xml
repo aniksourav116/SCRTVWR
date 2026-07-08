@@ -42,6 +42,10 @@
     <string name="image_preload_summary">How many nearby pages are prepared in the viewer.</string>
     <string name="video_preload_distance">Video preload distance</string>
     <string name="video_preload_summary">How many nearby video pages are prepared in the player.</string>
+    <string name="edge_dialog_style">Edge dialog style</string>
+    <string name="edge_dialog_style_summary">Choose how the viewer shows previous and next directory prompts.</string>
+    <string name="edge_dialog_style_bottom">Bottom</string>
+    <string name="edge_dialog_style_center">Center</string>
     <string name="invalid_whole_number">Enter a valid whole number.</string>
     <string name="short_slideshow_warning">Very short intervals may make controls difficult to use.</string>
     <string name="long_slideshow_warning">Very long intervals may look like the slideshow has stopped.</string>

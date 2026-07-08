@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import srv.scrtvwr.preferences.ScrtvwrPreferences
+import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 
 class OthersViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = ScrtvwrPreferences(application)
@@ -15,6 +16,7 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
             holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
             imagePreloadDistance = preferences.getImagePreloadDistance(),
             videoPreloadDistance = preferences.getVideoPreloadDistance(),
+            mediaEdgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
             showHiddenFiles = preferences.getShowHiddenFiles(),
         ),
     )
@@ -47,6 +49,11 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
         preferences.saveVideoPreloadDistance(boundedDistance)
         _uiState.update { it.copy(videoPreloadDistance = boundedDistance) }
     }
+
+    fun setMediaEdgeDialogStyle(style: MediaEdgeDialogStyle) {
+        preferences.saveMediaEdgeDialogStyle(style)
+        _uiState.update { it.copy(mediaEdgeDialogStyle = style) }
+    }
 }
 
 data class OthersUiState(
@@ -55,4 +62,5 @@ data class OthersUiState(
     val holdSlideShowEnabled: Boolean = false,
     val imagePreloadDistance: Int = 5,
     val videoPreloadDistance: Int = 0,
+    val mediaEdgeDialogStyle: MediaEdgeDialogStyle = MediaEdgeDialogStyle.Bottom,
 )
