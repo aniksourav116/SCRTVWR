@@ -52,6 +52,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -331,6 +332,8 @@ private fun VideoPage(
     var speedMenuOpen by remember { mutableStateOf(false) }
     var optionsMenuOpen by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var reloadWhenActive by remember { mutableStateOf(false) }
+    val latestIsActive by rememberUpdatedState(isActive)
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -339,12 +342,17 @@ private fun VideoPage(
             }
 
             override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_READY) duration = player.duration.coerceAtLeast(0L)
+                if (state == Player.STATE_READY) {
+                    duration = player.duration.coerceAtLeast(0L)
+                    error = null
+                    reloadWhenActive = false
+                }
                 if (state == Player.STATE_ENDED) onEnded()
             }
 
             override fun onPlayerError(playbackError: PlaybackException) {
                 error = playbackError.localizedMessage ?: playbackError.errorCodeName
+                if (!latestIsActive) reloadWhenActive = true
             }
         }
         player.addListener(listener)
@@ -360,7 +368,15 @@ private fun VideoPage(
     LaunchedEffect(isActive, player) {
         if (isActive) {
             player.playWhenReady = true
-            if (player.playbackState != Player.STATE_ENDED) player.play()
+            if (reloadWhenActive) {
+                reloadWhenActive = false
+                error = null
+                player.seekTo(savedPlaybackPosition.coerceAtLeast(0L))
+                player.prepare()
+                player.play()
+            } else if (player.playbackState != Player.STATE_ENDED) {
+                player.play()
+            }
         } else {
             player.pause()
         }
