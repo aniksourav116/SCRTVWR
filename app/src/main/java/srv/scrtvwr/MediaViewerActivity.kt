@@ -13,6 +13,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Arrangement
@@ -44,6 +48,8 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
 import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -62,6 +68,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -78,6 +85,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -206,6 +214,8 @@ private fun MediaViewerScreen(
     var pseudoSlideShowStayMillis by remember { mutableStateOf(uiState.slideShowStayMillis) }
     var pseudoSlideShowHorizontalFraction by remember { mutableFloatStateOf(0f) }
     val readyMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
+    val zoomedMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
+    var zoomCommand by remember { mutableStateOf<ZoomCommand?>(null) }
     val isAnySlideShowRunning = uiState.isSlideShowRunning || isPseudoSlideShowRunning
     val activeSlideShowStayMillis = if (isPseudoSlideShowRunning) {
         pseudoSlideShowStayMillis
@@ -287,6 +297,16 @@ private fun MediaViewerScreen(
     }
 
     val selectedItem = uiState.itemForPage(pagerState.currentPage)
+    val selectedMediaKey = selectedItem?.readinessKey
+    val isCurrentMediaZoomed = selectedMediaKey?.let { zoomedMedia[it] == true } == true
+    fun toggleCurrentImageZoom() {
+        val mediaKey = selectedMediaKey ?: return
+        zoomCommand = ZoomCommand(
+            mediaKey = mediaKey,
+            id = (zoomCommand?.id ?: 0) + 1,
+        )
+    }
+
     Timber.d("name ${selectedItem?.name}")
     val splits = selectedItem?.name?.split("_") ?: emptyList()
     Timber.d("splits $splits")
@@ -411,10 +431,13 @@ private fun MediaViewerScreen(
                     fillFrame = uiState.fillFrame,
                     flipped = uiState.flipped,
                     bookmarked = uiState.bookmarked,
+                    zoomEnabled = selectedItem?.type == MediaViewerType.Image,
+                    zoomed = isCurrentMediaZoomed,
                     onFitClick = onFitClick,
                     onRotateClick = onRotateClick,
                     onFlipClick = onFlipClick,
                     onBookmarkClick = onBookmarkClick,
+                    onZoomClick = ::toggleCurrentImageZoom,
                     onDetailsClick = { detailsDialogVisible = true },
                     onSlideShowClick = { slideShowDialogVisible = true },
                 )
@@ -438,9 +461,11 @@ private fun MediaViewerScreen(
                 } else HorizontalPager(
                     state = pagerState,
                     beyondViewportPageCount = minOf(uiState.imagePreloadDistance, uiState.lastPageIndex),
+                    userScrollEnabled = !isCurrentMediaZoomed,
                     modifier = Modifier
                         .fillMaxSize()
-                        .pointerInput(uiState.pageCount) {
+                        .pointerInput(uiState.pageCount, isCurrentMediaZoomed) {
+                            if (isCurrentMediaZoomed) return@pointerInput
                             detectVerticalDragGestures(
                                 onDragStart = { verticalDrag = 0f },
                                 onVerticalDrag = { _, dragAmount -> verticalDrag += dragAmount },
@@ -459,11 +484,13 @@ private fun MediaViewerScreen(
                             uiState.isSlideShowRunning,
                             uiState.holdSlideShowEnabled,
                             uiState.slideShowStayMillis,
+                            isCurrentMediaZoomed,
                         ) {
                             if (
                                 !uiState.holdSlideShowEnabled ||
                                 !uiState.isChromeHidden ||
-                                uiState.isSlideShowRunning
+                                uiState.isSlideShowRunning ||
+                                isCurrentMediaZoomed
                             ) return@pointerInput
 
                             awaitEachGesture {
@@ -502,7 +529,8 @@ private fun MediaViewerScreen(
                                 }
                             }
                         }
-                        .pointerInput(uiState.pageCount) {
+                        .pointerInput(uiState.pageCount, isCurrentMediaZoomed) {
+                            if (isCurrentMediaZoomed) return@pointerInput
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
                                 var totalX = 0f
@@ -534,7 +562,8 @@ private fun MediaViewerScreen(
                                 } while (change.pressed)
                             }
                         }
-                        .pointerInput(uiState.pageCount) {
+                        .pointerInput(uiState.pageCount, isCurrentMediaZoomed) {
+                            if (isCurrentMediaZoomed) return@pointerInput
                             awaitPointerEventScope {
                                 var lastScrollTime = 0L
                                 var acceleration = 1f
@@ -589,14 +618,22 @@ private fun MediaViewerScreen(
                             fillFrame = uiState.fillFrame,
                             rotation = uiState.rotation,
                             flipped = uiState.flipped,
+                            zoomCommand = zoomCommand,
                             onReady = { readyMedia[item.readinessKey] = true },
+                            onZoomChanged = { zoomed ->
+                                if (zoomed) {
+                                    zoomedMedia[item.readinessKey] = true
+                                } else {
+                                    zoomedMedia.remove(item.readinessKey)
+                                }
+                            },
                             onContentClick = onChromeToggle,
                         )
                         else -> EmptyViewerMessage()
                     }
                 }
 
-                if (uiState.isChromeHidden && uiState.pageCount > 0) {
+                if (uiState.isChromeHidden && uiState.pageCount > 0 && !isCurrentMediaZoomed) {
                     HiddenNavigationButtons(
                         currentPage = pagerState.currentPage,
                         pageCount = uiState.pageCount,
@@ -723,10 +760,13 @@ private fun ViewerOptionsRow(
     fillFrame: Boolean,
     flipped: Boolean,
     bookmarked: Boolean,
+    zoomEnabled: Boolean,
+    zoomed: Boolean,
     onFitClick: () -> Unit,
     onRotateClick: () -> Unit,
     onFlipClick: () -> Unit,
     onBookmarkClick: () -> Unit,
+    onZoomClick: () -> Unit,
     onDetailsClick: () -> Unit,
     onSlideShowClick: () -> Unit,
 ) {
@@ -760,6 +800,17 @@ private fun ViewerOptionsRow(
                 Icons.Default.BookmarkBorder,
                 contentDescription = stringResource(R.string.bookmark),
                 tint = if (bookmarked) Color(0xFF64B5F6) else Color.White,
+            )
+        }
+        IconButton(onClick = onZoomClick, enabled = zoomEnabled) {
+            Icon(
+                if (zoomed) Icons.Default.ZoomOut else Icons.Default.ZoomIn,
+                contentDescription = stringResource(if (zoomed) R.string.reset_zoom else R.string.zoom_in),
+                tint = when {
+                    !zoomEnabled -> Color.White.copy(alpha = 0.35f)
+                    zoomed -> Color(0xFF64B5F6)
+                    else -> Color.White
+                },
             )
         }
         IconButton(onClick = onDetailsClick) {
@@ -808,7 +859,9 @@ private fun MediaPage(
     fillFrame: Boolean,
     rotation: Int,
     flipped: Boolean,
+    zoomCommand: ZoomCommand?,
     onReady: () -> Unit,
+    onZoomChanged: (Boolean) -> Unit,
     onContentClick: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -876,10 +929,120 @@ private fun MediaPage(
         if (preview?.bitmap != null) onReady()
     }
 
+    var imageScale by remember(item.path, item.lastModifiedMillis) { mutableFloatStateOf(MIN_IMAGE_ZOOM) }
+    var imageOffsetX by remember(item.path, item.lastModifiedMillis) { mutableFloatStateOf(0f) }
+    var imageOffsetY by remember(item.path, item.lastModifiedMillis) { mutableFloatStateOf(0f) }
+    var handledZoomCommandId by remember(item.readinessKey) { mutableStateOf(zoomCommand?.id ?: 0) }
+    val isZoomed = imageScale > MIN_IMAGE_ZOOM
+
+    fun resetImageZoom() {
+        imageScale = MIN_IMAGE_ZOOM
+        imageOffsetX = 0f
+        imageOffsetY = 0f
+    }
+
+    fun setCenteredImageZoom(targetScale: Float) {
+        imageScale = targetScale.coerceIn(MIN_IMAGE_ZOOM, MAX_IMAGE_ZOOM)
+        imageOffsetX = 0f
+        imageOffsetY = 0f
+    }
+
+    LaunchedEffect(item.path, item.lastModifiedMillis, fillFrame, rotation, flipped) {
+        resetImageZoom()
+    }
+
+    LaunchedEffect(item.readinessKey, isZoomed) {
+        onZoomChanged(isZoomed)
+    }
+
+    LaunchedEffect(zoomCommand, item.readinessKey) {
+        val command = zoomCommand
+        if (
+            command != null &&
+            command.mediaKey == item.readinessKey &&
+            command.id != handledZoomCommandId
+        ) {
+            handledZoomCommandId = command.id
+            if (isZoomed) {
+                resetImageZoom()
+            } else {
+                setCenteredImageZoom(DOUBLE_TAP_IMAGE_ZOOM)
+            }
+        }
+    }
+
+    DisposableEffect(item.readinessKey) {
+        onDispose {
+            onZoomChanged(false)
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .clickable(onClick = onContentClick),
+            .pointerInput(item.path, item.lastModifiedMillis) {
+                detectTapGestures(
+                    onTap = { onContentClick() },
+                    onDoubleTap = { tapOffset ->
+                        if (imageScale > MIN_IMAGE_ZOOM) {
+                            resetImageZoom()
+                        } else {
+                            val targetScale = DOUBLE_TAP_IMAGE_ZOOM
+                            val center = Offset(size.width / 2f, size.height / 2f)
+                            val nextOffset = constrainImageOffset(
+                                offset = (center - tapOffset) * (targetScale - MIN_IMAGE_ZOOM),
+                                width = size.width.toFloat(),
+                                height = size.height.toFloat(),
+                                scale = targetScale,
+                            )
+                            imageScale = targetScale
+                            imageOffsetX = nextOffset.x
+                            imageOffsetY = nextOffset.y
+                        }
+                    },
+                )
+            }
+            .pointerInput(item.path, item.lastModifiedMillis) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    do {
+                        val event = awaitPointerEvent()
+                        val pressedCount = event.changes.count { it.pressed }
+                        if (pressedCount == 0) break
+
+                        val zoomChange = if (pressedCount > 1) event.calculateZoom() else MIN_IMAGE_ZOOM
+                        val panChange = if (imageScale > MIN_IMAGE_ZOOM || pressedCount > 1) {
+                            event.calculatePan()
+                        } else {
+                            Offset.Zero
+                        }
+                        val shouldHandle = imageScale > MIN_IMAGE_ZOOM || pressedCount > 1
+                        if (shouldHandle) {
+                            val previousScale = imageScale
+                            val nextScale = (imageScale * zoomChange).coerceIn(MIN_IMAGE_ZOOM, MAX_IMAGE_ZOOM)
+                            val nextOffset = if (nextScale <= MIN_IMAGE_ZOOM) {
+                                Offset.Zero
+                            } else {
+                                val centroid = event.calculateCentroid(useCurrent = true)
+                                val center = Offset(size.width / 2f, size.height / 2f)
+                                val scaleChange = nextScale / previousScale
+                                ((Offset(imageOffsetX, imageOffsetY) + centroid - center) * scaleChange) -
+                                    (centroid - center) + panChange
+                            }
+                            val constrainedOffset = constrainImageOffset(
+                                offset = nextOffset,
+                                width = size.width.toFloat(),
+                                height = size.height.toFloat(),
+                                scale = nextScale,
+                            )
+                            imageScale = nextScale
+                            imageOffsetX = constrainedOffset.x
+                            imageOffsetY = constrainedOffset.y
+                            event.changes.forEach { it.consume() }
+                        }
+                    } while (event.changes.any { it.pressed })
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
         val previewResult = preview
@@ -900,8 +1063,14 @@ private fun MediaPage(
                 contentDescription = item.name,
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer(rotationZ = rotation.toFloat())
-                    .scale(scaleX = if (flipped) -1f else 1f, scaleY = 1f),
+                    .graphicsLayer(
+                        rotationZ = rotation.toFloat(),
+                        scaleX = imageScale * if (flipped) -1f else 1f,
+                        scaleY = imageScale,
+                        translationX = imageOffsetX,
+                        translationY = imageOffsetY,
+                        clip = true,
+                    ),
                 contentScale = if (fillFrame) ContentScale.Crop else ContentScale.Fit,
             )
         }
@@ -920,6 +1089,29 @@ private fun adjustedPseudoStayMillis(baseStayMillis: Long, horizontalFraction: F
 
 private const val MIN_PSEUDO_STAY_MILLIS = 1L
 private const val MAX_PSEUDO_STAY_MILLIS = 3_600_000L
+private const val MIN_IMAGE_ZOOM = 1f
+private const val DOUBLE_TAP_IMAGE_ZOOM = 2.5f
+private const val MAX_IMAGE_ZOOM = 5f
+
+private data class ZoomCommand(
+    val mediaKey: String,
+    val id: Int,
+)
+
+private fun constrainImageOffset(
+    offset: Offset,
+    width: Float,
+    height: Float,
+    scale: Float,
+): Offset {
+    if (scale <= MIN_IMAGE_ZOOM) return Offset.Zero
+    val maxX = width * (scale - MIN_IMAGE_ZOOM) / 2f
+    val maxY = height * (scale - MIN_IMAGE_ZOOM) / 2f
+    return Offset(
+        x = offset.x.coerceIn(-maxX, maxX),
+        y = offset.y.coerceIn(-maxY, maxY),
+    )
+}
 
 @Composable
 private fun MediaDetailsDialog(item: MediaViewerItem, onDismiss: () -> Unit) {
