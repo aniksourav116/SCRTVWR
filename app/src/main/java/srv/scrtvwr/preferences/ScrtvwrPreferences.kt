@@ -17,7 +17,7 @@ class ScrtvwrPreferences(context: Context) {
     }
 
     fun getHoldSlideShowEnabled(): Boolean =
-        preferences.getBoolean(KEY_HOLD_SLIDE_SHOW_ENABLED, false)
+        preferences.getBoolean(KEY_HOLD_SLIDE_SHOW_ENABLED, true)
 
     fun saveHoldSlideShowEnabled(enabled: Boolean) {
         preferences.edit().putBoolean(KEY_HOLD_SLIDE_SHOW_ENABLED, enabled).apply()
