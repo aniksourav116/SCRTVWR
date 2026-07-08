@@ -39,7 +39,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.FormatIndentDecrease
-import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.automirrored.filled.LastPage
+import androidx.compose.material.icons.filled.FirstPage
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.MoreVert
@@ -48,8 +49,6 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
 import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material.icons.filled.ZoomIn
-import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -347,6 +346,27 @@ private fun MediaViewerScreen(
                         }
                     },
                     actions = {
+                        IconButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    pagerState.animateScrollToPage(0)
+                                }
+                            },
+                            enabled = uiState.items.isNotEmpty() && pagerState.currentPage != 0
+                        ) {
+                            Icon(Icons.Default.FirstPage, contentDescription = stringResource(R.string.move_first_item))
+                        }
+                        IconButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    pagerState.animateScrollToPage(uiState.items.lastIndex)
+                                }
+                            },
+                            enabled = uiState.items.isNotEmpty() &&
+                                    pagerState.currentPage != uiState.items.lastIndex
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.LastPage, contentDescription = stringResource(R.string.move_last_item))
+                        }
                         IconButton(onClick = onFitClick) {
                             Icon(Icons.Default.OpenInFull, contentDescription = stringResource(R.string.toggle_full_view))
                         }
@@ -362,27 +382,6 @@ private fun MediaViewerScreen(
                                     text = { Text(stringResource(if (uiState.fillFrame) R.string.fit_screen else R.string.fill_screen)) },
                                     onClick = {
                                         onFitClick()
-                                        menuExpanded = false
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.move_first_item)) },
-                                    enabled = uiState.items.isNotEmpty() && pagerState.currentPage != 0,
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            pagerState.animateScrollToPage(0)
-                                        }
-                                        menuExpanded = false
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.move_last_item)) },
-                                    enabled = uiState.items.isNotEmpty() &&
-                                        pagerState.currentPage != uiState.items.lastIndex,
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            pagerState.animateScrollToPage(uiState.items.lastIndex)
-                                        }
                                         menuExpanded = false
                                     },
                                 )
@@ -404,6 +403,14 @@ private fun MediaViewerScreen(
                                     text = { Text(stringResource(if (uiState.bookmarked) R.string.remove_bookmark else R.string.bookmark)) },
                                     onClick = {
                                         onBookmarkClick()
+                                        menuExpanded = false
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(if (isCurrentMediaZoomed) R.string.reset_zoom else R.string.zoom_in)) },
+                                    enabled = selectedItem?.type == MediaViewerType.Image,
+                                    onClick = {
+                                        toggleCurrentImageZoom()
                                         menuExpanded = false
                                     },
                                 )
@@ -431,14 +438,9 @@ private fun MediaViewerScreen(
                 ViewerOptionsRow(
                     fillFrame = uiState.fillFrame,
                     flipped = uiState.flipped,
-                    bookmarked = uiState.bookmarked,
-                    zoomEnabled = selectedItem?.type == MediaViewerType.Image,
-                    zoomed = isCurrentMediaZoomed,
                     onFitClick = onFitClick,
                     onRotateClick = onRotateClick,
                     onFlipClick = onFlipClick,
-                    onBookmarkClick = onBookmarkClick,
-                    onZoomClick = ::toggleCurrentImageZoom,
                     onDetailsClick = { detailsDialogVisible = true },
                     onSlideShowClick = { slideShowDialogVisible = true },
                 )
@@ -760,14 +762,9 @@ private fun PseudoSlideShowVisualizer(
 private fun ViewerOptionsRow(
     fillFrame: Boolean,
     flipped: Boolean,
-    bookmarked: Boolean,
-    zoomEnabled: Boolean,
-    zoomed: Boolean,
     onFitClick: () -> Unit,
     onRotateClick: () -> Unit,
     onFlipClick: () -> Unit,
-    onBookmarkClick: () -> Unit,
-    onZoomClick: () -> Unit,
     onDetailsClick: () -> Unit,
     onSlideShowClick: () -> Unit,
 ) {
@@ -794,24 +791,6 @@ private fun ViewerOptionsRow(
                 Icons.Default.SwapHoriz,
                 contentDescription = stringResource(R.string.flip_horizontal),
                 tint = if (flipped) Color(0xFF64B5F6) else Color.White,
-            )
-        }
-        IconButton(onClick = onBookmarkClick) {
-            Icon(
-                Icons.Default.BookmarkBorder,
-                contentDescription = stringResource(R.string.bookmark),
-                tint = if (bookmarked) Color(0xFF64B5F6) else Color.White,
-            )
-        }
-        IconButton(onClick = onZoomClick, enabled = zoomEnabled) {
-            Icon(
-                if (zoomed) Icons.Default.ZoomOut else Icons.Default.ZoomIn,
-                contentDescription = stringResource(if (zoomed) R.string.reset_zoom else R.string.zoom_in),
-                tint = when {
-                    !zoomEnabled -> Color.White.copy(alpha = 0.35f)
-                    zoomed -> Color(0xFF64B5F6)
-                    else -> Color.White
-                },
             )
         }
         IconButton(onClick = onDetailsClick) {
