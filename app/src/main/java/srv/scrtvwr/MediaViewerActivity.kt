@@ -38,7 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.automirrored.filled.FormatIndentDecrease
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.filled.LastPage
 import androidx.compose.material.icons.filled.FirstPage
 import androidx.compose.material.icons.filled.FitScreen
@@ -112,6 +112,7 @@ import srv.scrtvwr.ui.media.MediaViewerSource
 import srv.scrtvwr.ui.media.MediaViewerType
 import srv.scrtvwr.ui.media.MediaViewerUiState
 import srv.scrtvwr.ui.media.MediaViewerViewModel
+import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.util.time.TimeUtil
 import timber.log.Timber
@@ -179,6 +180,7 @@ private fun MediaViewerRoute(
         onNextSourceClick = viewModel::loadNextSource,
         onSlideShowStart = viewModel::startSlideShow,
         onSlideShowStop = viewModel::stopSlideShow,
+        onSortOrderChange = viewModel::setSortOrder,
         onBack = onBack,
     )
 }
@@ -197,6 +199,7 @@ private fun MediaViewerScreen(
     onNextSourceClick: () -> Unit,
     onSlideShowStart: (Long) -> Unit,
     onSlideShowStop: () -> Unit,
+    onSortOrderChange: (DirectorySortOrder) -> Unit,
     onBack: () -> Unit,
 ) {
     val pagerState = rememberPagerState(
@@ -206,6 +209,7 @@ private fun MediaViewerScreen(
     val coroutineScope = rememberCoroutineScope()
     var menuExpanded by rememberSaveable { mutableStateOf(false) }
     var slideShowDialogVisible by rememberSaveable { mutableStateOf(false) }
+    var sortDialogVisible by rememberSaveable { mutableStateOf(false) }
     var detailsDialogVisible by rememberSaveable { mutableStateOf(false) }
     var edgeDialogDirection by rememberSaveable { mutableStateOf<SourceDirection?>(null) }
     var slideShowStayText by rememberSaveable { mutableStateOf(uiState.slideShowStayMillis.toString()) }
@@ -441,7 +445,7 @@ private fun MediaViewerScreen(
                     onFitClick = onFitClick,
                     onRotateClick = onRotateClick,
                     onFlipClick = onFlipClick,
-                    onDetailsClick = { detailsDialogVisible = true },
+                    onSortClick = { sortDialogVisible = true },
                     onSlideShowClick = { slideShowDialogVisible = true },
                 )
             }
@@ -698,6 +702,16 @@ private fun MediaViewerScreen(
     if (detailsDialogVisible && selectedItem != null) {
         MediaDetailsDialog(item = selectedItem, onDismiss = { detailsDialogVisible = false })
     }
+    if (sortDialogVisible) {
+        SortDialog(
+            currentOrder = uiState.sortOrder,
+            onOrderSelect = {
+                onSortOrderChange(it)
+                sortDialogVisible = false
+            },
+            onDismiss = { sortDialogVisible = false },
+        )
+    }
     edgeDialogDirection?.let { direction ->
         SourceEdgeDialog(
             direction = direction,
@@ -765,7 +779,7 @@ private fun ViewerOptionsRow(
     onFitClick: () -> Unit,
     onRotateClick: () -> Unit,
     onFlipClick: () -> Unit,
-    onDetailsClick: () -> Unit,
+    onSortClick: () -> Unit,
     onSlideShowClick: () -> Unit,
 ) {
     Row(
@@ -793,8 +807,8 @@ private fun ViewerOptionsRow(
                 tint = if (flipped) Color(0xFF64B5F6) else Color.White,
             )
         }
-        IconButton(onClick = onDetailsClick) {
-            Icon(Icons.AutoMirrored.Filled.FormatIndentDecrease, contentDescription = stringResource(R.string.details), tint = Color.White)
+        IconButton(onClick = onSortClick) {
+            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = stringResource(R.string.sort_order), tint = Color.White)
         }
         IconButton(onClick = onSlideShowClick) {
             Icon(Icons.Default.Slideshow, contentDescription = stringResource(R.string.start_slideshow), tint = Color.White)
@@ -1286,6 +1300,53 @@ private fun SourceDirection.edgeReachedMessageStringRes(): Int = when (this) {
 }
 
 @Composable
+private fun SortDialog(
+    currentOrder: DirectorySortOrder,
+    onOrderSelect: (DirectorySortOrder) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.sort_order)) },
+        text = {
+            Column {
+                DirectorySortOrder.entries.forEach { order ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOrderSelect(order) }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.material3.RadioButton(
+                            selected = order == currentOrder,
+                            onClick = { onOrderSelect(order) }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = when (order) {
+                                DirectorySortOrder.NameAscending -> stringResource(R.string.sort_name_ascending)
+                                DirectorySortOrder.NameDescending -> stringResource(R.string.sort_name_descending)
+                                DirectorySortOrder.NewestFirst -> stringResource(R.string.sort_newest)
+                                DirectorySortOrder.OldestFirst -> stringResource(R.string.sort_oldest)
+                                DirectorySortOrder.LargestFirst -> stringResource(R.string.sort_largest)
+                                DirectorySortOrder.SmallestFirst -> stringResource(R.string.sort_smallest)
+                            },
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.close))
+            }
+        }
+    )
+}
+
+@Composable
 private fun BoxScope.HiddenNavigationButtons(
     currentPage: Int,
     pageCount: Int,
@@ -1452,6 +1513,7 @@ private fun MediaViewerScreenPreview() {
             onNextSourceClick = {},
             onSlideShowStart = {},
             onSlideShowStop = {},
+            onSortOrderChange = {},
             onBack = {}
         )
     }

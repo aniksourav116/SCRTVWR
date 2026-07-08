@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.media.MediaCatalog
+import srv.scrtvwr.ui.sort.DirectorySortOrder
 import java.io.File
 
 class MediaViewerViewModel(
@@ -28,6 +29,7 @@ class MediaViewerViewModel(
             holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
             imagePreloadDistance = preferences.getImagePreloadDistance(),
             edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
+            sortOrder = preferences.getDirectorySortOrder(),
         ),
     )
     val uiState = _uiState.asStateFlow()
@@ -120,6 +122,7 @@ class MediaViewerViewModel(
                 holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
                 imagePreloadDistance = preferences.getImagePreloadDistance(),
                 edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
+                sortOrder = sortOrder,
                 bookmarked = preferences.isMediaBookmarked(items.getOrNull(initialPage)?.path ?: selectedPath),
                 isLoading = false,
             )
@@ -161,6 +164,13 @@ class MediaViewerViewModel(
         } else {
             load(nextSource.path, null)
         }
+    }
+
+    fun setSortOrder(sortOrder: DirectorySortOrder) {
+        preferences.saveDirectorySortOrder(sortOrder)
+        _uiState.update { it.copy(sortOrder = sortOrder) }
+        val state = _uiState.value
+        load(state.sourceDirectoryPath, state.selectedPath)
     }
 
     fun toggleFillFrame() {
@@ -238,6 +248,7 @@ data class MediaViewerUiState(
     val holdSlideShowEnabled: Boolean = false,
     val imagePreloadDistance: Int = 5,
     val edgeDialogStyle: MediaEdgeDialogStyle = MediaEdgeDialogStyle.Bottom,
+    val sortOrder: DirectorySortOrder = DirectorySortOrder.NameAscending,
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
 ) {

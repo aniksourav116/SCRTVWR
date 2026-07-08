@@ -120,5 +120,6 @@
     <string name="sort_oldest">Oldest first</string>
     <string name="sort_largest">Largest first</string>
     <string name="sort_smallest">Smallest first</string>
+    <string name="sort_order">Sort order</string>
     <string name="version">Version</string>
 </resources>
