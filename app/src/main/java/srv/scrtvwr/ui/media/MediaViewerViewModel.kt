@@ -34,16 +34,16 @@ class MediaViewerViewModel(
     )
     val uiState = _uiState.asStateFlow()
 
-    fun load(directoryPath: String?, selectedPath: String?) {
+    fun load(directoryPath: String?, selectedPath: String?, force: Boolean = false) {
         val currentState = _uiState.value
-        if (currentState.sourceDirectoryPath == directoryPath && currentState.selectedPath == selectedPath) {
+        if (!force && currentState.sourceDirectoryPath == directoryPath && currentState.selectedPath == selectedPath) {
             return
         }
 
         loadJob?.cancel()
         _uiState.update { it.copy(isLoading = true, errorMessage = null) }
         loadJob = viewModelScope.launch(Dispatchers.IO) {
-            runCatching { loadMedia(directoryPath, selectedPath) }
+            runCatching { loadMedia(directoryPath, selectedPath, force) }
                 .onFailure { error ->
                     if (error is kotlinx.coroutines.CancellationException) throw error
                     _uiState.update {
@@ -56,7 +56,7 @@ class MediaViewerViewModel(
         }
     }
 
-    private suspend fun loadMedia(directoryPath: String?, selectedPath: String?) {
+    private suspend fun loadMedia(directoryPath: String?, selectedPath: String?, force: Boolean = false) {
         val items: List<MediaViewerItem>
         val sourceDirectoryPath: String?
         var initialPage: Int
@@ -100,7 +100,7 @@ class MediaViewerViewModel(
 
         val sourceKey = "${directoryPath.orEmpty()}|${selectedPath.orEmpty()}"
         val pageCount = items.size
-        if (savedStateHandle.get<String>(STATE_SOURCE) == sourceKey) {
+        if (!force && savedStateHandle.get<String>(STATE_SOURCE) == sourceKey) {
             initialPage = savedStateHandle.get<Int>(STATE_SELECTED_PAGE)
                 ?.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
                 ?: initialPage
@@ -170,7 +170,7 @@ class MediaViewerViewModel(
         preferences.saveDirectorySortOrder(sortOrder)
         _uiState.update { it.copy(sortOrder = sortOrder) }
         val state = _uiState.value
-        load(state.sourceDirectoryPath, state.selectedPath)
+        load(state.sourceDirectoryPath, null, force = true)
     }
 
     fun toggleFillFrame() {
