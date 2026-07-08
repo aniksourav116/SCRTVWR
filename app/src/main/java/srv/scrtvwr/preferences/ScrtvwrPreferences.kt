@@ -3,6 +3,7 @@ package srv.scrtvwr.preferences
 import android.content.Context
 import org.json.JSONArray
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
+import srv.scrtvwr.ui.media.SlideShowDirection
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 
 class ScrtvwrPreferences(context: Context) {
@@ -22,6 +23,17 @@ class ScrtvwrPreferences(context: Context) {
 
     fun saveHoldSlideShowEnabled(enabled: Boolean) {
         preferences.edit().putBoolean(KEY_HOLD_SLIDE_SHOW_ENABLED, enabled).apply()
+    }
+
+    fun getSlideShowDirection(): SlideShowDirection =
+        preferences.getString(KEY_SLIDE_SHOW_DIRECTION, null)
+            ?.let { value -> SlideShowDirection.entries.firstOrNull { it.name == value } }
+            ?: SlideShowDirection.Next
+
+    fun saveSlideShowDirection(direction: SlideShowDirection) {
+        preferences.edit()
+            .putString(KEY_SLIDE_SHOW_DIRECTION, direction.name)
+            .apply()
     }
 
     fun getImagePreloadDistance(): Int =
@@ -142,6 +154,7 @@ class ScrtvwrPreferences(context: Context) {
         const val PREFERENCES_NAME = "scrtvwr_preferences"
         const val KEY_SLIDE_SHOW_STAY_MILLIS = "slide_show_stay_millis"
         const val KEY_HOLD_SLIDE_SHOW_ENABLED = "hold_slide_show_enabled"
+        const val KEY_SLIDE_SHOW_DIRECTION = "slide_show_direction"
         const val KEY_IMAGE_PRELOAD_DISTANCE = "image_preload_distance"
         const val KEY_VIDEO_PRELOAD_DISTANCE = "video_preload_distance"
         const val KEY_MEDIA_EDGE_DIALOG_STYLE = "media_edge_dialog_style"

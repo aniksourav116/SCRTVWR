@@ -26,6 +26,7 @@ class MediaViewerViewModel(
     private val _uiState = MutableStateFlow(
         MediaViewerUiState(
             slideShowStayMillis = preferences.getSlideShowStayMillis(),
+            slideShowDirection = preferences.getSlideShowDirection(),
             holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
             imagePreloadDistance = preferences.getImagePreloadDistance(),
             edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
@@ -119,6 +120,7 @@ class MediaViewerViewModel(
                 initialPage = initialPage,
                 selectedPage = initialPage,
                 slideShowStayMillis = preferences.getSlideShowStayMillis(),
+                slideShowDirection = preferences.getSlideShowDirection(),
                 holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
                 imagePreloadDistance = preferences.getImagePreloadDistance(),
                 edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
@@ -198,12 +200,14 @@ class MediaViewerViewModel(
         _uiState.update { it.copy(isChromeHidden = !it.isChromeHidden) }
     }
 
-    fun startSlideShow(stayMillis: Long) {
+    fun startSlideShow(stayMillis: Long, direction: SlideShowDirection) {
         val boundedStayMillis = stayMillis.coerceAtLeast(1L)
         preferences.saveSlideShowStayMillis(boundedStayMillis)
+        preferences.saveSlideShowDirection(direction)
         _uiState.update {
             it.copy(
                 slideShowStayMillis = boundedStayMillis,
+                slideShowDirection = direction,
                 isSlideShowRunning = true,
                 isChromeHidden = true,
             )
@@ -245,6 +249,7 @@ data class MediaViewerUiState(
     val isChromeHidden: Boolean = false,
     val isSlideShowRunning: Boolean = false,
     val slideShowStayMillis: Long = 50L,
+    val slideShowDirection: SlideShowDirection = SlideShowDirection.Next,
     val holdSlideShowEnabled: Boolean = false,
     val imagePreloadDistance: Int = 5,
     val edgeDialogStyle: MediaEdgeDialogStyle = MediaEdgeDialogStyle.Bottom,

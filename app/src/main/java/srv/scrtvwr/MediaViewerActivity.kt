@@ -94,6 +94,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -114,6 +115,8 @@ import srv.scrtvwr.ui.media.MediaViewerSource
 import srv.scrtvwr.ui.media.MediaViewerType
 import srv.scrtvwr.ui.media.MediaViewerUiState
 import srv.scrtvwr.ui.media.MediaViewerViewModel
+import srv.scrtvwr.ui.media.SlideShowDirection
+import srv.scrtvwr.ui.media.pageOffset
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.util.time.TimeUtil
@@ -199,7 +202,7 @@ private fun MediaViewerScreen(
     onChromeToggle: () -> Unit,
     onPreviousSourceClick: () -> Unit,
     onNextSourceClick: () -> Unit,
-    onSlideShowStart: (Long) -> Unit,
+    onSlideShowStart: (Long, SlideShowDirection) -> Unit,
     onSlideShowStop: () -> Unit,
     onSortOrderChange: (DirectorySortOrder) -> Unit,
     onBack: () -> Unit,
@@ -215,6 +218,7 @@ private fun MediaViewerScreen(
     var detailsDialogVisible by rememberSaveable { mutableStateOf(false) }
     var edgeDialogDirection by rememberSaveable { mutableStateOf<SourceDirection?>(null) }
     var slideShowStayText by rememberSaveable { mutableStateOf(uiState.slideShowStayMillis.toString()) }
+    var slideShowDirection by rememberSaveable { mutableStateOf(uiState.slideShowDirection) }
     var verticalDrag by remember { mutableFloatStateOf(0f) }
     var isPseudoSlideShowRunning by remember { mutableStateOf(false) }
     var pseudoSlideShowStayMillis by remember { mutableStateOf(uiState.slideShowStayMillis) }
@@ -232,7 +236,7 @@ private fun MediaViewerScreen(
     val activeSlideShowPageOffset = if (isPseudoSlideShowRunning) {
         pseudoSlideShowPageOffset
     } else {
-        1
+        uiState.slideShowDirection.pageOffset
     }
     fun showEdgeDialog(direction: SourceDirection) {
         if (uiState.items.isNotEmpty()) {
@@ -269,9 +273,10 @@ private fun MediaViewerScreen(
         pseudoSlideShowPageOffset = 1
     }
 
-    LaunchedEffect(slideShowDialogVisible, uiState.slideShowStayMillis) {
+    LaunchedEffect(slideShowDialogVisible, uiState.slideShowStayMillis, uiState.slideShowDirection) {
         if (slideShowDialogVisible) {
             slideShowStayText = uiState.slideShowStayMillis.toString()
+            slideShowDirection = uiState.slideShowDirection
         }
     }
 
@@ -718,10 +723,12 @@ private fun MediaViewerScreen(
     if (slideShowDialogVisible) {
         SlideShowDialog(
             stayMillis = slideShowStayText,
+            direction = slideShowDirection,
             onStayMillisChange = { slideShowStayText = it.filter(Char::isDigit) },
+            onDirectionChange = { slideShowDirection = it },
             onDismiss = { slideShowDialogVisible = false },
             onStart = {
-                onSlideShowStart(slideShowStayText.toLongOrNull() ?: 50L)
+                onSlideShowStart(slideShowStayText.toLongOrNull() ?: 50L, slideShowDirection)
                 slideShowDialogVisible = false
             },
         )
@@ -846,7 +853,9 @@ private fun ViewerOptionsRow(
 @Composable
 private fun SlideShowDialog(
     stayMillis: String,
+    direction: SlideShowDirection,
     onStayMillisChange: (String) -> Unit,
+    onDirectionChange: (SlideShowDirection) -> Unit,
     onDismiss: () -> Unit,
     onStart: () -> Unit,
 ) {
@@ -854,12 +863,45 @@ private fun SlideShowDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.slideshow)) },
         text = {
-            OutlinedTextField(
-                value = stayMillis,
-                onValueChange = onStayMillisChange,
-                label = { Text(stringResource(R.string.per_image_stay)) },
-                singleLine = true,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = stayMillis,
+                    onValueChange = onStayMillisChange,
+                    label = { Text(stringResource(R.string.per_image_stay)) },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                    ),
+                )
+                Column {
+                    Text(
+                        text = stringResource(R.string.slideshow_direction),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    SlideShowDirection.entries.forEach { option ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onDirectionChange(option) }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            androidx.compose.material3.RadioButton(
+                                selected = option == direction,
+                                onClick = { onDirectionChange(option) },
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = when (option) {
+                                    SlideShowDirection.Next -> stringResource(R.string.next_media)
+                                    SlideShowDirection.Previous -> stringResource(R.string.previous_media)
+                                },
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
+                    }
+                }
+            }
         },
         confirmButton = {
             Button(onClick = onStart) {
@@ -1567,6 +1609,7 @@ private fun MediaViewerScreenPreview() {
         isChromeHidden = false,
         isSlideShowRunning = false,
         slideShowStayMillis = 3000L,
+        slideShowDirection = SlideShowDirection.Next,
         holdSlideShowEnabled = true,
         imagePreloadDistance = 1,
         edgeDialogStyle = MediaEdgeDialogStyle.Bottom,
@@ -1584,7 +1627,7 @@ private fun MediaViewerScreenPreview() {
             onChromeToggle = {},
             onPreviousSourceClick = {},
             onNextSourceClick = {},
-            onSlideShowStart = {},
+            onSlideShowStart = { _, _ -> },
             onSlideShowStop = {},
             onSortOrderChange = {},
             onBack = {}

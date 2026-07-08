@@ -2,6 +2,7 @@
     <string name="app_name">SCRTVWR</string>
     <string name="storage">Storage</string>
     <string name="directory">Directory</string>
+    <string name="direction">Direction</string>
     <string name="history">History</string>
     <string name="others">Others</string>
     <string name="storage_hint">Storage information will appear here.</string>
@@ -37,6 +38,8 @@
     <string name="show_hidden_files_summary">Include hidden items in directory listings.</string>
     <string name="slideshow_speed">Slide show speed</string>
     <string name="slideshow_speed_summary">Milliseconds each image stays on screen.</string>
+    <string name="slideshow_direction">Slide show direction</string>
+    <string name="slideshow_direction_summary">Choose whether the slide show moves to the previous or next media item.</string>
     <string name="hold_slideshow">Hold-to-slide control</string>
     <string name="hold_slideshow_summary">When viewer controls are hidden, long-press the lower screen and drag left or right to adjust speed.</string>
     <string name="slower">Slower</string>
