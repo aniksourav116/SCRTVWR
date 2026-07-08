@@ -403,7 +403,6 @@ private fun DirectoryToolbarButton(
 
     Surface(
         modifier = modifier
-            .height(44.dp)
             .semantics { contentDescription = label }
             .then(
                 if (enabled) {
@@ -424,7 +423,15 @@ private fun DirectoryToolbarButton(
             modifier = Modifier.padding(8.dp),
             contentAlignment = Alignment.Center,
         ) {
-            icon()
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                icon()
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
