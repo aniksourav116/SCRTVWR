@@ -105,6 +105,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.PreviewResult
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
@@ -667,9 +668,15 @@ private fun MediaViewerScreen(
                     HiddenNavigationButtons(
                         currentPage = pagerState.currentPage,
                         pageCount = uiState.pageCount,
-                        onPreviousPressStart = { startPseudoSlideShow(pageOffset = -1) },
-                        onNextPressStart = { startPseudoSlideShow(pageOffset = 1) },
-                        onPressEnd = { stopPseudoSlideShow() },
+                        onPreviousClick = {
+                            navigateFromCurrentPage(-1, animated = false)
+                        },
+                        onNextClick = {
+                            navigateFromCurrentPage(1, animated = false)
+                        },
+                        onPreviousLongPressStart = { startPseudoSlideShow(pageOffset = -1) },
+                        onNextLongPressStart = { startPseudoSlideShow(pageOffset = 1) },
+                        onLongPressEnd = { stopPseudoSlideShow() },
                     )
                 }
 
@@ -1103,6 +1110,7 @@ private fun adjustedPseudoStayMillis(baseStayMillis: Long, horizontalFraction: F
 
 private const val MIN_PSEUDO_STAY_MILLIS = 1L
 private const val MAX_PSEUDO_STAY_MILLIS = 3_600_000L
+private const val HIDDEN_NAVIGATION_LONG_PRESS_MILLIS = 500L
 private const val MIN_IMAGE_ZOOM = 1f
 private const val DOUBLE_TAP_IMAGE_ZOOM = 2.5f
 private const val MAX_IMAGE_ZOOM = 5f
@@ -1370,9 +1378,11 @@ private fun SortDialog(
 private fun BoxScope.HiddenNavigationButtons(
     currentPage: Int,
     pageCount: Int,
-    onPreviousPressStart: () -> Unit,
-    onNextPressStart: () -> Unit,
-    onPressEnd: () -> Unit,
+    onPreviousClick: () -> Unit,
+    onNextClick: () -> Unit,
+    onPreviousLongPressStart: () -> Unit,
+    onNextLongPressStart: () -> Unit,
+    onLongPressEnd: () -> Unit,
 ) {
     Box(
         modifier = Modifier
@@ -1390,8 +1400,9 @@ private fun BoxScope.HiddenNavigationButtons(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
-                onPressStart = onPreviousPressStart,
-                onPressEnd = onPressEnd,
+                onClick = onPreviousClick,
+                onLongPressStart = onPreviousLongPressStart,
+                onLongPressEnd = onLongPressEnd,
             )
 
             HiddenNavigationButton(
@@ -1400,8 +1411,9 @@ private fun BoxScope.HiddenNavigationButtons(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
-                onPressStart = onNextPressStart,
-                onPressEnd = onPressEnd,
+                onClick = onNextClick,
+                onLongPressStart = onNextLongPressStart,
+                onLongPressEnd = onLongPressEnd,
             )
         }
 
@@ -1423,11 +1435,13 @@ private fun HiddenNavigationButton(
     text: String,
     contentDescription: String,
     modifier: Modifier = Modifier,
-    onPressStart: () -> Unit,
-    onPressEnd: () -> Unit,
+    onClick: () -> Unit,
+    onLongPressStart: () -> Unit,
+    onLongPressEnd: () -> Unit,
 ) {
-    val currentOnPressStart by rememberUpdatedState(onPressStart)
-    val currentOnPressEnd by rememberUpdatedState(onPressEnd)
+    val currentOnClick by rememberUpdatedState(onClick)
+    val currentOnLongPressStart by rememberUpdatedState(onLongPressStart)
+    val currentOnLongPressEnd by rememberUpdatedState(onLongPressEnd)
     Box(
         modifier = modifier
             .alpha(0.11f)
@@ -1436,7 +1450,24 @@ private fun HiddenNavigationButton(
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     down.consume()
-                    currentOnPressStart()
+                    val releasedBeforeLongPress = withTimeoutOrNull(HIDDEN_NAVIGATION_LONG_PRESS_MILLIS) {
+                        var released = false
+                        while (!released) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                                ?: return@withTimeoutOrNull true
+                            change.consume()
+                            released = !change.pressed
+                        }
+                        true
+                    } == true
+
+                    if (releasedBeforeLongPress) {
+                        currentOnClick()
+                        return@awaitEachGesture
+                    }
+
+                    currentOnLongPressStart()
                     try {
                         do {
                             val event = awaitPointerEvent()
@@ -1445,7 +1476,7 @@ private fun HiddenNavigationButton(
                             change.consume()
                         } while (change.pressed)
                     } finally {
-                        currentOnPressEnd()
+                        currentOnLongPressEnd()
                     }
                 }
             },
