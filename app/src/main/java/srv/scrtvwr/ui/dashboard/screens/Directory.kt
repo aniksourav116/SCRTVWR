@@ -311,19 +311,18 @@ fun DirectoryScreen(
                     }
 
                     DirectoryToolbarButton(
-                        icon = { Icon(Icons.AutoMirrored.Filled.ViewList, contentDescription = null) },
-                        label = stringResource(R.string.list_view),
-                        selected = uiState.viewMode == DirectoryViewMode.List,
-                        onClick = { onViewModeChange(DirectoryViewMode.List) },
-                        modifier = Modifier.weight(1f),
-                    )
-
-                    DirectoryToolbarButton(
-                        icon = { Icon(Icons.Default.GridView, contentDescription = null) },
-                        label = stringResource(R.string.grid_view),
-                        selected = uiState.viewMode == DirectoryViewMode.Grid,
-                        onClick = { onViewModeChange(DirectoryViewMode.Grid) },
-                        modifier = Modifier.weight(1f),
+                        icon = {
+                            Icon(
+                                imageVector = if (uiState.viewMode == DirectoryViewMode.List) Icons.Default.GridView else Icons.AutoMirrored.Filled.ViewList,
+                                contentDescription = null
+                            )
+                        },
+                        label = stringResource(if (uiState.viewMode == DirectoryViewMode.List) R.string.grid_view else R.string.list_view),
+                        onClick = {
+                            val newMode = if (uiState.viewMode == DirectoryViewMode.List) DirectoryViewMode.Grid else DirectoryViewMode.List
+                            onViewModeChange(newMode)
+                        },
+                        modifier = Modifier.weight(0.8f),
                     )
                 }
             }
