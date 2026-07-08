@@ -48,6 +48,9 @@ class DirectoryViewModel(
             viewMode = savedStateHandle.get<String>(STATE_VIEW_MODE)
                 ?.let { value -> DirectoryViewMode.entries.firstOrNull { it.name == value } }
                 ?: DirectoryViewMode.List,
+            mediaFilter = savedStateHandle.get<String>(STATE_MEDIA_FILTER)
+                ?.let { value -> DirectoryMediaFilter.entries.firstOrNull { it.name == value } }
+                ?: DirectoryMediaFilter.All,
             sortOrder = preferences.getDirectorySortOrder(),
             showHiddenFiles = preferences.getShowHiddenFiles(),
             canNavigateUp = initialDirectory.isDifferentDirectory(initialRoot),
@@ -73,6 +76,12 @@ class DirectoryViewModel(
     fun setViewMode(mode: DirectoryViewMode) {
         savedStateHandle[STATE_VIEW_MODE] = mode.name
         _uiState.update { it.copy(viewMode = mode) }
+    }
+
+    fun setMediaFilter(filter: DirectoryMediaFilter) {
+        savedStateHandle[STATE_MEDIA_FILTER] = filter.name
+        _uiState.update { it.copy(mediaFilter = filter) }
+        scanDirectory()
     }
 
     fun setSortOrder(order: DirectorySortOrder) {
@@ -150,11 +159,13 @@ class DirectoryViewModel(
                     searchQuery = request.searchQuery,
                     sortOrder = request.sortOrder,
                     showHiddenFiles = request.showHiddenFiles,
+                    mediaFilter = request.mediaFilter,
                 )
             }
             _uiState.update { current ->
                 if (current.currentDirectory.absolutePath != request.currentDirectory.absolutePath ||
-                    current.searchQuery != request.searchQuery || current.sortOrder != request.sortOrder
+                    current.searchQuery != request.searchQuery || current.sortOrder != request.sortOrder ||
+                    current.mediaFilter != request.mediaFilter
                 ) current else current.copy(
                     directoryListing = listing,
                     isLoading = false,
@@ -168,6 +179,7 @@ class DirectoryViewModel(
         const val STATE_DIRECTORY = "directory_path"
         const val STATE_SEARCH = "directory_search"
         const val STATE_VIEW_MODE = "directory_view_mode"
+        const val STATE_MEDIA_FILTER = "directory_media_filter"
     }
 }
 
@@ -177,6 +189,7 @@ data class DirectoryUiState(
     val searchQuery: String = "",
     val directoryListing: DirectoryListing = DirectoryListing(entries = emptyList()),
     val viewMode: DirectoryViewMode = DirectoryViewMode.List,
+    val mediaFilter: DirectoryMediaFilter = DirectoryMediaFilter.All,
     val sortOrder: DirectorySortOrder = DirectorySortOrder.NameAscending,
     val canNavigateUp: Boolean = false,
     val recentDirectories: List<String> = emptyList(),
@@ -212,6 +225,14 @@ enum class DirectoryViewMode {
     Grid,
 }
 
+enum class DirectoryMediaFilter {
+    All,
+    Folders,
+    Images,
+    Videos,
+    Archives,
+}
+
 enum class DirectoryMediaType {
     Image,
     Video,
@@ -223,6 +244,7 @@ private suspend fun File.fileExplorerEntries(
     searchQuery: String = "",
     sortOrder: DirectorySortOrder = DirectorySortOrder.NameAscending,
     showHiddenFiles: Boolean = false,
+    mediaFilter: DirectoryMediaFilter = DirectoryMediaFilter.All,
 ): DirectoryListing {
     val normalizedQuery = searchQuery.trim()
     return runCatching {
@@ -238,6 +260,15 @@ private suspend fun File.fileExplorerEntries(
             ?.filter { showHiddenFiles || !it.isHidden }
             ?.filter { file ->
                 normalizedQuery.isBlank() || file.name.contains(normalizedQuery, ignoreCase = true)
+            }
+            ?.filter { file ->
+                when (mediaFilter) {
+                    DirectoryMediaFilter.All -> true
+                    DirectoryMediaFilter.Folders -> file.isDirectory
+                    DirectoryMediaFilter.Images -> file.mediaType() == DirectoryMediaType.Image
+                    DirectoryMediaFilter.Videos -> file.mediaType() == DirectoryMediaType.Video
+                    DirectoryMediaFilter.Archives -> file.mediaType() == DirectoryMediaType.Archive
+                }
             }
             ?.sortedWith(sortOrder.fileComparator(directoriesFirst = true))
             ?.map { file ->

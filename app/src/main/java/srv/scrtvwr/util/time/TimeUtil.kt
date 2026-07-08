@@ -3,7 +3,6 @@ package srv.scrtvwr.util.time
 
 import android.content.Context
 import android.text.format.DateUtils
-import timber.log.Timber
 
 object TimeUtil {
     private lateinit var applicationContext: Context
@@ -24,7 +23,6 @@ object TimeUtil {
                     DateUtils.FORMAT_12HOUR or
                     DateUtils.FORMAT_SHOW_WEEKDAY
         )
-        Timber.d("$time,000L and $date")
         return date
     }
 

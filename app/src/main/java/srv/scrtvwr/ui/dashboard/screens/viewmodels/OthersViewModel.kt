@@ -65,7 +65,7 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
 
 data class OthersUiState(
     val showHiddenFiles: Boolean = false,
-    val slideShowStayMillis: Long = 50L,
+    val slideShowStayMillis: Long = 3_000L,
     val holdSlideShowEnabled: Boolean = false,
     val slideShowDirection: SlideShowDirection = SlideShowDirection.Next,
     val imagePreloadDistance: Int = 5,

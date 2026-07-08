@@ -120,7 +120,6 @@ import srv.scrtvwr.ui.media.pageOffset
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.util.time.TimeUtil
-import timber.log.Timber
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.math.pow
 
@@ -343,16 +342,15 @@ private fun MediaViewerScreen(
         )
     }
 
-    Timber.d("name ${selectedItem?.name}")
     val splits = selectedItem?.name?.split("_") ?: emptyList()
-    Timber.d("splits $splits")
 
     val selectedName =  selectedItem?.name?: stringResource(R.string.no_media_selected)
-    val time = if (splits.isNotEmpty() && splits.size>=4) {
-        TimeUtil.getDateAndTimeWithWeekDay(splits[(splits.size - 3).coerceAtLeast(0)].toLongOrNull())
+    val timestampSeconds = if (splits.size >= 4) {
+        splits[(splits.size - 3).coerceAtLeast(0)].toLongOrNull()
     } else {
-        TimeUtil.getDateAndTimeWithWeekDay()
+        selectedItem?.lastModifiedMillis?.let { it / 1_000L }
     }
+    val time = TimeUtil.getDateAndTimeWithWeekDay(timestampSeconds)
 
 
     Scaffold(
@@ -728,7 +726,7 @@ private fun MediaViewerScreen(
             onDirectionChange = { slideShowDirection = it },
             onDismiss = { slideShowDialogVisible = false },
             onStart = {
-                onSlideShowStart(slideShowStayText.toLongOrNull() ?: 50L, slideShowDirection)
+                onSlideShowStart(slideShowStayText.toLongOrNull() ?: 3_000L, slideShowDirection)
                 slideShowDialogVisible = false
             },
         )

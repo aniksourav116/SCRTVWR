@@ -5,6 +5,7 @@ import org.json.JSONArray
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
 import srv.scrtvwr.ui.sort.DirectorySortOrder
+import java.io.File
 
 class ScrtvwrPreferences(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -81,6 +82,17 @@ class ScrtvwrPreferences(context: Context) {
         preferences.edit().putStringSet(KEY_BOOKMARKED_MEDIA, bookmarks).apply()
     }
 
+    fun clearBookmarkedMedia() {
+        preferences.edit().remove(KEY_BOOKMARKED_MEDIA).apply()
+    }
+
+    fun removeBookmarkedMediaDirectory(directoryPath: String) {
+        val bookmarks = getBookmarkedMedia()
+            .filterNot { path -> File(path.substringBefore("::")).parentFile?.absolutePath == directoryPath }
+            .toSet()
+        preferences.edit().putStringSet(KEY_BOOKMARKED_MEDIA, bookmarks).apply()
+    }
+
     fun isMediaBookmarked(path: String?): Boolean =
         path != null && path in getBookmarkedMedia()
 
@@ -129,6 +141,26 @@ class ScrtvwrPreferences(context: Context) {
             ?.let(::decodeMediaHistory)
             .orEmpty()
 
+    fun removeMediaHistoryDirectory(directoryPath: String) {
+        val history = getMediaHistory().filterNot { it.directoryPath == directoryPath }
+        val editor = preferences.edit()
+            .putString(KEY_MEDIA_HISTORY, encodeMediaHistory(history))
+        if (getLastMediaSession()?.directoryPath == directoryPath) {
+            editor
+                .remove(KEY_LAST_MEDIA_DIRECTORY)
+                .remove(KEY_LAST_MEDIA_PATH)
+        }
+        editor.apply()
+    }
+
+    fun clearMediaHistory() {
+        preferences.edit()
+            .remove(KEY_MEDIA_HISTORY)
+            .remove(KEY_LAST_MEDIA_DIRECTORY)
+            .remove(KEY_LAST_MEDIA_PATH)
+            .apply()
+    }
+
     private fun encodeMediaHistory(values: List<LastMediaSession>): String {
         val json = JSONArray()
         values.forEach { session ->
@@ -165,7 +197,7 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_DIRECTORY_SORT_ORDER = "directory_sort_order"
         const val KEY_LAST_MEDIA_DIRECTORY = "last_media_directory"
         const val KEY_LAST_MEDIA_PATH = "last_media_path"
-        const val DEFAULT_SLIDE_SHOW_STAY_MILLIS = 50L
+        const val DEFAULT_SLIDE_SHOW_STAY_MILLIS = 3_000L
         const val DEFAULT_IMAGE_PRELOAD_DISTANCE = 5
         const val DEFAULT_VIDEO_PRELOAD_DISTANCE = 0
         const val MAX_RECENT_DIRECTORIES = 100

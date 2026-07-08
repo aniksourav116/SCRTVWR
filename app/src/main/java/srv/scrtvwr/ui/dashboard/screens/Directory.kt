@@ -1,9 +1,6 @@
 package srv.scrtvwr.ui.dashboard.screens
 
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.media.MediaMetadataRetriever
 import android.text.TextPaint
 import android.text.TextUtils
 import androidx.activity.compose.BackHandler
@@ -13,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
@@ -45,16 +43,20 @@ import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
@@ -63,12 +65,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -102,15 +104,14 @@ import srv.scrtvwr.VideoPlayerActivity
 import srv.scrtvwr.R
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryEntry
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryListing
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryMediaFilter
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryMediaType
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewModel
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewMode
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -157,6 +158,7 @@ fun Directory(
         uiState = uiState,
         onSearchQueryChange = viewModel::updateSearchQuery,
         onViewModeChange = viewModel::setViewMode,
+        onMediaFilterChange = viewModel::setMediaFilter,
         onSortOrderChange = viewModel::setSortOrder,
         onOpenDirectory = viewModel::openDirectory,
         onOpenRecentDirectory = viewModel::openDirectoryPath,
@@ -204,6 +206,7 @@ fun DirectoryScreen(
     uiState: DirectoryUiState,
     onSearchQueryChange: (String) -> Unit,
     onViewModeChange: (DirectoryViewMode) -> Unit,
+    onMediaFilterChange: (DirectoryMediaFilter) -> Unit,
     onSortOrderChange: (DirectorySortOrder) -> Unit,
     onOpenDirectory: (DirectoryEntry) -> Unit,
     onOpenRecentDirectory: (String) -> Unit,
@@ -213,8 +216,8 @@ fun DirectoryScreen(
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var recentMenuExpanded by remember { mutableStateOf(false) }
     var sortMenuExpanded by remember { mutableStateOf(false) }
+    var moreMenuExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -243,7 +246,7 @@ fun DirectoryScreen(
                     Box(modifier = Modifier.weight(1f)) {
                         DirectoryToolbarButton(
                             icon = { Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null) },
-                            label = stringResource(uiState.sortOrder.labelResource()).substringBefore(" "),
+                            label = stringResource(R.string.sort_order),
                             onClick = { sortMenuExpanded = true },
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -275,25 +278,49 @@ fun DirectoryScreen(
                     }
 
                     DirectoryToolbarButton(
-                        icon = { Icon(Icons.Default.PlayCircle, contentDescription = null) },
-                        label = stringResource(R.string.resume),
-                        onClick = onResumeMedia,
-                        enabled = uiState.lastMediaSession != null,
+                        icon = {
+                            Icon(
+                                imageVector = if (uiState.viewMode == DirectoryViewMode.List) Icons.Default.GridView else Icons.AutoMirrored.Filled.ViewList,
+                                contentDescription = null
+                            )
+                        },
+                        label = stringResource(if (uiState.viewMode == DirectoryViewMode.List) R.string.grid_view else R.string.list_view),
+                        onClick = {
+                            val newMode = if (uiState.viewMode == DirectoryViewMode.List) DirectoryViewMode.Grid else DirectoryViewMode.List
+                            onViewModeChange(newMode)
+                        },
                         modifier = Modifier.weight(1f),
                     )
 
                     Box(modifier = Modifier.weight(1f)) {
                         DirectoryToolbarButton(
-                            icon = { Icon(Icons.Default.History, contentDescription = null) },
-                            label = stringResource(R.string.recent),
-                            onClick = { recentMenuExpanded = true },
-                            enabled = uiState.recentDirectories.isNotEmpty(),
+                            icon = { Icon(Icons.Default.MoreVert, contentDescription = null) },
+                            label = stringResource(R.string.more_options),
+                            onClick = { moreMenuExpanded = true },
                             modifier = Modifier.fillMaxWidth(),
                         )
                         DropdownMenu(
-                            expanded = recentMenuExpanded,
-                            onDismissRequest = { recentMenuExpanded = false },
+                            expanded = moreMenuExpanded,
+                            onDismissRequest = { moreMenuExpanded = false },
                         ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.resume)) },
+                                leadingIcon = { Icon(Icons.Default.PlayCircle, contentDescription = null) },
+                                enabled = uiState.lastMediaSession != null,
+                                onClick = {
+                                    onResumeMedia()
+                                    moreMenuExpanded = false
+                                },
+                            )
+                            if (uiState.recentDirectories.isNotEmpty()) {
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.recent)) },
+                                    leadingIcon = { Icon(Icons.Default.History, contentDescription = null) },
+                                    enabled = false,
+                                    onClick = {},
+                                )
+                            }
                             uiState.recentDirectories.forEach { path ->
                                 DropdownMenuItem(
                                     text = {
@@ -315,27 +342,12 @@ fun DirectoryScreen(
                                     leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null) },
                                     onClick = {
                                         onOpenRecentDirectory(path)
-                                        recentMenuExpanded = false
+                                        moreMenuExpanded = false
                                     },
                                 )
                             }
                         }
                     }
-
-                    DirectoryToolbarButton(
-                        icon = {
-                            Icon(
-                                imageVector = if (uiState.viewMode == DirectoryViewMode.List) Icons.Default.GridView else Icons.AutoMirrored.Filled.ViewList,
-                                contentDescription = null
-                            )
-                        },
-                        label = stringResource(if (uiState.viewMode == DirectoryViewMode.List) R.string.grid_view else R.string.list_view),
-                        onClick = {
-                            val newMode = if (uiState.viewMode == DirectoryViewMode.List) DirectoryViewMode.Grid else DirectoryViewMode.List
-                            onViewModeChange(newMode)
-                        },
-                        modifier = Modifier.weight(0.8f),
-                    )
                 }
             }
         }
@@ -345,11 +357,31 @@ fun DirectoryScreen(
             onValueChange = onSearchQueryChange,
             placeholder = { Text(stringResource(R.string.search_files_folders)) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = {
+                if (uiState.searchQuery.isNotBlank()) {
+                    IconButton(onClick = { onSearchQueryChange("") }) {
+                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.clear_search))
+                    }
+                }
+            },
             singleLine = true,
             modifier = Modifier
                 .fillMaxWidth()
                 .wrapContentHeight(),
         )
+
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            DirectoryMediaFilter.entries.forEach { filter ->
+                FilterChip(
+                    selected = uiState.mediaFilter == filter,
+                    onClick = { onMediaFilterChange(filter) },
+                    label = { Text(stringResource(filter.labelResource())) },
+                )
+            }
+        }
 
         if (uiState.isLoading && uiState.entries.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -968,6 +1000,14 @@ private fun DirectorySortOrder.labelResource(): Int = when (this) {
     DirectorySortOrder.SmallestFirst -> R.string.sort_smallest
 }
 
+private fun DirectoryMediaFilter.labelResource(): Int = when (this) {
+    DirectoryMediaFilter.All -> R.string.all
+    DirectoryMediaFilter.Folders -> R.string.folders
+    DirectoryMediaFilter.Images -> R.string.images
+    DirectoryMediaFilter.Videos -> R.string.videos
+    DirectoryMediaFilter.Archives -> R.string.archives
+}
+
 private fun formatBytes(bytes: Long): String {
     if (bytes < 1_000L) return "$bytes B"
     val units = listOf("KB", "MB", "GB", "TB")
@@ -1022,6 +1062,7 @@ fun DirectoryScreenPreview() {
             ),
             onSearchQueryChange = {},
             onViewModeChange = {},
+            onMediaFilterChange = {},
             onSortOrderChange = {},
             onOpenDirectory = {},
             onOpenRecentDirectory = {},

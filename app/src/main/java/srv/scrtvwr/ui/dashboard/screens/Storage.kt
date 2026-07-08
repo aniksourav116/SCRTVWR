@@ -251,10 +251,10 @@ private fun StorageDeviceCard(
     }
 }
 
-private fun StorageDevice.icon(): ImageVector = when (type) {
-    "USB storage" -> Icons.Default.Usb
-    "Removable storage" -> Icons.Default.SdStorage
-    else -> Icons.Default.Storage
+private fun StorageDevice.icon(): ImageVector = when {
+    !isRemovable -> Icons.Default.Storage
+    type.contains("usb", ignoreCase = true) || name.contains("usb", ignoreCase = true) -> Icons.Default.Usb
+    else -> Icons.Default.SdStorage
 }
 
 private fun formatBytes(bytes: Long): String {
