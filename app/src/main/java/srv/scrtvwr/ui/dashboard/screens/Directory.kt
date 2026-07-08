@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -262,7 +263,7 @@ fun DirectoryScreen(
                     }
 
                     DirectoryToolbarButton(
-                        icon = { Icon(Icons.Default.Restore, contentDescription = null) },
+                        icon = { Icon(Icons.Default.PlayCircle, contentDescription = null) },
                         label = stringResource(R.string.resume),
                         onClick = onResumeMedia,
                         enabled = uiState.lastMediaSession != null,
@@ -336,7 +337,7 @@ fun DirectoryScreen(
             singleLine = true,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp),
+                .wrapContentHeight(),
         )
 
         if (uiState.isLoading && uiState.entries.isEmpty()) {
