@@ -12,8 +12,8 @@
     <string name="refresh">Refresh</string>
     <string name="resume">Resume</string>
     <string name="recent">Recent</string>
-    <string name="list_view">List view</string>
-    <string name="grid_view">Grid view</string>
+    <string name="list_view">List</string>
+    <string name="grid_view">Grid</string>
     <string name="search_files_folders">Search files and folders</string>
     <string name="go_up">Go up</string>
     <string name="folder">Folder</string>
