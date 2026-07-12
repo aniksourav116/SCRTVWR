@@ -38,7 +38,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.LastPage
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.FirstPage
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.MoreVert
@@ -386,27 +388,6 @@ private fun MediaViewerScreen(
                                 onDismissRequest = { menuExpanded = false },
                             ) {
                                 DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.move_first_item)) },
-                                    enabled = uiState.items.isNotEmpty() && pagerState.currentPage != 0,
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            pagerState.animateScrollToPage(0)
-                                        }
-                                        menuExpanded = false
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.move_last_item)) },
-                                    enabled = uiState.items.isNotEmpty() &&
-                                            pagerState.currentPage != uiState.items.lastIndex,
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            pagerState.animateScrollToPage(uiState.items.lastIndex)
-                                        }
-                                        menuExpanded = false
-                                    },
-                                )
-                                DropdownMenuItem(
                                     text = { Text(stringResource(if (uiState.fillFrame) R.string.fit_screen else R.string.fill_screen)) },
                                     onClick = {
                                         onFitClick()
@@ -464,13 +445,25 @@ private fun MediaViewerScreen(
         ) {
             if (!uiState.isChromeHidden) {
                 ViewerOptionsRow(
+                    currentPage = pagerState.currentPage,
+                    pageCount = uiState.pageCount,
                     fillFrame = uiState.fillFrame,
                     flipped = uiState.flipped,
+                    onMoveFirstClick = {
+                        coroutineScope.launch {
+                            pagerState.animateScrollToPage(0)
+                        }
+                    },
                     onFitClick = onFitClick,
                     onRotateClick = onRotateClick,
                     onFlipClick = onFlipClick,
                     onSortClick = { sortDialogVisible = true },
                     onSlideShowClick = { slideShowDialogVisible = true },
+                    onMoveLastClick = {
+                        coroutineScope.launch {
+                            pagerState.animateScrollToPage(uiState.items.lastIndex)
+                        }
+                    },
                 )
             }
 
@@ -800,14 +793,21 @@ private fun PseudoSlideShowVisualizer(
 
 @Composable
 private fun ViewerOptionsRow(
+    currentPage: Int,
+    pageCount: Int,
     fillFrame: Boolean,
     flipped: Boolean,
+    onMoveFirstClick: () -> Unit,
     onFitClick: () -> Unit,
     onRotateClick: () -> Unit,
     onFlipClick: () -> Unit,
     onSortClick: () -> Unit,
     onSlideShowClick: () -> Unit,
+    onMoveLastClick: () -> Unit,
 ) {
+    val canMoveFirst = pageCount > 0 && currentPage != 0
+    val canMoveLast = pageCount > 0 && currentPage != pageCount - 1
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -816,28 +816,65 @@ private fun ViewerOptionsRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
-        IconButton(onClick = onFitClick) {
+        IconButton(
+            onClick = onMoveFirstClick,
+            enabled = canMoveFirst,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(
+                Icons.Default.FirstPage,
+                contentDescription = stringResource(R.string.move_first_item),
+                tint = Color.White.copy(alpha = if (canMoveFirst) 1f else 0.38f),
+            )
+        }
+        IconButton(
+            onClick = onFitClick,
+            modifier = Modifier.size(40.dp),
+        ) {
             Icon(
                 Icons.Default.FitScreen,
                 contentDescription = stringResource(if (fillFrame) R.string.fit_screen else R.string.fill_screen),
                 tint = if (fillFrame) Color(0xFF64B5F6) else Color.White,
             )
         }
-        IconButton(onClick = onRotateClick) {
+        IconButton(
+            onClick = onRotateClick,
+            modifier = Modifier.size(40.dp),
+        ) {
             Icon(Icons.Default.Rotate90DegreesCcw, contentDescription = stringResource(R.string.rotate), tint = Color.White)
         }
-        IconButton(onClick = onFlipClick) {
+        IconButton(
+            onClick = onFlipClick,
+            modifier = Modifier.size(40.dp),
+        ) {
             Icon(
                 Icons.Default.SwapHoriz,
                 contentDescription = stringResource(R.string.flip_horizontal),
                 tint = if (flipped) Color(0xFF64B5F6) else Color.White,
             )
         }
-        IconButton(onClick = onSortClick) {
+        IconButton(
+            onClick = onSortClick,
+            modifier = Modifier.size(40.dp),
+        ) {
             Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = stringResource(R.string.sort_order), tint = Color.White)
         }
-        IconButton(onClick = onSlideShowClick) {
+        IconButton(
+            onClick = onSlideShowClick,
+            modifier = Modifier.size(40.dp),
+        ) {
             Icon(Icons.Default.Slideshow, contentDescription = stringResource(R.string.start_slideshow), tint = Color.White)
+        }
+        IconButton(
+            onClick = onMoveLastClick,
+            enabled = canMoveLast,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.LastPage,
+                contentDescription = stringResource(R.string.move_last_item),
+                tint = Color.White.copy(alpha = if (canMoveLast) 1f else 0.38f),
+            )
         }
     }
 }
