@@ -39,12 +39,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Sort
-import androidx.compose.material.icons.automirrored.filled.LastPage
-import androidx.compose.material.icons.filled.FirstPage
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
 import androidx.compose.material.icons.filled.Slideshow
@@ -380,30 +377,6 @@ private fun MediaViewerScreen(
                         }
                     },
                     actions = {
-                        IconButton(
-                            onClick = {
-                                coroutineScope.launch {
-                                    pagerState.animateScrollToPage(0)
-                                }
-                            },
-                            enabled = uiState.items.isNotEmpty() && pagerState.currentPage != 0
-                        ) {
-                            Icon(Icons.Default.FirstPage, contentDescription = stringResource(R.string.move_first_item))
-                        }
-                        IconButton(
-                            onClick = {
-                                coroutineScope.launch {
-                                    pagerState.animateScrollToPage(uiState.items.lastIndex)
-                                }
-                            },
-                            enabled = uiState.items.isNotEmpty() &&
-                                    pagerState.currentPage != uiState.items.lastIndex
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.LastPage, contentDescription = stringResource(R.string.move_last_item))
-                        }
-                        IconButton(onClick = onFitClick) {
-                            Icon(Icons.Default.OpenInFull, contentDescription = stringResource(R.string.toggle_full_view))
-                        }
                         Box {
                             IconButton(onClick = { menuExpanded = true }) {
                                 Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_options))
@@ -412,6 +385,27 @@ private fun MediaViewerScreen(
                                 expanded = menuExpanded,
                                 onDismissRequest = { menuExpanded = false },
                             ) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.move_first_item)) },
+                                    enabled = uiState.items.isNotEmpty() && pagerState.currentPage != 0,
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            pagerState.animateScrollToPage(0)
+                                        }
+                                        menuExpanded = false
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.move_last_item)) },
+                                    enabled = uiState.items.isNotEmpty() &&
+                                            pagerState.currentPage != uiState.items.lastIndex,
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            pagerState.animateScrollToPage(uiState.items.lastIndex)
+                                        }
+                                        menuExpanded = false
+                                    },
+                                )
                                 DropdownMenuItem(
                                     text = { Text(stringResource(if (uiState.fillFrame) R.string.fit_screen else R.string.fill_screen)) },
                                     onClick = {
