@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
@@ -52,6 +53,7 @@ fun Others(
     OthersScreen(
         uiState = uiState,
         onShowHiddenFilesChange = viewModel::setShowHiddenFiles,
+        onShowDirectoryFileActionsChange = viewModel::setShowDirectoryFileActions,
         onSlideShowStayMillisChange = viewModel::setSlideShowStayMillis,
         onHoldSlideShowEnabledChange = viewModel::setHoldSlideShowEnabled,
         onSlideShowDirectionChange = viewModel::setSlideShowDirection,
@@ -66,6 +68,7 @@ fun Others(
 fun OthersScreen(
     uiState: OthersUiState,
     onShowHiddenFilesChange: (Boolean) -> Unit,
+    onShowDirectoryFileActionsChange: (Boolean) -> Unit,
     onSlideShowStayMillisChange: (Long) -> Unit,
     onHoldSlideShowEnabledChange: (Boolean) -> Unit,
     onSlideShowDirectionChange: (SlideShowDirection) -> Unit,
@@ -169,6 +172,20 @@ fun OthersScreen(
                                 SlideShowDirection.Previous -> previousMediaLabel
                             }
                         },
+                    )
+                },
+            )
+        }
+        item {
+            ListItem(
+                modifier = Modifier.fillMaxWidth(),
+                headlineContent = { Text(stringResource(R.string.show_directory_file_actions)) },
+                supportingContent = { Text(stringResource(R.string.show_directory_file_actions_summary)) },
+                leadingContent = { Icon(Icons.Default.MoreVert, contentDescription = null) },
+                trailingContent = {
+                    Switch(
+                        checked = uiState.showDirectoryFileActions,
+                        onCheckedChange = onShowDirectoryFileActionsChange,
                     )
                 },
             )
@@ -302,6 +319,7 @@ fun OthersPreview() {
         OthersScreen(
             uiState = OthersUiState(
                 showHiddenFiles = true,
+                showDirectoryFileActions = false,
                 slideShowStayMillis = 3000L,
                 holdSlideShowEnabled = true,
                 slideShowDirection = SlideShowDirection.Next,
@@ -310,6 +328,7 @@ fun OthersPreview() {
                 mediaEdgeDialogStyle = MediaEdgeDialogStyle.Bottom,
             ),
             onShowHiddenFilesChange = {},
+            onShowDirectoryFileActionsChange = {},
             onSlideShowStayMillisChange = {},
             onHoldSlideShowEnabledChange = {},
             onSlideShowDirectionChange = {},

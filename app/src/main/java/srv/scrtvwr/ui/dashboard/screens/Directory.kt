@@ -403,14 +403,16 @@ fun DirectoryScreen(
             }
         }
 
-        DirectoryFileOperationPanel(
-            pendingOperation = uiState.pendingFileOperation,
-            status = uiState.fileOperationStatus,
-            isRunning = uiState.isFileOperationRunning,
-            onPaste = onPasteFileOperation,
-            onCancel = onCancelFileOperation,
-            onDismissStatus = onClearFileOperationStatus,
-        )
+        if (uiState.showDirectoryFileActions) {
+            DirectoryFileOperationPanel(
+                pendingOperation = uiState.pendingFileOperation,
+                status = uiState.fileOperationStatus,
+                isRunning = uiState.isFileOperationRunning,
+                onPaste = onPasteFileOperation,
+                onCancel = onCancelFileOperation,
+                onDismissStatus = onClearFileOperationStatus,
+            )
+        }
 
         if (uiState.isLoading && uiState.entries.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -422,6 +424,7 @@ fun DirectoryScreen(
                 onOpenDirectory = onOpenDirectory,
                 onOpenMedia = onOpenMedia,
                 onNavigateUp = onNavigateUp,
+                showFileActions = uiState.showDirectoryFileActions,
                 onCopyEntry = onCopyEntry,
                 onMoveEntry = onMoveEntry,
                 onRequestDeleteEntry = { entryPendingDeletion = it },
@@ -432,6 +435,7 @@ fun DirectoryScreen(
                 onOpenDirectory = onOpenDirectory,
                 onOpenMedia = onOpenMedia,
                 onNavigateUp = onNavigateUp,
+                showFileActions = uiState.showDirectoryFileActions,
                 onCopyEntry = onCopyEntry,
                 onMoveEntry = onMoveEntry,
                 onRequestDeleteEntry = { entryPendingDeletion = it },
@@ -709,6 +713,7 @@ private fun DirectoryList(
     onOpenDirectory: (DirectoryEntry) -> Unit,
     onOpenMedia: (DirectoryEntry) -> Unit,
     onNavigateUp: () -> Unit,
+    showFileActions: Boolean,
     onCopyEntry: (DirectoryEntry) -> Unit,
     onMoveEntry: (DirectoryEntry) -> Unit,
     onRequestDeleteEntry: (DirectoryEntry) -> Unit,
@@ -759,13 +764,17 @@ private fun DirectoryList(
                     } else {
                         null
                     },
-                    actions = {
-                        DirectoryEntryActionMenu(
-                            entry = entry,
-                            onCopyEntry = onCopyEntry,
-                            onMoveEntry = onMoveEntry,
-                            onRequestDeleteEntry = onRequestDeleteEntry,
-                        )
+                    actions = if (showFileActions) {
+                        {
+                            DirectoryEntryActionMenu(
+                                entry = entry,
+                                onCopyEntry = onCopyEntry,
+                                onMoveEntry = onMoveEntry,
+                                onRequestDeleteEntry = onRequestDeleteEntry,
+                            )
+                        }
+                    } else {
+                        null
                     },
                 )
             }
@@ -840,6 +849,7 @@ private fun DirectoryGrid(
     onOpenDirectory: (DirectoryEntry) -> Unit,
     onOpenMedia: (DirectoryEntry) -> Unit,
     onNavigateUp: () -> Unit,
+    showFileActions: Boolean,
     onCopyEntry: (DirectoryEntry) -> Unit,
     onMoveEntry: (DirectoryEntry) -> Unit,
     onRequestDeleteEntry: (DirectoryEntry) -> Unit,
@@ -915,13 +925,17 @@ private fun DirectoryGrid(
                     } else {
                         null
                     },
-                    actions = {
-                        DirectoryEntryActionMenu(
-                            entry = entry,
-                            onCopyEntry = onCopyEntry,
-                            onMoveEntry = onMoveEntry,
-                            onRequestDeleteEntry = onRequestDeleteEntry,
-                        )
+                    actions = if (showFileActions) {
+                        {
+                            DirectoryEntryActionMenu(
+                                entry = entry,
+                                onCopyEntry = onCopyEntry,
+                                onMoveEntry = onMoveEntry,
+                                onRequestDeleteEntry = onRequestDeleteEntry,
+                            )
+                        }
+                    } else {
+                        null
                     },
                 )
             }

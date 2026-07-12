@@ -55,6 +55,7 @@ class DirectoryViewModel(
                 ?: DirectoryMediaFilter.All,
             sortOrder = preferences.getDirectorySortOrder(),
             showHiddenFiles = preferences.getShowHiddenFiles(),
+            showDirectoryFileActions = preferences.getShowDirectoryFileActions(),
             canNavigateUp = initialDirectory.isDifferentDirectory(initialRoot),
             recentDirectories = preferences.getRecentDirectories().validDirectories(),
             lastMediaSession = preferences.getLastMediaSession()?.takeIfValid(),
@@ -139,6 +140,7 @@ class DirectoryViewModel(
         _uiState.update {
             it.copy(
                 showHiddenFiles = preferences.getShowHiddenFiles(),
+                showDirectoryFileActions = preferences.getShowDirectoryFileActions(),
                 recentDirectories = preferences.getRecentDirectories().validDirectories(),
                 lastMediaSession = preferences.getLastMediaSession()?.takeIfValid(),
             )
@@ -165,6 +167,7 @@ class DirectoryViewModel(
     fun pastePendingFileOperation() {
         val currentState = _uiState.value
         if (currentState.isFileOperationRunning) return
+        if (!currentState.showDirectoryFileActions) return
         val operation = currentState.pendingFileOperation ?: return
         val destinationDirectory = currentState.currentDirectory
         viewModelScope.launch {
@@ -189,7 +192,8 @@ class DirectoryViewModel(
     }
 
     fun deleteEntry(entry: DirectoryEntry) {
-        if (_uiState.value.isFileOperationRunning) return
+        val currentState = _uiState.value
+        if (currentState.isFileOperationRunning || !currentState.showDirectoryFileActions) return
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -217,7 +221,7 @@ class DirectoryViewModel(
 
     private fun prepareFileOperation(entry: DirectoryEntry, operation: DirectoryFileOperation) {
         _uiState.update { state ->
-            if (state.isFileOperationRunning) state else state.copy(
+            if (state.isFileOperationRunning || !state.showDirectoryFileActions) state else state.copy(
                 pendingFileOperation = PendingDirectoryFileOperation(
                     operation = operation,
                     name = entry.name,
@@ -280,6 +284,7 @@ data class DirectoryUiState(
     val recentDirectories: List<String> = emptyList(),
     val lastMediaSession: LastMediaSession? = null,
     val showHiddenFiles: Boolean = false,
+    val showDirectoryFileActions: Boolean = false,
     val isLoading: Boolean = false,
     val isFileOperationRunning: Boolean = false,
     val pendingFileOperation: PendingDirectoryFileOperation? = null,

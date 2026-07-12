@@ -73,6 +73,13 @@ class ScrtvwrPreferences(context: Context) {
         preferences.edit().putBoolean(KEY_SHOW_HIDDEN_FILES, enabled).apply()
     }
 
+    fun getShowDirectoryFileActions(): Boolean =
+        preferences.getBoolean(KEY_SHOW_DIRECTORY_FILE_ACTIONS, false)
+
+    fun saveShowDirectoryFileActions(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_SHOW_DIRECTORY_FILE_ACTIONS, enabled).apply()
+    }
+
     fun getBookmarkedMedia(): Set<String> =
         preferences.getStringSet(KEY_BOOKMARKED_MEDIA, emptySet()).orEmpty().toSet()
 
@@ -191,6 +198,7 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_VIDEO_PRELOAD_DISTANCE = "video_preload_distance"
         const val KEY_MEDIA_EDGE_DIALOG_STYLE = "media_edge_dialog_style"
         const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
+        const val KEY_SHOW_DIRECTORY_FILE_ACTIONS = "show_directory_file_actions"
         const val KEY_BOOKMARKED_MEDIA = "bookmarked_media"
         const val KEY_MEDIA_HISTORY = "media_history"
         const val KEY_LAST_DIRECTORY = "last_directory"
