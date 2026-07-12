@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
@@ -51,6 +52,8 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -62,6 +65,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -103,12 +107,15 @@ import srv.scrtvwr.MediaViewerActivity
 import srv.scrtvwr.VideoPlayerActivity
 import srv.scrtvwr.R
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryEntry
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryFileOperation
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryFileOperationStatus
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryListing
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryMediaFilter
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryMediaType
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewModel
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewMode
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.PendingDirectoryFileOperation
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import kotlinx.coroutines.launch
@@ -197,6 +204,12 @@ fun Directory(
         },
         onNavigateUp = viewModel::navigateUp,
         onRefresh = viewModel::refresh,
+        onCopyEntry = viewModel::prepareCopy,
+        onMoveEntry = viewModel::prepareMove,
+        onDeleteEntry = viewModel::deleteEntry,
+        onPasteFileOperation = viewModel::pastePendingFileOperation,
+        onCancelFileOperation = viewModel::cancelFileOperation,
+        onClearFileOperationStatus = viewModel::clearFileOperationStatus,
         modifier = modifier,
     )
 }
@@ -214,10 +227,17 @@ fun DirectoryScreen(
     onResumeMedia: () -> Unit,
     onNavigateUp: () -> Unit,
     onRefresh: () -> Unit,
+    onCopyEntry: (DirectoryEntry) -> Unit,
+    onMoveEntry: (DirectoryEntry) -> Unit,
+    onDeleteEntry: (DirectoryEntry) -> Unit,
+    onPasteFileOperation: () -> Unit,
+    onCancelFileOperation: () -> Unit,
+    onClearFileOperationStatus: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var sortMenuExpanded by remember { mutableStateOf(false) }
     var moreMenuExpanded by remember { mutableStateOf(false) }
+    var entryPendingDeletion by remember { mutableStateOf<DirectoryEntry?>(null) }
 
     Column(
         modifier = modifier
@@ -383,6 +403,15 @@ fun DirectoryScreen(
             }
         }
 
+        DirectoryFileOperationPanel(
+            pendingOperation = uiState.pendingFileOperation,
+            status = uiState.fileOperationStatus,
+            isRunning = uiState.isFileOperationRunning,
+            onPaste = onPasteFileOperation,
+            onCancel = onCancelFileOperation,
+            onDismissStatus = onClearFileOperationStatus,
+        )
+
         if (uiState.isLoading && uiState.entries.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
@@ -393,6 +422,9 @@ fun DirectoryScreen(
                 onOpenDirectory = onOpenDirectory,
                 onOpenMedia = onOpenMedia,
                 onNavigateUp = onNavigateUp,
+                onCopyEntry = onCopyEntry,
+                onMoveEntry = onMoveEntry,
+                onRequestDeleteEntry = { entryPendingDeletion = it },
             )
 
             DirectoryViewMode.Grid -> DirectoryGrid(
@@ -400,8 +432,22 @@ fun DirectoryScreen(
                 onOpenDirectory = onOpenDirectory,
                 onOpenMedia = onOpenMedia,
                 onNavigateUp = onNavigateUp,
+                onCopyEntry = onCopyEntry,
+                onMoveEntry = onMoveEntry,
+                onRequestDeleteEntry = { entryPendingDeletion = it },
             )
         }
+    }
+
+    entryPendingDeletion?.let { entry ->
+        DeleteEntryDialog(
+            entry = entry,
+            onDismiss = { entryPendingDeletion = null },
+            onDelete = {
+                onDeleteEntry(entry)
+                entryPendingDeletion = null
+            },
+        )
     }
 }
 
@@ -480,11 +526,192 @@ private fun DirectoryToolbarButton(
 }
 
 @Composable
+private fun DirectoryFileOperationPanel(
+    pendingOperation: PendingDirectoryFileOperation?,
+    status: DirectoryFileOperationStatus?,
+    isRunning: Boolean,
+    onPaste: () -> Unit,
+    onCancel: () -> Unit,
+    onDismissStatus: () -> Unit,
+) {
+    if (pendingOperation == null && status == null) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        pendingOperation?.let { operation ->
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = stringResource(operation.operation.pendingLabelResource(), operation.name),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = operation.path,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    TextButton(
+                        onClick = onCancel,
+                        enabled = !isRunning,
+                    ) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                    Button(
+                        onClick = onPaste,
+                        enabled = !isRunning,
+                    ) {
+                        Text(stringResource(R.string.paste_here))
+                    }
+                }
+            }
+        }
+
+        status?.let { operationStatus ->
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+                color = if (operationStatus.isError) {
+                    MaterialTheme.colorScheme.errorContainer
+                } else {
+                    MaterialTheme.colorScheme.secondaryContainer
+                },
+                contentColor = if (operationStatus.isError) {
+                    MaterialTheme.colorScheme.onErrorContainer
+                } else {
+                    MaterialTheme.colorScheme.onSecondaryContainer
+                },
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = operationStatus.message,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    IconButton(onClick = onDismissStatus) {
+                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.close))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeleteEntryDialog(
+    entry: DirectoryEntry,
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                stringResource(
+                    if (entry.isDirectory) R.string.delete_folder_title else R.string.delete_file_title,
+                ),
+            )
+        },
+        text = {
+            Text(stringResource(R.string.delete_item_message, entry.name))
+        },
+        confirmButton = {
+            Button(onClick = onDelete) {
+                Text(stringResource(R.string.delete))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun DirectoryEntryActionMenu(
+    entry: DirectoryEntry,
+    onCopyEntry: (DirectoryEntry) -> Unit,
+    onMoveEntry: (DirectoryEntry) -> Unit,
+    onRequestDeleteEntry: (DirectoryEntry) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box {
+        Surface(
+            shape = MaterialTheme.shapes.extraSmall,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.86f),
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ) {
+            IconButton(
+                onClick = { expanded = true },
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_options))
+            }
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.copy)) },
+                onClick = {
+                    onCopyEntry(entry)
+                    expanded = false
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.move)) },
+                onClick = {
+                    onMoveEntry(entry)
+                    expanded = false
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.delete)) },
+                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                onClick = {
+                    onRequestDeleteEntry(entry)
+                    expanded = false
+                },
+            )
+        }
+    }
+}
+
+@Composable
 private fun DirectoryList(
     uiState: DirectoryUiState,
     onOpenDirectory: (DirectoryEntry) -> Unit,
     onOpenMedia: (DirectoryEntry) -> Unit,
     onNavigateUp: () -> Unit,
+    onCopyEntry: (DirectoryEntry) -> Unit,
+    onMoveEntry: (DirectoryEntry) -> Unit,
+    onRequestDeleteEntry: (DirectoryEntry) -> Unit,
 ) {
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
@@ -532,6 +759,14 @@ private fun DirectoryList(
                     } else {
                         null
                     },
+                    actions = {
+                        DirectoryEntryActionMenu(
+                            entry = entry,
+                            onCopyEntry = onCopyEntry,
+                            onMoveEntry = onMoveEntry,
+                            onRequestDeleteEntry = onRequestDeleteEntry,
+                        )
+                    },
                 )
             }
         }
@@ -555,6 +790,7 @@ private fun DirectoryListRow(
     thumbnail: @Composable () -> Unit,
     style: EntryVisualStyle,
     onClick: (() -> Unit)?,
+    actions: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
@@ -591,6 +827,10 @@ private fun DirectoryListRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        actions?.let {
+            Spacer(modifier = Modifier.width(8.dp))
+            it()
+        }
     }
 }
 
@@ -600,6 +840,9 @@ private fun DirectoryGrid(
     onOpenDirectory: (DirectoryEntry) -> Unit,
     onOpenMedia: (DirectoryEntry) -> Unit,
     onNavigateUp: () -> Unit,
+    onCopyEntry: (DirectoryEntry) -> Unit,
+    onMoveEntry: (DirectoryEntry) -> Unit,
+    onRequestDeleteEntry: (DirectoryEntry) -> Unit,
 ) {
     val gridState = rememberLazyGridState()
     val coroutineScope = rememberCoroutineScope()
@@ -671,6 +914,14 @@ private fun DirectoryGrid(
                         }
                     } else {
                         null
+                    },
+                    actions = {
+                        DirectoryEntryActionMenu(
+                            entry = entry,
+                            onCopyEntry = onCopyEntry,
+                            onMoveEntry = onMoveEntry,
+                            onRequestDeleteEntry = onRequestDeleteEntry,
+                        )
                     },
                 )
             }
@@ -753,6 +1004,7 @@ private fun DirectoryGridCard(
     subtitle: String,
     thumbnail: @Composable () -> Unit,
     onClick: (() -> Unit)?,
+    actions: (@Composable () -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier
@@ -762,7 +1014,14 @@ private fun DirectoryGridCard(
             .padding(4.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        thumbnail()
+        Box {
+            thumbnail()
+            actions?.let {
+                Box(modifier = Modifier.align(Alignment.TopEnd)) {
+                    it.invoke()
+                }
+            }
+        }
         MiddleEllipsizedText(
             text = title,
             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
@@ -991,6 +1250,11 @@ private fun DirectoryEntry.typeText(): String =
         else -> stringResource(R.string.file)
     }
 
+private fun DirectoryFileOperation.pendingLabelResource(): Int = when (this) {
+    DirectoryFileOperation.Copy -> R.string.copy_pending
+    DirectoryFileOperation.Move -> R.string.move_pending
+}
+
 private fun DirectorySortOrder.labelResource(): Int = when (this) {
     DirectorySortOrder.NameAscending -> R.string.sort_name_ascending
     DirectorySortOrder.NameDescending -> R.string.sort_name_descending
@@ -1070,6 +1334,12 @@ fun DirectoryScreenPreview() {
             onResumeMedia = {},
             onNavigateUp = {},
             onRefresh = {},
+            onCopyEntry = {},
+            onMoveEntry = {},
+            onDeleteEntry = {},
+            onPasteFileOperation = {},
+            onCancelFileOperation = {},
+            onClearFileOperationStatus = {},
         )
     }
 }

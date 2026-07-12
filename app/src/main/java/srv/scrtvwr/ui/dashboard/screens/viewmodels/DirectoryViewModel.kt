@@ -16,6 +16,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import srv.scrtvwr.R
 import srv.scrtvwr.preferences.LastMediaSession
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.sort.DirectorySortOrder
@@ -26,6 +27,7 @@ class DirectoryViewModel(
     application: Application,
     private val savedStateHandle: SavedStateHandle,
 ) : AndroidViewModel(application) {
+    private val app = application
     private val defaultRootDirectory = Environment.getExternalStorageDirectory()
     private val preferences = ScrtvwrPreferences(application)
     private val initialDirectory = savedStateHandle.get<String>(STATE_DIRECTORY)
@@ -144,6 +146,89 @@ class DirectoryViewModel(
         scanDirectory()
     }
 
+    fun prepareCopy(entry: DirectoryEntry) {
+        prepareFileOperation(entry, DirectoryFileOperation.Copy)
+    }
+
+    fun prepareMove(entry: DirectoryEntry) {
+        prepareFileOperation(entry, DirectoryFileOperation.Move)
+    }
+
+    fun cancelFileOperation() {
+        _uiState.update { it.copy(pendingFileOperation = null) }
+    }
+
+    fun clearFileOperationStatus() {
+        _uiState.update { it.copy(fileOperationStatus = null) }
+    }
+
+    fun pastePendingFileOperation() {
+        val currentState = _uiState.value
+        if (currentState.isFileOperationRunning) return
+        val operation = currentState.pendingFileOperation ?: return
+        val destinationDirectory = currentState.currentDirectory
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isFileOperationRunning = true,
+                    fileOperationStatus = null,
+                )
+            }
+            val result = withContext(Dispatchers.IO) {
+                operation.perform(destinationDirectory, app)
+            }
+            _uiState.update { state ->
+                state.copy(
+                    pendingFileOperation = if (result.isError) state.pendingFileOperation else null,
+                    isFileOperationRunning = false,
+                    fileOperationStatus = result,
+                )
+            }
+            scanDirectory()
+        }
+    }
+
+    fun deleteEntry(entry: DirectoryEntry) {
+        if (_uiState.value.isFileOperationRunning) return
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isFileOperationRunning = true,
+                    fileOperationStatus = null,
+                )
+            }
+            val result = withContext(Dispatchers.IO) {
+                File(entry.path).deleteEntry(entry.name, app)
+            }
+            _uiState.update {
+                it.copy(
+                    pendingFileOperation = if (!result.isError && it.pendingFileOperation?.path == entry.path) {
+                        null
+                    } else {
+                        it.pendingFileOperation
+                    },
+                    isFileOperationRunning = false,
+                    fileOperationStatus = result,
+                )
+            }
+            scanDirectory()
+        }
+    }
+
+    private fun prepareFileOperation(entry: DirectoryEntry, operation: DirectoryFileOperation) {
+        _uiState.update { state ->
+            if (state.isFileOperationRunning) state else state.copy(
+                pendingFileOperation = PendingDirectoryFileOperation(
+                    operation = operation,
+                    name = entry.name,
+                    path = entry.path,
+                    isDirectory = entry.isDirectory,
+                ),
+                fileOperationStatus = null,
+            )
+        }
+    }
+
     private fun saveLastDirectory(directory: File) {
         preferences.saveLastDirectory(directory.absolutePath)
     }
@@ -196,6 +281,9 @@ data class DirectoryUiState(
     val lastMediaSession: LastMediaSession? = null,
     val showHiddenFiles: Boolean = false,
     val isLoading: Boolean = false,
+    val isFileOperationRunning: Boolean = false,
+    val pendingFileOperation: PendingDirectoryFileOperation? = null,
+    val fileOperationStatus: DirectoryFileOperationStatus? = null,
     val errorMessage: String? = null,
 ) {
     val entries: List<DirectoryEntry>
@@ -218,6 +306,23 @@ data class DirectoryEntry(
     val sizeBytes: Long,
     val lastModifiedMillis: Long,
     val mediaType: DirectoryMediaType = DirectoryMediaType.Other,
+)
+
+data class PendingDirectoryFileOperation(
+    val operation: DirectoryFileOperation,
+    val name: String,
+    val path: String,
+    val isDirectory: Boolean,
+)
+
+enum class DirectoryFileOperation {
+    Copy,
+    Move,
+}
+
+data class DirectoryFileOperationStatus(
+    val message: String,
+    val isError: Boolean,
 )
 
 enum class DirectoryViewMode {
@@ -299,6 +404,159 @@ private fun File.isSameOrChildOf(root: File): Boolean {
     val filePath = canonicalPathOrAbsolute()
     return filePath == rootPath || filePath.startsWith("$rootPath${File.separator}")
 }
+
+private fun PendingDirectoryFileOperation.perform(
+    destinationDirectory: File,
+    app: Application,
+): DirectoryFileOperationStatus {
+    val source = File(path)
+    if (!source.exists()) {
+        return operation.failure(app, name, app.getString(R.string.file_operation_source_missing))
+    }
+    if (!destinationDirectory.exists() || !destinationDirectory.isDirectory) {
+        return operation.failure(app, name, app.getString(R.string.file_operation_destination_unavailable))
+    }
+
+    return when (operation) {
+        DirectoryFileOperation.Copy -> source.copyInto(destinationDirectory, name, app)
+        DirectoryFileOperation.Move -> source.moveInto(destinationDirectory, name, app)
+    }
+}
+
+private fun File.copyInto(
+    destinationDirectory: File,
+    displayName: String,
+    app: Application,
+): DirectoryFileOperationStatus = runCatching {
+    val destination = destinationDirectory.uniqueCopyDestinationFor(this)
+    if (isDirectory && destination.isSameOrChildOf(this)) {
+        error(app.getString(R.string.file_operation_destination_inside_source))
+    }
+
+    if (isDirectory) {
+        if (!copyRecursively(destination, overwrite = false)) {
+            error(app.getString(R.string.file_operation_copy_failed_generic))
+        }
+    } else {
+        copyTo(destination, overwrite = false)
+    }
+}.fold(
+    onSuccess = {
+        DirectoryFileOperationStatus(
+            message = app.getString(R.string.copy_complete, displayName),
+            isError = false,
+        )
+    },
+    onFailure = { error ->
+        DirectoryFileOperation.Copy.failure(app, displayName, error.userMessage(app))
+    },
+)
+
+private fun File.moveInto(
+    destinationDirectory: File,
+    displayName: String,
+    app: Application,
+): DirectoryFileOperationStatus = runCatching {
+    if (isDirectory && destinationDirectory.isSameOrChildOf(this)) {
+        error(app.getString(R.string.file_operation_destination_inside_source))
+    }
+
+    val destination = File(destinationDirectory, name)
+    if (destination.exists()) {
+        error(app.getString(R.string.file_operation_destination_exists))
+    }
+
+    if (!renameTo(destination)) {
+        if (isDirectory) {
+            if (!copyRecursively(destination, overwrite = false)) {
+                error(app.getString(R.string.file_operation_copy_failed_generic))
+            }
+            if (!deleteRecursively() && exists()) {
+                error(app.getString(R.string.file_operation_original_delete_failed))
+            }
+        } else {
+            copyTo(destination, overwrite = false)
+            if (!delete() && exists()) {
+                error(app.getString(R.string.file_operation_original_delete_failed))
+            }
+        }
+    }
+}.fold(
+    onSuccess = {
+        DirectoryFileOperationStatus(
+            message = app.getString(R.string.move_complete, displayName),
+            isError = false,
+        )
+    },
+    onFailure = { error ->
+        DirectoryFileOperation.Move.failure(app, displayName, error.userMessage(app))
+    },
+)
+
+private fun File.deleteEntry(
+    displayName: String,
+    app: Application,
+): DirectoryFileOperationStatus = runCatching {
+    if (!exists()) {
+        error(app.getString(R.string.file_operation_source_missing))
+    }
+
+    val deleted = if (isDirectory) deleteRecursively() else delete()
+    if (!deleted && exists()) {
+        error(app.getString(R.string.file_operation_delete_failed_generic))
+    }
+}.fold(
+    onSuccess = {
+        DirectoryFileOperationStatus(
+            message = app.getString(R.string.delete_complete, displayName),
+            isError = false,
+        )
+    },
+    onFailure = { error ->
+        DirectoryFileOperationStatus(
+            message = app.getString(R.string.delete_failed, displayName, error.userMessage(app)),
+            isError = true,
+        )
+    },
+)
+
+private fun DirectoryFileOperation.failure(
+    app: Application,
+    displayName: String,
+    reason: String,
+): DirectoryFileOperationStatus =
+    DirectoryFileOperationStatus(
+        message = app.getString(
+            when (this) {
+                DirectoryFileOperation.Copy -> R.string.copy_failed
+                DirectoryFileOperation.Move -> R.string.move_failed
+            },
+            displayName,
+            reason,
+        ),
+        isError = true,
+    )
+
+private fun File.uniqueCopyDestinationFor(source: File): File {
+    val initial = File(this, source.name)
+    if (!initial.exists()) return initial
+
+    val hasExtension = source.isFile && source.extension.isNotBlank() && source.nameWithoutExtension.isNotBlank()
+    val baseName = if (hasExtension) source.nameWithoutExtension else source.name
+    val extension = if (hasExtension) ".${source.extension}" else ""
+    var index = 1
+    while (true) {
+        val suffix = if (index == 1) " copy" else " copy $index"
+        val candidate = File(this, "$baseName$suffix$extension")
+        if (!candidate.exists()) return candidate
+        index++
+    }
+}
+
+private fun Throwable.userMessage(app: Application): String =
+    localizedMessage?.takeIf(String::isNotBlank)
+        ?: message?.takeIf(String::isNotBlank)
+        ?: app.getString(R.string.unknown)
 
 private fun List<String>.validDirectories(): List<String> =
     filter { File(it).exists() && File(it).isDirectory }
