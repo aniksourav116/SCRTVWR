@@ -817,17 +817,6 @@ private fun ViewerOptionsRow(
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
         IconButton(
-            onClick = onMoveFirstClick,
-            enabled = canMoveFirst,
-            modifier = Modifier.size(40.dp),
-        ) {
-            Icon(
-                Icons.Default.FirstPage,
-                contentDescription = stringResource(R.string.move_first_item),
-                tint = Color.White.copy(alpha = if (canMoveFirst) 1f else 0.38f),
-            )
-        }
-        IconButton(
             onClick = onFitClick,
             modifier = Modifier.size(40.dp),
         ) {
@@ -864,6 +853,17 @@ private fun ViewerOptionsRow(
             modifier = Modifier.size(40.dp),
         ) {
             Icon(Icons.Default.Slideshow, contentDescription = stringResource(R.string.start_slideshow), tint = Color.White)
+        }
+        IconButton(
+            onClick = onMoveFirstClick,
+            enabled = canMoveFirst,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(
+                Icons.Default.FirstPage,
+                contentDescription = stringResource(R.string.move_first_item),
+                tint = Color.White.copy(alpha = if (canMoveFirst) 1f else 0.38f),
+            )
         }
         IconButton(
             onClick = onMoveLastClick,
