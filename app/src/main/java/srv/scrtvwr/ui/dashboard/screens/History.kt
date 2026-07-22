@@ -14,15 +14,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
@@ -75,6 +79,8 @@ fun History(
     HistoryScreen(
         uiState = uiState,
         onFilterSelected = viewModel::selectFilter,
+        onRemoveDirectory = viewModel::removeItem,
+        onClearVisible = viewModel::clearVisibleItems,
         onOpenDirectory = { directoryPath, mediaPath ->
             context.startActivity(Intent(context, MediaViewerActivity::class.java).apply {
                 putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, directoryPath)
@@ -89,6 +95,8 @@ fun History(
 fun HistoryScreen(
     uiState: HistoryUiState,
     onFilterSelected: (HistoryFilter) -> Unit,
+    onRemoveDirectory: (HistoryDirectoryItem) -> Unit,
+    onClearVisible: () -> Unit,
     onOpenDirectory: (String, String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -97,13 +105,27 @@ fun HistoryScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(stringResource(R.string.viewing_history), style = MaterialTheme.typography.headlineSmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            HistoryFilter.entries.forEach { filter ->
-                FilterChip(
-                    selected = filter == uiState.selectedFilter,
-                    onClick = { onFilterSelected(filter) },
-                    label = { Text(stringResource(filter.labelResource())) },
-                )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                HistoryFilter.entries.forEach { filter ->
+                    FilterChip(
+                        selected = filter == uiState.selectedFilter,
+                        onClick = { onFilterSelected(filter) },
+                        label = { Text(stringResource(filter.labelResource())) },
+                    )
+                }
+            }
+            if (uiState.visibleDirectories.isNotEmpty()) {
+                TextButton(onClick = onClearVisible) {
+                    Icon(Icons.Default.DeleteSweep, contentDescription = null)
+                    Text(stringResource(uiState.selectedFilter.clearLabelResource()))
+                }
             }
         }
         if (uiState.visibleDirectories.isEmpty()) {
@@ -123,11 +145,19 @@ fun HistoryScreen(
             }
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
-                items(uiState.visibleDirectories, key = { it.path }) { directory ->
+                items(uiState.visibleDirectories, key = { it.mediaPath ?: it.path }) { directory ->
                     ListItem(
                         headlineContent = { Text(directory.name) },
                         supportingContent = { Text(directory.path) },
                         leadingContent = { HistoryThumbnail(directory) },
+                        trailingContent = {
+                            IconButton(onClick = { onRemoveDirectory(directory) }) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = stringResource(R.string.remove_history_item),
+                                )
+                            }
+                        },
                         modifier = Modifier.clickable(role = Role.Button) {
                             onOpenDirectory(directory.path, directory.mediaPath)
                         },
@@ -190,4 +220,10 @@ private fun HistoryFilter.labelResource(): Int = when (this) {
     HistoryFilter.ALL -> R.string.all
     HistoryFilter.RECENT -> R.string.recent
     HistoryFilter.FAVORITES -> R.string.favorites
+}
+
+private fun HistoryFilter.clearLabelResource(): Int = when (this) {
+    HistoryFilter.ALL,
+    HistoryFilter.RECENT -> R.string.clear_history
+    HistoryFilter.FAVORITES -> R.string.clear_favorites
 }

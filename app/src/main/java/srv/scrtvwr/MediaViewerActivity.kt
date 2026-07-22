@@ -13,6 +13,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Arrangement
@@ -34,12 +38,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.automirrored.filled.FormatIndentDecrease
-import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.automirrored.filled.LastPage
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.FirstPage
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
 import androidx.compose.material.icons.filled.Slideshow
@@ -62,6 +66,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -70,6 +75,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -78,13 +84,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -96,6 +105,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.PreviewResult
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
@@ -104,9 +114,11 @@ import srv.scrtvwr.ui.media.MediaViewerSource
 import srv.scrtvwr.ui.media.MediaViewerType
 import srv.scrtvwr.ui.media.MediaViewerUiState
 import srv.scrtvwr.ui.media.MediaViewerViewModel
+import srv.scrtvwr.ui.media.SlideShowDirection
+import srv.scrtvwr.ui.media.pageOffset
+import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.util.time.TimeUtil
-import timber.log.Timber
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.math.pow
 
@@ -171,6 +183,7 @@ private fun MediaViewerRoute(
         onNextSourceClick = viewModel::loadNextSource,
         onSlideShowStart = viewModel::startSlideShow,
         onSlideShowStop = viewModel::stopSlideShow,
+        onSortOrderChange = viewModel::setSortOrder,
         onBack = onBack,
     )
 }
@@ -187,8 +200,9 @@ private fun MediaViewerScreen(
     onChromeToggle: () -> Unit,
     onPreviousSourceClick: () -> Unit,
     onNextSourceClick: () -> Unit,
-    onSlideShowStart: (Long) -> Unit,
+    onSlideShowStart: (Long, SlideShowDirection) -> Unit,
     onSlideShowStop: () -> Unit,
+    onSortOrderChange: (DirectorySortOrder) -> Unit,
     onBack: () -> Unit,
 ) {
     val pagerState = rememberPagerState(
@@ -198,19 +212,29 @@ private fun MediaViewerScreen(
     val coroutineScope = rememberCoroutineScope()
     var menuExpanded by rememberSaveable { mutableStateOf(false) }
     var slideShowDialogVisible by rememberSaveable { mutableStateOf(false) }
+    var sortDialogVisible by rememberSaveable { mutableStateOf(false) }
     var detailsDialogVisible by rememberSaveable { mutableStateOf(false) }
     var edgeDialogDirection by rememberSaveable { mutableStateOf<SourceDirection?>(null) }
     var slideShowStayText by rememberSaveable { mutableStateOf(uiState.slideShowStayMillis.toString()) }
+    var slideShowDirection by rememberSaveable { mutableStateOf(uiState.slideShowDirection) }
     var verticalDrag by remember { mutableFloatStateOf(0f) }
     var isPseudoSlideShowRunning by remember { mutableStateOf(false) }
     var pseudoSlideShowStayMillis by remember { mutableStateOf(uiState.slideShowStayMillis) }
     var pseudoSlideShowHorizontalFraction by remember { mutableFloatStateOf(0f) }
+    var pseudoSlideShowPageOffset by remember { mutableStateOf(1) }
     val readyMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
+    val zoomedMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
+    var zoomCommand by remember { mutableStateOf<ZoomCommand?>(null) }
     val isAnySlideShowRunning = uiState.isSlideShowRunning || isPseudoSlideShowRunning
     val activeSlideShowStayMillis = if (isPseudoSlideShowRunning) {
         pseudoSlideShowStayMillis
     } else {
         uiState.slideShowStayMillis
+    }
+    val activeSlideShowPageOffset = if (isPseudoSlideShowRunning) {
+        pseudoSlideShowPageOffset
+    } else {
+        uiState.slideShowDirection.pageOffset
     }
     fun showEdgeDialog(direction: SourceDirection) {
         if (uiState.items.isNotEmpty()) {
@@ -233,9 +257,24 @@ private fun MediaViewerScreen(
         }
     }
 
-    LaunchedEffect(slideShowDialogVisible, uiState.slideShowStayMillis) {
+    fun startPseudoSlideShow(pageOffset: Int) {
+        if (uiState.items.isEmpty() || uiState.isSlideShowRunning) return
+        pseudoSlideShowStayMillis = uiState.slideShowStayMillis
+        pseudoSlideShowHorizontalFraction = 0f
+        pseudoSlideShowPageOffset = pageOffset
+        isPseudoSlideShowRunning = true
+    }
+
+    fun stopPseudoSlideShow() {
+        isPseudoSlideShowRunning = false
+        pseudoSlideShowHorizontalFraction = 0f
+        pseudoSlideShowPageOffset = 1
+    }
+
+    LaunchedEffect(slideShowDialogVisible, uiState.slideShowStayMillis, uiState.slideShowDirection) {
         if (slideShowDialogVisible) {
             slideShowStayText = uiState.slideShowStayMillis.toString()
+            slideShowDirection = uiState.slideShowDirection
         }
     }
 
@@ -257,6 +296,7 @@ private fun MediaViewerScreen(
     LaunchedEffect(
         isAnySlideShowRunning,
         activeSlideShowStayMillis,
+        activeSlideShowPageOffset,
         isPseudoSlideShowRunning,
         uiState.items,
         pagerState.currentPage,
@@ -276,27 +316,40 @@ private fun MediaViewerScreen(
             delay(activeSlideShowStayMillis.milliseconds)
 
             if (pagerState.currentPage == currentPage) {
-                val nextPage = currentPage + 1
-                if (nextPage >= uiState.items.size) {
-                    if (!isPseudoSlideShowRunning) onSlideShowStop()
+                val requestedPage = currentPage + activeSlideShowPageOffset
+                if (requestedPage !in uiState.items.indices) {
+                    if (isPseudoSlideShowRunning) {
+                        stopPseudoSlideShow()
+                    } else {
+                        onSlideShowStop()
+                    }
                 } else {
-                    pagerState.scrollToPage(nextPage)
+                    pagerState.scrollToPage(requestedPage)
                 }
             }
         }
     }
 
     val selectedItem = uiState.itemForPage(pagerState.currentPage)
-    Timber.d("name ${selectedItem?.name}")
+    val selectedMediaKey = selectedItem?.readinessKey
+    val isCurrentMediaZoomed = selectedMediaKey?.let { zoomedMedia[it] == true } == true
+    fun toggleCurrentImageZoom() {
+        val mediaKey = selectedMediaKey ?: return
+        zoomCommand = ZoomCommand(
+            mediaKey = mediaKey,
+            id = (zoomCommand?.id ?: 0) + 1,
+        )
+    }
+
     val splits = selectedItem?.name?.split("_") ?: emptyList()
-    Timber.d("splits $splits")
 
     val selectedName =  selectedItem?.name?: stringResource(R.string.no_media_selected)
-    val time = if (splits.isNotEmpty() && splits.size>=4) {
-        TimeUtil.getDateAndTimeWithWeekDay(splits[(splits.size - 3).coerceAtLeast(0)].toLongOrNull())
+    val timestampSeconds = if (splits.size >= 4) {
+        splits[(splits.size - 3).coerceAtLeast(0)].toLongOrNull()
     } else {
-        TimeUtil.getDateAndTimeWithWeekDay()
+        selectedItem?.lastModifiedMillis?.let { it / 1_000L }
     }
+    val time = TimeUtil.getDateAndTimeWithWeekDay(timestampSeconds)
 
 
     Scaffold(
@@ -326,9 +379,6 @@ private fun MediaViewerScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = onFitClick) {
-                            Icon(Icons.Default.OpenInFull, contentDescription = stringResource(R.string.toggle_full_view))
-                        }
                         Box {
                             IconButton(onClick = { menuExpanded = true }) {
                                 Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_options))
@@ -341,27 +391,6 @@ private fun MediaViewerScreen(
                                     text = { Text(stringResource(if (uiState.fillFrame) R.string.fit_screen else R.string.fill_screen)) },
                                     onClick = {
                                         onFitClick()
-                                        menuExpanded = false
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.move_first_item)) },
-                                    enabled = uiState.items.isNotEmpty() && pagerState.currentPage != 0,
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            pagerState.animateScrollToPage(0)
-                                        }
-                                        menuExpanded = false
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.move_last_item)) },
-                                    enabled = uiState.items.isNotEmpty() &&
-                                        pagerState.currentPage != uiState.items.lastIndex,
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            pagerState.animateScrollToPage(uiState.items.lastIndex)
-                                        }
                                         menuExpanded = false
                                     },
                                 )
@@ -383,6 +412,14 @@ private fun MediaViewerScreen(
                                     text = { Text(stringResource(if (uiState.bookmarked) R.string.remove_bookmark else R.string.bookmark)) },
                                     onClick = {
                                         onBookmarkClick()
+                                        menuExpanded = false
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(if (isCurrentMediaZoomed) R.string.reset_zoom else R.string.zoom_in)) },
+                                    enabled = selectedItem?.type == MediaViewerType.Image,
+                                    onClick = {
+                                        toggleCurrentImageZoom()
                                         menuExpanded = false
                                     },
                                 )
@@ -408,15 +445,25 @@ private fun MediaViewerScreen(
         ) {
             if (!uiState.isChromeHidden) {
                 ViewerOptionsRow(
+                    currentPage = pagerState.currentPage,
+                    pageCount = uiState.pageCount,
                     fillFrame = uiState.fillFrame,
                     flipped = uiState.flipped,
-                    bookmarked = uiState.bookmarked,
+                    onMoveFirstClick = {
+                        coroutineScope.launch {
+                            pagerState.animateScrollToPage(0)
+                        }
+                    },
                     onFitClick = onFitClick,
                     onRotateClick = onRotateClick,
                     onFlipClick = onFlipClick,
-                    onBookmarkClick = onBookmarkClick,
-                    onDetailsClick = { detailsDialogVisible = true },
+                    onSortClick = { sortDialogVisible = true },
                     onSlideShowClick = { slideShowDialogVisible = true },
+                    onMoveLastClick = {
+                        coroutineScope.launch {
+                            pagerState.animateScrollToPage(uiState.items.lastIndex)
+                        }
+                    },
                 )
             }
 
@@ -438,9 +485,11 @@ private fun MediaViewerScreen(
                 } else HorizontalPager(
                     state = pagerState,
                     beyondViewportPageCount = minOf(uiState.imagePreloadDistance, uiState.lastPageIndex),
+                    userScrollEnabled = !isCurrentMediaZoomed,
                     modifier = Modifier
                         .fillMaxSize()
-                        .pointerInput(uiState.pageCount) {
+                        .pointerInput(uiState.pageCount, isCurrentMediaZoomed) {
+                            if (isCurrentMediaZoomed) return@pointerInput
                             detectVerticalDragGestures(
                                 onDragStart = { verticalDrag = 0f },
                                 onVerticalDrag = { _, dragAmount -> verticalDrag += dragAmount },
@@ -459,11 +508,13 @@ private fun MediaViewerScreen(
                             uiState.isSlideShowRunning,
                             uiState.holdSlideShowEnabled,
                             uiState.slideShowStayMillis,
+                            isCurrentMediaZoomed,
                         ) {
                             if (
                                 !uiState.holdSlideShowEnabled ||
                                 !uiState.isChromeHidden ||
-                                uiState.isSlideShowRunning
+                                uiState.isSlideShowRunning ||
+                                isCurrentMediaZoomed
                             ) return@pointerInput
 
                             awaitEachGesture {
@@ -477,9 +528,7 @@ private fun MediaViewerScreen(
                                     ?: return@awaitEachGesture
                                 longPress.consume()
                                 val baseStayMillis = uiState.slideShowStayMillis
-                                pseudoSlideShowStayMillis = baseStayMillis
-                                pseudoSlideShowHorizontalFraction = 0f
-                                isPseudoSlideShowRunning = true
+                                startPseudoSlideShow(pageOffset = 1)
 
                                 try {
                                     do {
@@ -497,12 +546,12 @@ private fun MediaViewerScreen(
                                         change.consume()
                                     } while (change.pressed)
                                 } finally {
-                                    isPseudoSlideShowRunning = false
-                                    pseudoSlideShowHorizontalFraction = 0f
+                                    stopPseudoSlideShow()
                                 }
                             }
                         }
-                        .pointerInput(uiState.pageCount) {
+                        .pointerInput(uiState.pageCount, isCurrentMediaZoomed) {
+                            if (isCurrentMediaZoomed) return@pointerInput
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
                                 var totalX = 0f
@@ -534,7 +583,8 @@ private fun MediaViewerScreen(
                                 } while (change.pressed)
                             }
                         }
-                        .pointerInput(uiState.pageCount) {
+                        .pointerInput(uiState.pageCount, isCurrentMediaZoomed) {
+                            if (isCurrentMediaZoomed) return@pointerInput
                             awaitPointerEventScope {
                                 var lastScrollTime = 0L
                                 var acceleration = 1f
@@ -589,14 +639,22 @@ private fun MediaViewerScreen(
                             fillFrame = uiState.fillFrame,
                             rotation = uiState.rotation,
                             flipped = uiState.flipped,
+                            zoomCommand = zoomCommand,
                             onReady = { readyMedia[item.readinessKey] = true },
+                            onZoomChanged = { zoomed ->
+                                if (zoomed) {
+                                    zoomedMedia[item.readinessKey] = true
+                                } else {
+                                    zoomedMedia.remove(item.readinessKey)
+                                }
+                            },
                             onContentClick = onChromeToggle,
                         )
                         else -> EmptyViewerMessage()
                     }
                 }
 
-                if (uiState.isChromeHidden && uiState.pageCount > 0) {
+                if (uiState.isChromeHidden && uiState.pageCount > 0 && !isCurrentMediaZoomed) {
                     HiddenNavigationButtons(
                         currentPage = pagerState.currentPage,
                         pageCount = uiState.pageCount,
@@ -606,6 +664,9 @@ private fun MediaViewerScreen(
                         onNextClick = {
                             navigateFromCurrentPage(1, animated = false)
                         },
+                        onPreviousLongPressStart = { startPseudoSlideShow(pageOffset = -1) },
+                        onNextLongPressStart = { startPseudoSlideShow(pageOffset = 1) },
+                        onLongPressEnd = { stopPseudoSlideShow() },
                     )
                 }
 
@@ -647,16 +708,28 @@ private fun MediaViewerScreen(
     if (slideShowDialogVisible) {
         SlideShowDialog(
             stayMillis = slideShowStayText,
+            direction = slideShowDirection,
             onStayMillisChange = { slideShowStayText = it.filter(Char::isDigit) },
+            onDirectionChange = { slideShowDirection = it },
             onDismiss = { slideShowDialogVisible = false },
             onStart = {
-                onSlideShowStart(slideShowStayText.toLongOrNull() ?: 50L)
+                onSlideShowStart(slideShowStayText.toLongOrNull() ?: 3_000L, slideShowDirection)
                 slideShowDialogVisible = false
             },
         )
     }
     if (detailsDialogVisible && selectedItem != null) {
         MediaDetailsDialog(item = selectedItem, onDismiss = { detailsDialogVisible = false })
+    }
+    if (sortDialogVisible) {
+        SortDialog(
+            currentOrder = uiState.sortOrder,
+            onOrderSelect = {
+                onSortOrderChange(it)
+                sortDialogVisible = false
+            },
+            onDismiss = { sortDialogVisible = false },
+        )
     }
     edgeDialogDirection?.let { direction ->
         SourceEdgeDialog(
@@ -690,7 +763,7 @@ private fun PseudoSlideShowVisualizer(
                 .fillMaxWidth()
                 .height(72.dp)
                 .align(Alignment.BottomCenter)
-                .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(20.dp))
+                .background(Color.Black.copy(alpha = 0.27f), RoundedCornerShape(20.dp))
                 .padding(horizontal = 18.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
@@ -720,16 +793,21 @@ private fun PseudoSlideShowVisualizer(
 
 @Composable
 private fun ViewerOptionsRow(
+    currentPage: Int,
+    pageCount: Int,
     fillFrame: Boolean,
     flipped: Boolean,
-    bookmarked: Boolean,
+    onMoveFirstClick: () -> Unit,
     onFitClick: () -> Unit,
     onRotateClick: () -> Unit,
     onFlipClick: () -> Unit,
-    onBookmarkClick: () -> Unit,
-    onDetailsClick: () -> Unit,
+    onSortClick: () -> Unit,
     onSlideShowClick: () -> Unit,
+    onMoveLastClick: () -> Unit,
 ) {
+    val canMoveFirst = pageCount > 0 && currentPage != 0
+    val canMoveLast = pageCount > 0 && currentPage != pageCount - 1
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -738,35 +816,65 @@ private fun ViewerOptionsRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
-        IconButton(onClick = onFitClick) {
+        IconButton(
+            onClick = onMoveFirstClick,
+            enabled = canMoveFirst,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(
+                Icons.Default.FirstPage,
+                contentDescription = stringResource(R.string.move_first_item),
+                tint = Color.White.copy(alpha = if (canMoveFirst) 1f else 0.38f),
+            )
+        }
+        IconButton(
+            onClick = onFitClick,
+            modifier = Modifier.size(40.dp),
+        ) {
             Icon(
                 Icons.Default.FitScreen,
                 contentDescription = stringResource(if (fillFrame) R.string.fit_screen else R.string.fill_screen),
                 tint = if (fillFrame) Color(0xFF64B5F6) else Color.White,
             )
         }
-        IconButton(onClick = onRotateClick) {
+        IconButton(
+            onClick = onRotateClick,
+            modifier = Modifier.size(40.dp),
+        ) {
             Icon(Icons.Default.Rotate90DegreesCcw, contentDescription = stringResource(R.string.rotate), tint = Color.White)
         }
-        IconButton(onClick = onFlipClick) {
+        IconButton(
+            onClick = onFlipClick,
+            modifier = Modifier.size(40.dp),
+        ) {
             Icon(
                 Icons.Default.SwapHoriz,
                 contentDescription = stringResource(R.string.flip_horizontal),
                 tint = if (flipped) Color(0xFF64B5F6) else Color.White,
             )
         }
-        IconButton(onClick = onBookmarkClick) {
-            Icon(
-                Icons.Default.BookmarkBorder,
-                contentDescription = stringResource(R.string.bookmark),
-                tint = if (bookmarked) Color(0xFF64B5F6) else Color.White,
-            )
+        IconButton(
+            onClick = onSortClick,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = stringResource(R.string.sort_order), tint = Color.White)
         }
-        IconButton(onClick = onDetailsClick) {
-            Icon(Icons.AutoMirrored.Filled.FormatIndentDecrease, contentDescription = stringResource(R.string.details), tint = Color.White)
-        }
-        IconButton(onClick = onSlideShowClick) {
+        IconButton(
+            onClick = onSlideShowClick,
+            modifier = Modifier.size(40.dp),
+        ) {
             Icon(Icons.Default.Slideshow, contentDescription = stringResource(R.string.start_slideshow), tint = Color.White)
+        }
+        IconButton(
+            onClick = onMoveLastClick,
+            enabled = canMoveLast,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.LastPage,
+                contentDescription = stringResource(R.string.move_last_item),
+                tint = Color.White.copy(alpha = if (canMoveLast) 1f else 0.38f),
+            )
         }
     }
 }
@@ -774,7 +882,9 @@ private fun ViewerOptionsRow(
 @Composable
 private fun SlideShowDialog(
     stayMillis: String,
+    direction: SlideShowDirection,
     onStayMillisChange: (String) -> Unit,
+    onDirectionChange: (SlideShowDirection) -> Unit,
     onDismiss: () -> Unit,
     onStart: () -> Unit,
 ) {
@@ -782,12 +892,45 @@ private fun SlideShowDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.slideshow)) },
         text = {
-            OutlinedTextField(
-                value = stayMillis,
-                onValueChange = onStayMillisChange,
-                label = { Text(stringResource(R.string.per_image_stay)) },
-                singleLine = true,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = stayMillis,
+                    onValueChange = onStayMillisChange,
+                    label = { Text(stringResource(R.string.per_image_stay)) },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                    ),
+                )
+                Column {
+                    Text(
+                        text = stringResource(R.string.slideshow_direction),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    SlideShowDirection.entries.forEach { option ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onDirectionChange(option) }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            androidx.compose.material3.RadioButton(
+                                selected = option == direction,
+                                onClick = { onDirectionChange(option) },
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = when (option) {
+                                    SlideShowDirection.Next -> stringResource(R.string.next_media)
+                                    SlideShowDirection.Previous -> stringResource(R.string.previous_media)
+                                },
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
+                    }
+                }
+            }
         },
         confirmButton = {
             Button(onClick = onStart) {
@@ -808,7 +951,9 @@ private fun MediaPage(
     fillFrame: Boolean,
     rotation: Int,
     flipped: Boolean,
+    zoomCommand: ZoomCommand?,
     onReady: () -> Unit,
+    onZoomChanged: (Boolean) -> Unit,
     onContentClick: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -876,10 +1021,120 @@ private fun MediaPage(
         if (preview?.bitmap != null) onReady()
     }
 
+    var imageScale by remember(item.path, item.lastModifiedMillis) { mutableFloatStateOf(MIN_IMAGE_ZOOM) }
+    var imageOffsetX by remember(item.path, item.lastModifiedMillis) { mutableFloatStateOf(0f) }
+    var imageOffsetY by remember(item.path, item.lastModifiedMillis) { mutableFloatStateOf(0f) }
+    var handledZoomCommandId by remember(item.readinessKey) { mutableStateOf(zoomCommand?.id ?: 0) }
+    val isZoomed = imageScale > MIN_IMAGE_ZOOM
+
+    fun resetImageZoom() {
+        imageScale = MIN_IMAGE_ZOOM
+        imageOffsetX = 0f
+        imageOffsetY = 0f
+    }
+
+    fun setCenteredImageZoom(targetScale: Float) {
+        imageScale = targetScale.coerceIn(MIN_IMAGE_ZOOM, MAX_IMAGE_ZOOM)
+        imageOffsetX = 0f
+        imageOffsetY = 0f
+    }
+
+    LaunchedEffect(item.path, item.lastModifiedMillis, fillFrame, rotation, flipped) {
+        resetImageZoom()
+    }
+
+    LaunchedEffect(item.readinessKey, isZoomed) {
+        onZoomChanged(isZoomed)
+    }
+
+    LaunchedEffect(zoomCommand, item.readinessKey) {
+        val command = zoomCommand
+        if (
+            command != null &&
+            command.mediaKey == item.readinessKey &&
+            command.id != handledZoomCommandId
+        ) {
+            handledZoomCommandId = command.id
+            if (isZoomed) {
+                resetImageZoom()
+            } else {
+                setCenteredImageZoom(DOUBLE_TAP_IMAGE_ZOOM)
+            }
+        }
+    }
+
+    DisposableEffect(item.readinessKey) {
+        onDispose {
+            onZoomChanged(false)
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .clickable(onClick = onContentClick),
+            .pointerInput(item.path, item.lastModifiedMillis) {
+                detectTapGestures(
+                    onTap = { onContentClick() },
+                    onDoubleTap = { tapOffset ->
+                        if (imageScale > MIN_IMAGE_ZOOM) {
+                            resetImageZoom()
+                        } else {
+                            val targetScale = DOUBLE_TAP_IMAGE_ZOOM
+                            val center = Offset(size.width / 2f, size.height / 2f)
+                            val nextOffset = constrainImageOffset(
+                                offset = (center - tapOffset) * (targetScale - MIN_IMAGE_ZOOM),
+                                width = size.width.toFloat(),
+                                height = size.height.toFloat(),
+                                scale = targetScale,
+                            )
+                            imageScale = targetScale
+                            imageOffsetX = nextOffset.x
+                            imageOffsetY = nextOffset.y
+                        }
+                    },
+                )
+            }
+            .pointerInput(item.path, item.lastModifiedMillis) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    do {
+                        val event = awaitPointerEvent()
+                        val pressedCount = event.changes.count { it.pressed }
+                        if (pressedCount == 0) break
+
+                        val zoomChange = if (pressedCount > 1) event.calculateZoom() else MIN_IMAGE_ZOOM
+                        val panChange = if (imageScale > MIN_IMAGE_ZOOM || pressedCount > 1) {
+                            event.calculatePan()
+                        } else {
+                            Offset.Zero
+                        }
+                        val shouldHandle = imageScale > MIN_IMAGE_ZOOM || pressedCount > 1
+                        if (shouldHandle) {
+                            val previousScale = imageScale
+                            val nextScale = (imageScale * zoomChange).coerceIn(MIN_IMAGE_ZOOM, MAX_IMAGE_ZOOM)
+                            val nextOffset = if (nextScale <= MIN_IMAGE_ZOOM) {
+                                Offset.Zero
+                            } else {
+                                val centroid = event.calculateCentroid(useCurrent = true)
+                                val center = Offset(size.width / 2f, size.height / 2f)
+                                val scaleChange = nextScale / previousScale
+                                ((Offset(imageOffsetX, imageOffsetY) + centroid - center) * scaleChange) -
+                                    (centroid - center) + panChange
+                            }
+                            val constrainedOffset = constrainImageOffset(
+                                offset = nextOffset,
+                                width = size.width.toFloat(),
+                                height = size.height.toFloat(),
+                                scale = nextScale,
+                            )
+                            imageScale = nextScale
+                            imageOffsetX = constrainedOffset.x
+                            imageOffsetY = constrainedOffset.y
+                            event.changes.forEach { it.consume() }
+                        }
+                    } while (event.changes.any { it.pressed })
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
         val previewResult = preview
@@ -900,8 +1155,14 @@ private fun MediaPage(
                 contentDescription = item.name,
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer(rotationZ = rotation.toFloat())
-                    .scale(scaleX = if (flipped) -1f else 1f, scaleY = 1f),
+                    .graphicsLayer(
+                        rotationZ = rotation.toFloat(),
+                        scaleX = imageScale * if (flipped) -1f else 1f,
+                        scaleY = imageScale,
+                        translationX = imageOffsetX,
+                        translationY = imageOffsetY,
+                        clip = true,
+                    ),
                 contentScale = if (fillFrame) ContentScale.Crop else ContentScale.Fit,
             )
         }
@@ -920,6 +1181,30 @@ private fun adjustedPseudoStayMillis(baseStayMillis: Long, horizontalFraction: F
 
 private const val MIN_PSEUDO_STAY_MILLIS = 1L
 private const val MAX_PSEUDO_STAY_MILLIS = 3_600_000L
+private const val HIDDEN_NAVIGATION_LONG_PRESS_MILLIS = 500L
+private const val MIN_IMAGE_ZOOM = 1f
+private const val DOUBLE_TAP_IMAGE_ZOOM = 2.5f
+private const val MAX_IMAGE_ZOOM = 5f
+
+private data class ZoomCommand(
+    val mediaKey: String,
+    val id: Int,
+)
+
+private fun constrainImageOffset(
+    offset: Offset,
+    width: Float,
+    height: Float,
+    scale: Float,
+): Offset {
+    if (scale <= MIN_IMAGE_ZOOM) return Offset.Zero
+    val maxX = width * (scale - MIN_IMAGE_ZOOM) / 2f
+    val maxY = height * (scale - MIN_IMAGE_ZOOM) / 2f
+    return Offset(
+        x = offset.x.coerceIn(-maxX, maxX),
+        y = offset.y.coerceIn(-maxY, maxY),
+    )
+}
 
 @Composable
 private fun MediaDetailsDialog(item: MediaViewerItem, onDismiss: () -> Unit) {
@@ -1114,11 +1399,61 @@ private fun SourceDirection.edgeReachedMessageStringRes(): Int = when (this) {
 }
 
 @Composable
+private fun SortDialog(
+    currentOrder: DirectorySortOrder,
+    onOrderSelect: (DirectorySortOrder) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.sort_order)) },
+        text = {
+            Column {
+                DirectorySortOrder.entries.forEach { order ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOrderSelect(order) }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.material3.RadioButton(
+                            selected = order == currentOrder,
+                            onClick = { onOrderSelect(order) }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = when (order) {
+                                DirectorySortOrder.NameAscending -> stringResource(R.string.sort_name_ascending)
+                                DirectorySortOrder.NameDescending -> stringResource(R.string.sort_name_descending)
+                                DirectorySortOrder.NewestFirst -> stringResource(R.string.sort_newest)
+                                DirectorySortOrder.OldestFirst -> stringResource(R.string.sort_oldest)
+                                DirectorySortOrder.LargestFirst -> stringResource(R.string.sort_largest)
+                                DirectorySortOrder.SmallestFirst -> stringResource(R.string.sort_smallest)
+                            },
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.close))
+            }
+        }
+    )
+}
+
+@Composable
 private fun BoxScope.HiddenNavigationButtons(
     currentPage: Int,
     pageCount: Int,
     onPreviousClick: () -> Unit,
     onNextClick: () -> Unit,
+    onPreviousLongPressStart: () -> Unit,
+    onNextLongPressStart: () -> Unit,
+    onLongPressEnd: () -> Unit,
 ) {
     Box(
         modifier = Modifier
@@ -1137,6 +1472,8 @@ private fun BoxScope.HiddenNavigationButtons(
                     .weight(1f)
                     .fillMaxHeight(),
                 onClick = onPreviousClick,
+                onLongPressStart = onPreviousLongPressStart,
+                onLongPressEnd = onLongPressEnd,
             )
 
             HiddenNavigationButton(
@@ -1146,6 +1483,8 @@ private fun BoxScope.HiddenNavigationButtons(
                     .weight(1f)
                     .fillMaxHeight(),
                 onClick = onNextClick,
+                onLongPressStart = onNextLongPressStart,
+                onLongPressEnd = onLongPressEnd,
             )
         }
 
@@ -1168,12 +1507,50 @@ private fun HiddenNavigationButton(
     contentDescription: String,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
+    onLongPressStart: () -> Unit,
+    onLongPressEnd: () -> Unit,
 ) {
+    val currentOnClick by rememberUpdatedState(onClick)
+    val currentOnLongPressStart by rememberUpdatedState(onLongPressStart)
+    val currentOnLongPressEnd by rememberUpdatedState(onLongPressEnd)
     Box(
         modifier = modifier
             .alpha(0.11f)
             .background(MaterialTheme.colorScheme.surface)
-            .clickable(onClickLabel = contentDescription, onClick = onClick),
+            .pointerInput(contentDescription) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    val releasedBeforeLongPress = withTimeoutOrNull(HIDDEN_NAVIGATION_LONG_PRESS_MILLIS) {
+                        var released = false
+                        while (!released) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                                ?: return@withTimeoutOrNull true
+                            change.consume()
+                            released = !change.pressed
+                        }
+                        true
+                    } == true
+
+                    if (releasedBeforeLongPress) {
+                        currentOnClick()
+                        return@awaitEachGesture
+                    }
+
+                    currentOnLongPressStart()
+                    try {
+                        do {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                                ?: break
+                            change.consume()
+                        } while (change.pressed)
+                    } finally {
+                        currentOnLongPressEnd()
+                    }
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -1222,17 +1599,67 @@ private fun ViewerTimeline(
     }
 }
 
+//@Preview(showBackground = true)
+//@Composable
+//private fun HiddenNavigationButtonPreview() {
+//    SCRTVWRTheme {
+//        HiddenNavigationButton(
+//            text = "+",
+//            contentDescription = "Previous media",
+//            modifier = Modifier.width(64.dp),
+//            onClick = {}
+//        )
+//    }
+//}
+
 @Preview(showBackground = true)
 @Composable
-private fun HiddenNavigationButtonPreview() {
+private fun MediaViewerScreenPreview() {
+    TimeUtil.initialize(LocalContext.current)
+    val sampleItem = MediaViewerItem(
+        name = "image.jpg",
+        path = "/storage/emulated/0/Pictures/image.jpg",
+        type = MediaViewerType.Image,
+        lastModifiedMillis = System.currentTimeMillis(),
+        sizeBytes = 1024 * 1024
+    )
+    val sampleUiState = MediaViewerUiState(
+        sourceDirectoryPath = "/storage/emulated/0/Pictures",
+        selectedPath = "/storage/emulated/0/Pictures/image.jpg",
+        items = listOf(sampleItem),
+        previousSource = null,
+        nextSource = null,
+        initialPage = 0,
+        selectedPage = 0,
+        fillFrame = false,
+        rotation = 0,
+        flipped = false,
+        bookmarked = false,
+        isChromeHidden = false,
+        isSlideShowRunning = false,
+        slideShowStayMillis = 3000L,
+        slideShowDirection = SlideShowDirection.Next,
+        holdSlideShowEnabled = true,
+        imagePreloadDistance = 1,
+        edgeDialogStyle = MediaEdgeDialogStyle.Bottom,
+        isLoading = false,
+        errorMessage = null
+    )
     SCRTVWRTheme {
-        HiddenNavigationButton(
-            text = "+",
-            contentDescription = "Previous media",
-            modifier = Modifier.width(64.dp),
-            onClick = {}
+        MediaViewerScreen(
+            uiState = sampleUiState,
+            onPageChanged = {},
+            onFitClick = {},
+            onRotateClick = {},
+            onFlipClick = {},
+            onBookmarkClick = {},
+            onChromeToggle = {},
+            onPreviousSourceClick = {},
+            onNextSourceClick = {},
+            onSlideShowStart = { _, _ -> },
+            onSlideShowStop = {},
+            onSortOrderChange = {},
+            onBack = {}
         )
     }
 }
-
-

@@ -8,12 +8,15 @@ import android.os.storage.StorageVolume
 import androidx.lifecycle.AndroidViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import srv.scrtvwr.R
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
 
 class StorageViewModel(application: Application) : AndroidViewModel(application) {
-    private val _uiState = MutableStateFlow(StorageUiState())
+    private val _uiState = MutableStateFlow(
+        StorageUiState(lastChecked = application.getString(R.string.last_checked_not_yet)),
+    )
     val uiState = _uiState.asStateFlow()
 
     init {
@@ -52,7 +55,7 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
 
 data class StorageUiState(
     val devices: List<StorageDevice> = emptyList(),
-    val lastChecked: String = "Not checked yet",
+    val lastChecked: String = "",
 )
 
 data class StorageDevice(
@@ -88,12 +91,12 @@ private fun StorageVolume.directory(
 }
 
 private fun StorageVolume.deviceType(context: Application): String {
-    if (!isRemovable) return "Device storage"
+    if (!isRemovable) return context.getString(R.string.device_storage)
 
     return if (getDescription(context).contains("usb", ignoreCase = true)) {
-        "USB storage"
+        context.getString(R.string.usb_storage)
     } else {
-        "Removable storage"
+        context.getString(R.string.removable_storage)
     }
 }
 

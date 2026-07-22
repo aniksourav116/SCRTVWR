@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.media.MediaCatalog
+import srv.scrtvwr.ui.sort.DirectorySortOrder
 import java.io.File
 
 class MediaViewerViewModel(
@@ -25,23 +26,25 @@ class MediaViewerViewModel(
     private val _uiState = MutableStateFlow(
         MediaViewerUiState(
             slideShowStayMillis = preferences.getSlideShowStayMillis(),
+            slideShowDirection = preferences.getSlideShowDirection(),
             holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
             imagePreloadDistance = preferences.getImagePreloadDistance(),
             edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
+            sortOrder = preferences.getDirectorySortOrder(),
         ),
     )
     val uiState = _uiState.asStateFlow()
 
-    fun load(directoryPath: String?, selectedPath: String?) {
+    fun load(directoryPath: String?, selectedPath: String?, force: Boolean = false) {
         val currentState = _uiState.value
-        if (currentState.sourceDirectoryPath == directoryPath && currentState.selectedPath == selectedPath) {
+        if (!force && currentState.sourceDirectoryPath == directoryPath && currentState.selectedPath == selectedPath) {
             return
         }
 
         loadJob?.cancel()
         _uiState.update { it.copy(isLoading = true, errorMessage = null) }
         loadJob = viewModelScope.launch(Dispatchers.IO) {
-            runCatching { loadMedia(directoryPath, selectedPath) }
+            runCatching { loadMedia(directoryPath, selectedPath, force) }
                 .onFailure { error ->
                     if (error is kotlinx.coroutines.CancellationException) throw error
                     _uiState.update {
@@ -54,7 +57,7 @@ class MediaViewerViewModel(
         }
     }
 
-    private suspend fun loadMedia(directoryPath: String?, selectedPath: String?) {
+    private suspend fun loadMedia(directoryPath: String?, selectedPath: String?, force: Boolean = false) {
         val items: List<MediaViewerItem>
         val sourceDirectoryPath: String?
         var initialPage: Int
@@ -98,7 +101,7 @@ class MediaViewerViewModel(
 
         val sourceKey = "${directoryPath.orEmpty()}|${selectedPath.orEmpty()}"
         val pageCount = items.size
-        if (savedStateHandle.get<String>(STATE_SOURCE) == sourceKey) {
+        if (!force && savedStateHandle.get<String>(STATE_SOURCE) == sourceKey) {
             initialPage = savedStateHandle.get<Int>(STATE_SELECTED_PAGE)
                 ?.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
                 ?: initialPage
@@ -117,9 +120,11 @@ class MediaViewerViewModel(
                 initialPage = initialPage,
                 selectedPage = initialPage,
                 slideShowStayMillis = preferences.getSlideShowStayMillis(),
+                slideShowDirection = preferences.getSlideShowDirection(),
                 holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
                 imagePreloadDistance = preferences.getImagePreloadDistance(),
                 edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
+                sortOrder = sortOrder,
                 bookmarked = preferences.isMediaBookmarked(items.getOrNull(initialPage)?.path ?: selectedPath),
                 isLoading = false,
             )
@@ -163,6 +168,13 @@ class MediaViewerViewModel(
         }
     }
 
+    fun setSortOrder(sortOrder: DirectorySortOrder) {
+        preferences.saveDirectorySortOrder(sortOrder)
+        _uiState.update { it.copy(sortOrder = sortOrder) }
+        val state = _uiState.value
+        load(state.sourceDirectoryPath, null, force = true)
+    }
+
     fun toggleFillFrame() {
         _uiState.update { it.copy(fillFrame = !it.fillFrame) }
     }
@@ -188,12 +200,14 @@ class MediaViewerViewModel(
         _uiState.update { it.copy(isChromeHidden = !it.isChromeHidden) }
     }
 
-    fun startSlideShow(stayMillis: Long) {
+    fun startSlideShow(stayMillis: Long, direction: SlideShowDirection) {
         val boundedStayMillis = stayMillis.coerceAtLeast(1L)
         preferences.saveSlideShowStayMillis(boundedStayMillis)
+        preferences.saveSlideShowDirection(direction)
         _uiState.update {
             it.copy(
                 slideShowStayMillis = boundedStayMillis,
+                slideShowDirection = direction,
                 isSlideShowRunning = true,
                 isChromeHidden = true,
             )
@@ -234,10 +248,12 @@ data class MediaViewerUiState(
     val bookmarked: Boolean = false,
     val isChromeHidden: Boolean = false,
     val isSlideShowRunning: Boolean = false,
-    val slideShowStayMillis: Long = 50L,
+    val slideShowStayMillis: Long = 3_000L,
+    val slideShowDirection: SlideShowDirection = SlideShowDirection.Next,
     val holdSlideShowEnabled: Boolean = false,
     val imagePreloadDistance: Int = 5,
     val edgeDialogStyle: MediaEdgeDialogStyle = MediaEdgeDialogStyle.Bottom,
+    val sortOrder: DirectorySortOrder = DirectorySortOrder.NameAscending,
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
 ) {

@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
+import srv.scrtvwr.ui.media.SlideShowDirection
 
 class OthersViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = ScrtvwrPreferences(application)
@@ -14,6 +15,7 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
         OthersUiState(
             slideShowStayMillis = preferences.getSlideShowStayMillis(),
             holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
+            slideShowDirection = preferences.getSlideShowDirection(),
             imagePreloadDistance = preferences.getImagePreloadDistance(),
             videoPreloadDistance = preferences.getVideoPreloadDistance(),
             mediaEdgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
@@ -38,6 +40,11 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(holdSlideShowEnabled = enabled) }
     }
 
+    fun setSlideShowDirection(direction: SlideShowDirection) {
+        preferences.saveSlideShowDirection(direction)
+        _uiState.update { it.copy(slideShowDirection = direction) }
+    }
+
     fun setImagePreloadDistance(distance: Int) {
         val boundedDistance = distance.coerceAtLeast(0)
         preferences.saveImagePreloadDistance(boundedDistance)
@@ -58,8 +65,9 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
 
 data class OthersUiState(
     val showHiddenFiles: Boolean = false,
-    val slideShowStayMillis: Long = 50L,
+    val slideShowStayMillis: Long = 3_000L,
     val holdSlideShowEnabled: Boolean = false,
+    val slideShowDirection: SlideShowDirection = SlideShowDirection.Next,
     val imagePreloadDistance: Int = 5,
     val videoPreloadDistance: Int = 0,
     val mediaEdgeDialogStyle: MediaEdgeDialogStyle = MediaEdgeDialogStyle.Bottom,

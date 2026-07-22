@@ -39,6 +39,7 @@ import srv.scrtvwr.ui.dashboard.screens.viewmodels.OthersUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.OthersViewModel
 import srv.scrtvwr.ui.components.SimpleDropdown
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
+import srv.scrtvwr.ui.media.SlideShowDirection
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.R
 
@@ -53,6 +54,7 @@ fun Others(
         onShowHiddenFilesChange = viewModel::setShowHiddenFiles,
         onSlideShowStayMillisChange = viewModel::setSlideShowStayMillis,
         onHoldSlideShowEnabledChange = viewModel::setHoldSlideShowEnabled,
+        onSlideShowDirectionChange = viewModel::setSlideShowDirection,
         onImagePreloadDistanceChange = viewModel::setImagePreloadDistance,
         onVideoPreloadDistanceChange = viewModel::setVideoPreloadDistance,
         onMediaEdgeDialogStyleChange = viewModel::setMediaEdgeDialogStyle,
@@ -66,6 +68,7 @@ fun OthersScreen(
     onShowHiddenFilesChange: (Boolean) -> Unit,
     onSlideShowStayMillisChange: (Long) -> Unit,
     onHoldSlideShowEnabledChange: (Boolean) -> Unit,
+    onSlideShowDirectionChange: (SlideShowDirection) -> Unit,
     onImagePreloadDistanceChange: (Int) -> Unit,
     onVideoPreloadDistanceChange: (Int) -> Unit,
     onMediaEdgeDialogStyleChange: (MediaEdgeDialogStyle) -> Unit,
@@ -143,6 +146,31 @@ fun OthersScreen(
                 leadingContent = { Icon(Icons.Default.Slideshow, contentDescription = null) },
                 suffix = "ms",
                 warning = slideShowWarning,
+            )
+        }
+        item {
+            val nextMediaLabel = stringResource(R.string.next_media)
+            val previousMediaLabel = stringResource(R.string.previous_media)
+            ListItem(
+                modifier = Modifier.fillMaxWidth(),
+                headlineContent = { Text(stringResource(R.string.slideshow_direction)) },
+                supportingContent = { Text(stringResource(R.string.slideshow_direction_summary)) },
+                leadingContent = { Icon(Icons.Default.Slideshow, contentDescription = null) },
+                trailingContent = {
+                    SimpleDropdown(
+                        label = stringResource(R.string.direction),
+                        items = SlideShowDirection.entries,
+                        selected = uiState.slideShowDirection,
+                        onSelected = onSlideShowDirectionChange,
+                        modifier = Modifier.fillMaxWidth(0.46f),
+                        itemLabel = { direction ->
+                            when (direction) {
+                                SlideShowDirection.Next -> nextMediaLabel
+                                SlideShowDirection.Previous -> previousMediaLabel
+                            }
+                        },
+                    )
+                },
             )
         }
         item {
@@ -276,6 +304,7 @@ fun OthersPreview() {
                 showHiddenFiles = true,
                 slideShowStayMillis = 3000L,
                 holdSlideShowEnabled = true,
+                slideShowDirection = SlideShowDirection.Next,
                 imagePreloadDistance = 5,
                 videoPreloadDistance = 1,
                 mediaEdgeDialogStyle = MediaEdgeDialogStyle.Bottom,
@@ -283,6 +312,7 @@ fun OthersPreview() {
             onShowHiddenFilesChange = {},
             onSlideShowStayMillisChange = {},
             onHoldSlideShowEnabledChange = {},
+            onSlideShowDirectionChange = {},
             onImagePreloadDistanceChange = {},
             onVideoPreloadDistanceChange = {},
             onMediaEdgeDialogStyleChange = {},

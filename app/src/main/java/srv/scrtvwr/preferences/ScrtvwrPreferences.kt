@@ -3,7 +3,9 @@ package srv.scrtvwr.preferences
 import android.content.Context
 import org.json.JSONArray
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
+import srv.scrtvwr.ui.media.SlideShowDirection
 import srv.scrtvwr.ui.sort.DirectorySortOrder
+import java.io.File
 
 class ScrtvwrPreferences(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -22,6 +24,17 @@ class ScrtvwrPreferences(context: Context) {
 
     fun saveHoldSlideShowEnabled(enabled: Boolean) {
         preferences.edit().putBoolean(KEY_HOLD_SLIDE_SHOW_ENABLED, enabled).apply()
+    }
+
+    fun getSlideShowDirection(): SlideShowDirection =
+        preferences.getString(KEY_SLIDE_SHOW_DIRECTION, null)
+            ?.let { value -> SlideShowDirection.entries.firstOrNull { it.name == value } }
+            ?: SlideShowDirection.Next
+
+    fun saveSlideShowDirection(direction: SlideShowDirection) {
+        preferences.edit()
+            .putString(KEY_SLIDE_SHOW_DIRECTION, direction.name)
+            .apply()
     }
 
     fun getImagePreloadDistance(): Int =
@@ -66,6 +79,17 @@ class ScrtvwrPreferences(context: Context) {
     fun setMediaBookmarked(path: String, bookmarked: Boolean) {
         val bookmarks = getBookmarkedMedia().toMutableSet()
         if (bookmarked) bookmarks += path else bookmarks -= path
+        preferences.edit().putStringSet(KEY_BOOKMARKED_MEDIA, bookmarks).apply()
+    }
+
+    fun clearBookmarkedMedia() {
+        preferences.edit().remove(KEY_BOOKMARKED_MEDIA).apply()
+    }
+
+    fun removeBookmarkedMediaDirectory(directoryPath: String) {
+        val bookmarks = getBookmarkedMedia()
+            .filterNot { path -> File(path.substringBefore("::")).parentFile?.absolutePath == directoryPath }
+            .toSet()
         preferences.edit().putStringSet(KEY_BOOKMARKED_MEDIA, bookmarks).apply()
     }
 
@@ -117,6 +141,26 @@ class ScrtvwrPreferences(context: Context) {
             ?.let(::decodeMediaHistory)
             .orEmpty()
 
+    fun removeMediaHistoryDirectory(directoryPath: String) {
+        val history = getMediaHistory().filterNot { it.directoryPath == directoryPath }
+        val editor = preferences.edit()
+            .putString(KEY_MEDIA_HISTORY, encodeMediaHistory(history))
+        if (getLastMediaSession()?.directoryPath == directoryPath) {
+            editor
+                .remove(KEY_LAST_MEDIA_DIRECTORY)
+                .remove(KEY_LAST_MEDIA_PATH)
+        }
+        editor.apply()
+    }
+
+    fun clearMediaHistory() {
+        preferences.edit()
+            .remove(KEY_MEDIA_HISTORY)
+            .remove(KEY_LAST_MEDIA_DIRECTORY)
+            .remove(KEY_LAST_MEDIA_PATH)
+            .apply()
+    }
+
     private fun encodeMediaHistory(values: List<LastMediaSession>): String {
         val json = JSONArray()
         values.forEach { session ->
@@ -142,6 +186,7 @@ class ScrtvwrPreferences(context: Context) {
         const val PREFERENCES_NAME = "scrtvwr_preferences"
         const val KEY_SLIDE_SHOW_STAY_MILLIS = "slide_show_stay_millis"
         const val KEY_HOLD_SLIDE_SHOW_ENABLED = "hold_slide_show_enabled"
+        const val KEY_SLIDE_SHOW_DIRECTION = "slide_show_direction"
         const val KEY_IMAGE_PRELOAD_DISTANCE = "image_preload_distance"
         const val KEY_VIDEO_PRELOAD_DISTANCE = "video_preload_distance"
         const val KEY_MEDIA_EDGE_DIALOG_STYLE = "media_edge_dialog_style"
@@ -152,7 +197,7 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_DIRECTORY_SORT_ORDER = "directory_sort_order"
         const val KEY_LAST_MEDIA_DIRECTORY = "last_media_directory"
         const val KEY_LAST_MEDIA_PATH = "last_media_path"
-        const val DEFAULT_SLIDE_SHOW_STAY_MILLIS = 50L
+        const val DEFAULT_SLIDE_SHOW_STAY_MILLIS = 3_000L
         const val DEFAULT_IMAGE_PRELOAD_DISTANCE = 5
         const val DEFAULT_VIDEO_PRELOAD_DISTANCE = 0
         const val MAX_RECENT_DIRECTORIES = 100

@@ -1,37 +1,41 @@
 package srv.scrtvwr.ui.dashboard.screens
 
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.media.MediaMetadataRetriever
+import android.text.TextPaint
+import android.text.TextUtils
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.Sort
@@ -39,18 +43,20 @@ import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
@@ -59,11 +65,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,13 +80,18 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -92,15 +104,16 @@ import srv.scrtvwr.VideoPlayerActivity
 import srv.scrtvwr.R
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryEntry
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryListing
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryMediaFilter
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryMediaType
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewModel
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewMode
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import java.io.File
+import kotlin.math.roundToInt
 
 @Composable
 fun Directory(
@@ -145,6 +158,7 @@ fun Directory(
         uiState = uiState,
         onSearchQueryChange = viewModel::updateSearchQuery,
         onViewModeChange = viewModel::setViewMode,
+        onMediaFilterChange = viewModel::setMediaFilter,
         onSortOrderChange = viewModel::setSortOrder,
         onOpenDirectory = viewModel::openDirectory,
         onOpenRecentDirectory = viewModel::openDirectoryPath,
@@ -192,6 +206,7 @@ fun DirectoryScreen(
     uiState: DirectoryUiState,
     onSearchQueryChange: (String) -> Unit,
     onViewModeChange: (DirectoryViewMode) -> Unit,
+    onMediaFilterChange: (DirectoryMediaFilter) -> Unit,
     onSortOrderChange: (DirectorySortOrder) -> Unit,
     onOpenDirectory: (DirectoryEntry) -> Unit,
     onOpenRecentDirectory: (String) -> Unit,
@@ -201,8 +216,8 @@ fun DirectoryScreen(
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var recentMenuExpanded by remember { mutableStateOf(false) }
     var sortMenuExpanded by remember { mutableStateOf(false) }
+    var moreMenuExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -231,7 +246,7 @@ fun DirectoryScreen(
                     Box(modifier = Modifier.weight(1f)) {
                         DirectoryToolbarButton(
                             icon = { Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null) },
-                            label = stringResource(uiState.sortOrder.labelResource()).substringBefore(" "),
+                            label = stringResource(R.string.sort_order),
                             onClick = { sortMenuExpanded = true },
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -263,25 +278,49 @@ fun DirectoryScreen(
                     }
 
                     DirectoryToolbarButton(
-                        icon = { Icon(Icons.Default.PlayCircle, contentDescription = null) },
-                        label = stringResource(R.string.resume),
-                        onClick = onResumeMedia,
-                        enabled = uiState.lastMediaSession != null,
+                        icon = {
+                            Icon(
+                                imageVector = if (uiState.viewMode == DirectoryViewMode.List) Icons.Default.GridView else Icons.AutoMirrored.Filled.ViewList,
+                                contentDescription = null
+                            )
+                        },
+                        label = stringResource(if (uiState.viewMode == DirectoryViewMode.List) R.string.grid_view else R.string.list_view),
+                        onClick = {
+                            val newMode = if (uiState.viewMode == DirectoryViewMode.List) DirectoryViewMode.Grid else DirectoryViewMode.List
+                            onViewModeChange(newMode)
+                        },
                         modifier = Modifier.weight(1f),
                     )
 
                     Box(modifier = Modifier.weight(1f)) {
                         DirectoryToolbarButton(
-                            icon = { Icon(Icons.Default.History, contentDescription = null) },
-                            label = stringResource(R.string.recent),
-                            onClick = { recentMenuExpanded = true },
-                            enabled = uiState.recentDirectories.isNotEmpty(),
+                            icon = { Icon(Icons.Default.MoreVert, contentDescription = null) },
+                            label = stringResource(R.string.more_options),
+                            onClick = { moreMenuExpanded = true },
                             modifier = Modifier.fillMaxWidth(),
                         )
                         DropdownMenu(
-                            expanded = recentMenuExpanded,
-                            onDismissRequest = { recentMenuExpanded = false },
+                            expanded = moreMenuExpanded,
+                            onDismissRequest = { moreMenuExpanded = false },
                         ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.resume)) },
+                                leadingIcon = { Icon(Icons.Default.PlayCircle, contentDescription = null) },
+                                enabled = uiState.lastMediaSession != null,
+                                onClick = {
+                                    onResumeMedia()
+                                    moreMenuExpanded = false
+                                },
+                            )
+                            if (uiState.recentDirectories.isNotEmpty()) {
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.recent)) },
+                                    leadingIcon = { Icon(Icons.Default.History, contentDescription = null) },
+                                    enabled = false,
+                                    onClick = {},
+                                )
+                            }
                             uiState.recentDirectories.forEach { path ->
                                 DropdownMenuItem(
                                     text = {
@@ -303,27 +342,12 @@ fun DirectoryScreen(
                                     leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null) },
                                     onClick = {
                                         onOpenRecentDirectory(path)
-                                        recentMenuExpanded = false
+                                        moreMenuExpanded = false
                                     },
                                 )
                             }
                         }
                     }
-
-                    DirectoryToolbarButton(
-                        icon = {
-                            Icon(
-                                imageVector = if (uiState.viewMode == DirectoryViewMode.List) Icons.Default.GridView else Icons.AutoMirrored.Filled.ViewList,
-                                contentDescription = null
-                            )
-                        },
-                        label = stringResource(if (uiState.viewMode == DirectoryViewMode.List) R.string.grid_view else R.string.list_view),
-                        onClick = {
-                            val newMode = if (uiState.viewMode == DirectoryViewMode.List) DirectoryViewMode.Grid else DirectoryViewMode.List
-                            onViewModeChange(newMode)
-                        },
-                        modifier = Modifier.weight(0.8f),
-                    )
                 }
             }
         }
@@ -333,11 +357,31 @@ fun DirectoryScreen(
             onValueChange = onSearchQueryChange,
             placeholder = { Text(stringResource(R.string.search_files_folders)) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = {
+                if (uiState.searchQuery.isNotBlank()) {
+                    IconButton(onClick = { onSearchQueryChange("") }) {
+                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.clear_search))
+                    }
+                }
+            },
             singleLine = true,
             modifier = Modifier
                 .fillMaxWidth()
                 .wrapContentHeight(),
         )
+
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            DirectoryMediaFilter.entries.forEach { filter ->
+                FilterChip(
+                    selected = uiState.mediaFilter == filter,
+                    onClick = { onMediaFilterChange(filter) },
+                    label = { Text(stringResource(filter.labelResource())) },
+                )
+            }
+        }
 
         if (uiState.isLoading && uiState.entries.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -442,49 +486,65 @@ private fun DirectoryList(
     onOpenMedia: (DirectoryEntry) -> Unit,
     onNavigateUp: () -> Unit,
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        if (uiState.canNavigateUp) {
-            item(key = "parent") {
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp, end = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (uiState.canNavigateUp) {
+                item(key = "parent") {
+                    DirectoryListRow(
+                        title = "..",
+                        subtitle = stringResource(R.string.go_up),
+                        thumbnail = { Icon(Icons.Default.ArrowUpward, contentDescription = null) },
+                        style = navigationEntryVisualStyle(),
+                        onClick = onNavigateUp,
+                    )
+                }
+            }
+
+            if (uiState.entries.isEmpty()) {
+                item(key = "empty") {
+                    EmptyDirectoryMessage(uiState)
+                }
+            }
+
+            items(uiState.entries, key = DirectoryEntry::path) { entry ->
+                val style = entry.entryVisualStyle()
                 DirectoryListRow(
-                    title = "..",
-                    subtitle = stringResource(R.string.go_up),
-                    thumbnail = { Icon(Icons.Default.ArrowUpward, contentDescription = null) },
-                    style = navigationEntryVisualStyle(),
-                    onClick = onNavigateUp,
+                    title = entry.name,
+                    subtitle = entry.supportingText(),
+                    thumbnail = { EntryThumbnail(entry, size = 48, style = style) },
+                    style = style,
+                    onClick = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
+                        {
+                            if (entry.isDirectory) {
+                                onOpenDirectory(entry)
+                            } else {
+                                onOpenMedia(entry)
+                            }
+                        }
+                    } else {
+                        null
+                    },
                 )
             }
         }
 
-        if (uiState.entries.isEmpty()) {
-            item(key = "empty") {
-                EmptyDirectoryMessage(uiState)
-            }
-        }
-
-        items(uiState.entries, key = DirectoryEntry::path) { entry ->
-            val style = entry.entryVisualStyle()
-            DirectoryListRow(
-                title = entry.name,
-                subtitle = entry.supportingText(),
-                thumbnail = { EntryThumbnail(entry, size = 48, style = style) },
-                style = style,
-                onClick = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
-                    {
-                        if (entry.isDirectory) {
-                            onOpenDirectory(entry)
-                        } else {
-                            onOpenMedia(entry)
-                        }
-                    }
-                } else {
-                    null
-                },
-            )
-        }
+        DirectoryFastScroller(
+            totalItems = listState.layoutInfo.totalItemsCount,
+            visibleItems = listState.layoutInfo.visibleItemsInfo.size,
+            firstVisibleItemIndex = listState.firstVisibleItemIndex,
+            onScrollToItem = { index ->
+                coroutineScope.launch { listState.scrollToItem(index) }
+            },
+            modifier = Modifier.align(Alignment.CenterEnd),
+        )
     }
 }
 
@@ -541,75 +601,149 @@ private fun DirectoryGrid(
     onOpenMedia: (DirectoryEntry) -> Unit,
     onNavigateUp: () -> Unit,
 ) {
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(140.dp),
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        if (uiState.canNavigateUp) {
-            item(key = "parent") {
-                val style = navigationEntryVisualStyle()
+    val gridState = rememberLazyGridState()
+    val coroutineScope = rememberCoroutineScope()
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyVerticalGrid(
+            state = gridState,
+            columns = GridCells.Adaptive(112.dp),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 4.dp, end = 28.dp, bottom = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            if (uiState.canNavigateUp) {
+                item(key = "parent") {
+                    val style = navigationEntryVisualStyle()
+                    DirectoryGridCard(
+                        title = "..",
+                        subtitle = stringResource(R.string.go_up),
+                        thumbnail = {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(1f)
+                                    .background(style.thumbnailColor),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Default.ArrowUpward,
+                                    contentDescription = null,
+                                    tint = style.accentColor,
+                                )
+                            }
+                        },
+                        onClick = onNavigateUp,
+                    )
+                }
+            }
+
+            if (uiState.entries.isEmpty()) {
+                item(key = "empty") {
+                    EmptyDirectoryMessage(uiState)
+                }
+            }
+
+            items(uiState.entries, key = DirectoryEntry::path) { entry ->
+                val style = entry.entryVisualStyle()
                 DirectoryGridCard(
-                    title = "..",
-                    subtitle = stringResource(R.string.go_up),
+                    title = entry.name,
+                    subtitle = entry.typeText(),
                     thumbnail = {
-                        Box(
+                        EntryThumbnail(
+                            entry = entry,
+                            size = 128,
+                            style = style,
+                            showFolderBadge = entry.isDirectory,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .aspectRatio(4f / 3f)
-                                .background(style.thumbnailColor),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Default.ArrowUpward,
-                                contentDescription = null,
-                                tint = style.accentColor,
-                            )
-                        }
+                                .aspectRatio(1f),
+                        )
                     },
-                    style = style,
-                    onClick = onNavigateUp,
+                    onClick = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
+                        {
+                            if (entry.isDirectory) {
+                                onOpenDirectory(entry)
+                            } else {
+                                onOpenMedia(entry)
+                            }
+                        }
+                    } else {
+                        null
+                    },
                 )
             }
         }
 
-        if (uiState.entries.isEmpty()) {
-            item(key = "empty") {
-                EmptyDirectoryMessage(uiState)
-            }
-        }
+        DirectoryFastScroller(
+            totalItems = gridState.layoutInfo.totalItemsCount,
+            visibleItems = gridState.layoutInfo.visibleItemsInfo.size,
+            firstVisibleItemIndex = gridState.firstVisibleItemIndex,
+            onScrollToItem = { index ->
+                coroutineScope.launch { gridState.scrollToItem(index) }
+            },
+            modifier = Modifier.align(Alignment.CenterEnd),
+        )
+    }
+}
 
-        items(uiState.entries, key = DirectoryEntry::path) { entry ->
-            val style = entry.entryVisualStyle()
-            DirectoryGridCard(
-                title = entry.name,
-                subtitle = entry.supportingText(),
-                thumbnail = {
-                    EntryThumbnail(
-                        entry = entry,
-                        size = 128,
-                        style = style,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(4f / 3f),
-                    )
-                },
-                style = style,
-                onClick = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
-                    {
-                        if (entry.isDirectory) {
-                            onOpenDirectory(entry)
-                        } else {
-                            onOpenMedia(entry)
-                        }
-                    }
-                } else {
-                    null
-                },
-            )
-        }
+@Composable
+private fun DirectoryFastScroller(
+    totalItems: Int,
+    visibleItems: Int,
+    firstVisibleItemIndex: Int,
+    onScrollToItem: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val maxIndex = (totalItems - visibleItems).coerceAtLeast(0)
+    if (totalItems <= 0 || maxIndex == 0) return
+
+    var trackHeightPx by remember { mutableStateOf(0) }
+    val density = LocalDensity.current
+    val handleHeight = 52.dp
+    val handleHeightPx = with(density) { handleHeight.toPx() }
+    val progress = firstVisibleItemIndex.coerceIn(0, maxIndex) / maxIndex.toFloat()
+    val handleOffset = ((trackHeightPx - handleHeightPx).coerceAtLeast(0f) * progress).roundToInt()
+
+    fun scrollToOffset(y: Float) {
+        val travel = (trackHeightPx - handleHeightPx).coerceAtLeast(1f)
+        val targetProgress = ((y - handleHeightPx / 2f) / travel).coerceIn(0f, 1f)
+        onScrollToItem((targetProgress * maxIndex).roundToInt())
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(28.dp)
+            .padding(vertical = 8.dp)
+            .onSizeChanged { trackHeightPx = it.height }
+            .pointerInput(totalItems, visibleItems, trackHeightPx) {
+                detectDragGestures(
+                    onDragStart = { offset -> scrollToOffset(offset.y) },
+                    onDrag = { change, _ -> scrollToOffset(change.position.y) },
+                )
+            },
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .fillMaxHeight()
+                .clip(MaterialTheme.shapes.extraSmall)
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+        )
+        Surface(
+            modifier = Modifier
+                .padding(horizontal = 4.dp)
+                .fillMaxWidth()
+                .height(handleHeight)
+                .align(Alignment.TopCenter)
+                .offset { IntOffset(0, handleOffset) },
+            shape = MaterialTheme.shapes.extraSmall,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.72f),
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+        ) {}
     }
 }
 
@@ -618,37 +752,28 @@ private fun DirectoryGridCard(
     title: String,
     subtitle: String,
     thumbnail: @Composable () -> Unit,
-    style: EntryVisualStyle,
     onClick: (() -> Unit)?,
 ) {
-    ElevatedCard(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .defaultMinSize(minHeight = 132.dp)
-            .border(BorderStroke(1.dp, style.borderColor), MaterialTheme.shapes.medium)
-            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = style.containerColor,
-        ),
+            .clip(MaterialTheme.shapes.small)
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .padding(4.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            thumbnail()
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text(title, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(
-                    subtitle,
-                    color = style.supportingColor,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
+        thumbnail()
+        MiddleEllipsizedText(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+        )
+        Text(
+            text = subtitle,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -657,6 +782,7 @@ private fun EntryThumbnail(
     entry: DirectoryEntry,
     size: Int,
     style: EntryVisualStyle,
+    showFolderBadge: Boolean = false,
     modifier: Modifier = Modifier.size(size.dp),
 ) {
     val preview by produceState<PreviewResult?>(
@@ -699,6 +825,9 @@ private fun EntryThumbnail(
                     tint = MaterialTheme.colorScheme.onPrimary,
                 )
             }
+            if (showFolderBadge) {
+                FolderPreviewBadge(style)
+            }
         } else {
             Icon(
                 imageVector = if (entry.isDirectory) {
@@ -715,12 +844,65 @@ private fun EntryThumbnail(
     }
 }
 
+@Composable
+private fun BoxScope.FolderPreviewBadge(style: EntryVisualStyle) {
+    Surface(
+        modifier = Modifier
+            .align(Alignment.BottomStart)
+            .padding(6.dp)
+            .size(28.dp),
+        shape = MaterialTheme.shapes.extraSmall,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+        contentColor = style.accentColor,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                Icons.Default.Folder,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MiddleEllipsizedText(
+    text: String,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+) {
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val density = LocalDensity.current
+        val maxWidthPx = with(density) { maxWidth.toPx() }
+        val fontSizePx = with(density) { style.fontSize.toPx() }
+        val displayText = remember(text, maxWidthPx, fontSizePx) {
+            if (maxWidthPx > 0f) {
+                TextUtils.ellipsize(
+                    text,
+                    TextPaint().apply { textSize = fontSizePx },
+                    maxWidthPx,
+                    TextUtils.TruncateAt.MIDDLE,
+                ).toString()
+            } else {
+                text
+            }
+        }
+
+        Text(
+            text = displayText,
+            style = style,
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.MiddleEllipsis,
+        )
+    }
+}
+
 private data class EntryVisualStyle(
     val containerColor: Color,
     val thumbnailColor: Color,
-    val borderColor: Color,
     val accentColor: Color,
-    val supportingColor: Color,
 )
 
 @Composable
@@ -730,25 +912,19 @@ private fun DirectoryEntry.entryVisualStyle(): EntryVisualStyle {
         isDirectory -> EntryVisualStyle(
             containerColor = colors.primaryContainer.copy(alpha = 0.24f),
             thumbnailColor = colors.primaryContainer.copy(alpha = 0.62f),
-            borderColor = colors.primary.copy(alpha = 0.32f),
             accentColor = colors.primary,
-            supportingColor = colors.onPrimaryContainer.copy(alpha = 0.76f),
         )
 
         mediaType == DirectoryMediaType.Image || mediaType == DirectoryMediaType.Video -> EntryVisualStyle(
             containerColor = colors.tertiaryContainer.copy(alpha = 0.22f),
             thumbnailColor = colors.tertiaryContainer.copy(alpha = 0.56f),
-            borderColor = colors.tertiary.copy(alpha = 0.30f),
             accentColor = colors.tertiary,
-            supportingColor = colors.onTertiaryContainer.copy(alpha = 0.76f),
         )
 
         mediaType == DirectoryMediaType.Archive -> EntryVisualStyle(
             containerColor = colors.secondaryContainer.copy(alpha = 0.22f),
             thumbnailColor = colors.secondaryContainer.copy(alpha = 0.58f),
-            borderColor = colors.secondary.copy(alpha = 0.32f),
             accentColor = colors.secondary,
-            supportingColor = colors.onSecondaryContainer.copy(alpha = 0.76f),
         )
 
         else -> defaultEntryVisualStyle()
@@ -761,9 +937,7 @@ private fun navigationEntryVisualStyle(): EntryVisualStyle {
     return EntryVisualStyle(
         containerColor = colors.surfaceVariant.copy(alpha = 0.32f),
         thumbnailColor = colors.surfaceVariant,
-        borderColor = colors.outlineVariant.copy(alpha = 0.5f),
         accentColor = colors.onSurfaceVariant,
-        supportingColor = colors.onSurfaceVariant,
     )
 }
 
@@ -773,9 +947,7 @@ private fun defaultEntryVisualStyle(): EntryVisualStyle {
     return EntryVisualStyle(
         containerColor = colors.surface,
         thumbnailColor = colors.surfaceVariant,
-        borderColor = colors.outlineVariant.copy(alpha = 0.35f),
         accentColor = colors.onSurfaceVariant,
-        supportingColor = colors.onSurfaceVariant,
     )
 }
 
@@ -809,6 +981,16 @@ private fun DirectoryEntry.supportingText(): String =
         else -> formatBytes(sizeBytes)
     }
 
+@Composable
+private fun DirectoryEntry.typeText(): String =
+    when {
+        isDirectory -> stringResource(R.string.folder)
+        mediaType == DirectoryMediaType.Image -> stringResource(R.string.image)
+        mediaType == DirectoryMediaType.Video -> stringResource(R.string.video)
+        mediaType == DirectoryMediaType.Archive -> stringResource(R.string.archive)
+        else -> stringResource(R.string.file)
+    }
+
 private fun DirectorySortOrder.labelResource(): Int = when (this) {
     DirectorySortOrder.NameAscending -> R.string.sort_name_ascending
     DirectorySortOrder.NameDescending -> R.string.sort_name_descending
@@ -816,6 +998,14 @@ private fun DirectorySortOrder.labelResource(): Int = when (this) {
     DirectorySortOrder.OldestFirst -> R.string.sort_oldest
     DirectorySortOrder.LargestFirst -> R.string.sort_largest
     DirectorySortOrder.SmallestFirst -> R.string.sort_smallest
+}
+
+private fun DirectoryMediaFilter.labelResource(): Int = when (this) {
+    DirectoryMediaFilter.All -> R.string.all
+    DirectoryMediaFilter.Folders -> R.string.folders
+    DirectoryMediaFilter.Images -> R.string.images
+    DirectoryMediaFilter.Videos -> R.string.videos
+    DirectoryMediaFilter.Archives -> R.string.archives
 }
 
 private fun formatBytes(bytes: Long): String {
@@ -845,8 +1035,8 @@ fun DirectoryScreenPreview() {
                 directoryListing = DirectoryListing(
                     entries = listOf(
                         DirectoryEntry(
-                            name = "Recordings",
-                            path = "/storage/emulated/0/Movies/Recordings",
+                            name = "Recordings of when we went fishing or something",
+                            path = "/storage/emulated/0/Movies/Recordings of when we went fishing or something",
                             isDirectory = true,
                             sizeBytes = 0L,
                             lastModifiedMillis = 0L,
@@ -858,12 +1048,21 @@ fun DirectoryScreenPreview() {
                             sizeBytes = 24_000_000L,
                             lastModifiedMillis = 0L,
                         ),
+                        DirectoryEntry(
+                            name = "megamind_78681236172_81736172371276.mp3",
+                            path = "/storage/emulated/0/Movies/megamind_78681236172_81736172371276.mp3",
+                            isDirectory = false,
+                            sizeBytes = 24_000_000L,
+                            lastModifiedMillis = 0L,
+                        ),
                     ),
                 ),
                 canNavigateUp = true,
+                viewMode = DirectoryViewMode.Grid,
             ),
             onSearchQueryChange = {},
             onViewModeChange = {},
+            onMediaFilterChange = {},
             onSortOrderChange = {},
             onOpenDirectory = {},
             onOpenRecentDirectory = {},

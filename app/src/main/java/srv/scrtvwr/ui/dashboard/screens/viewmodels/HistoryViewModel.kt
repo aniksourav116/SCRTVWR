@@ -28,6 +28,24 @@ class HistoryViewModel(
         _uiState.value = historyState(_uiState.value.selectedFilter)
     }
 
+    fun removeItem(item: HistoryDirectoryItem) {
+        if (_uiState.value.selectedFilter == HistoryFilter.FAVORITES) {
+            preferences.removeBookmarkedMediaDirectory(item.path)
+        } else {
+            preferences.removeMediaHistoryDirectory(item.path)
+        }
+        refresh()
+    }
+
+    fun clearVisibleItems() {
+        when (_uiState.value.selectedFilter) {
+            HistoryFilter.ALL,
+            HistoryFilter.RECENT -> preferences.clearMediaHistory()
+            HistoryFilter.FAVORITES -> preferences.clearBookmarkedMedia()
+        }
+        refresh()
+    }
+
     private fun historyState(
         filter: HistoryFilter = savedStateHandle.get<String>(STATE_FILTER)
             ?.let { value -> HistoryFilter.entries.firstOrNull { it.name == value } }
