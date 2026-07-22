@@ -20,6 +20,7 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
             videoPreloadDistance = preferences.getVideoPreloadDistance(),
             mediaEdgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
             showHiddenFiles = preferences.getShowHiddenFiles(),
+            showDirectoryFileActions = preferences.getShowDirectoryFileActions(),
         ),
     )
     val uiState = _uiState.asStateFlow()
@@ -27,6 +28,11 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
     fun setShowHiddenFiles(enabled: Boolean) {
         preferences.saveShowHiddenFiles(enabled)
         _uiState.update { it.copy(showHiddenFiles = enabled) }
+    }
+
+    fun setShowDirectoryFileActions(enabled: Boolean) {
+        preferences.saveShowDirectoryFileActions(enabled)
+        _uiState.update { it.copy(showDirectoryFileActions = enabled) }
     }
 
     fun setSlideShowStayMillis(stayMillis: Long) {
@@ -65,6 +71,7 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
 
 data class OthersUiState(
     val showHiddenFiles: Boolean = false,
+    val showDirectoryFileActions: Boolean = false,
     val slideShowStayMillis: Long = 3_000L,
     val holdSlideShowEnabled: Boolean = false,
     val slideShowDirection: SlideShowDirection = SlideShowDirection.Next,
