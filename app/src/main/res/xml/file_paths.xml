@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        The directory browser can open files anywhere on device storage (internal,
+        SD card, or USB) via MANAGE_EXTERNAL_STORAGE, so the FileProvider needs to be
+        able to serve a content:// Uri for any of those paths.
+    -->
+    <root-path name="root" path="/" />
+</paths>
