@@ -1,8 +1,12 @@
 package srv.scrtvwr.ui.dashboard.screens
 
+import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.text.TextPaint
 import android.text.TextUtils
+import android.webkit.MimeTypeMap
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -97,6 +101,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
@@ -189,6 +194,7 @@ fun Directory(
                 }
             mediaLauncher.launch(intent)
         },
+        onOpenWithOtherApp = { entry -> context.openWithOtherApp(entry) },
         onResumeMedia = {
             uiState.lastMediaSession?.let { session ->
                 val isVideo = session.mediaPath?.substringAfterLast('.', "")?.lowercase() in VIDEO_EXTENSIONS
@@ -229,6 +235,7 @@ fun DirectoryScreen(
     onOpenDirectory: (DirectoryEntry) -> Unit,
     onOpenRecentDirectory: (String) -> Unit,
     onOpenMedia: (DirectoryEntry) -> Unit,
+    onOpenWithOtherApp: (DirectoryEntry) -> Unit,
     onResumeMedia: () -> Unit,
     onNavigateUp: () -> Unit,
     onRefresh: () -> Unit,
@@ -430,6 +437,7 @@ fun DirectoryScreen(
                 onSaveScrollPosition = onSaveScrollPosition,
                 onOpenDirectory = onOpenDirectory,
                 onOpenMedia = onOpenMedia,
+                onOpenWithOtherApp = onOpenWithOtherApp,
                 onNavigateUp = onNavigateUp,
                 showFileActions = uiState.showDirectoryFileActions,
                 onCopyEntry = onCopyEntry,
@@ -443,6 +451,7 @@ fun DirectoryScreen(
                 onSaveScrollPosition = onSaveScrollPosition,
                 onOpenDirectory = onOpenDirectory,
                 onOpenMedia = onOpenMedia,
+                onOpenWithOtherApp = onOpenWithOtherApp,
                 onNavigateUp = onNavigateUp,
                 showFileActions = uiState.showDirectoryFileActions,
                 onCopyEntry = onCopyEntry,
@@ -723,6 +732,7 @@ private fun DirectoryList(
     onSaveScrollPosition: (String, DirectoryScrollPosition) -> Unit,
     onOpenDirectory: (DirectoryEntry) -> Unit,
     onOpenMedia: (DirectoryEntry) -> Unit,
+    onOpenWithOtherApp: (DirectoryEntry) -> Unit,
     onNavigateUp: () -> Unit,
     showFileActions: Boolean,
     onCopyEntry: (DirectoryEntry) -> Unit,
@@ -785,16 +795,12 @@ private fun DirectoryList(
                     subtitle = entry.supportingText(),
                     thumbnail = { EntryThumbnail(entry, size = 48, style = style) },
                     style = style,
-                    onClick = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
-                        {
-                            if (entry.isDirectory) {
-                                onOpenDirectory(entry)
-                            } else {
-                                onOpenMedia(entry)
-                            }
+                    onClick = {
+                        when {
+                            entry.isDirectory -> onOpenDirectory(entry)
+                            entry.mediaType != DirectoryMediaType.Other -> onOpenMedia(entry)
+                            else -> onOpenWithOtherApp(entry)
                         }
-                    } else {
-                        null
                     },
                     actions = if (showFileActions) {
                         {
@@ -882,6 +888,7 @@ private fun DirectoryGrid(
     onSaveScrollPosition: (String, DirectoryScrollPosition) -> Unit,
     onOpenDirectory: (DirectoryEntry) -> Unit,
     onOpenMedia: (DirectoryEntry) -> Unit,
+    onOpenWithOtherApp: (DirectoryEntry) -> Unit,
     onNavigateUp: () -> Unit,
     showFileActions: Boolean,
     onCopyEntry: (DirectoryEntry) -> Unit,
@@ -969,16 +976,12 @@ private fun DirectoryGrid(
                                 .aspectRatio(1f),
                         )
                     },
-                    onClick = if (entry.isDirectory || entry.mediaType != DirectoryMediaType.Other) {
-                        {
-                            if (entry.isDirectory) {
-                                onOpenDirectory(entry)
-                            } else {
-                                onOpenMedia(entry)
-                            }
+                    onClick = {
+                        when {
+                            entry.isDirectory -> onOpenDirectory(entry)
+                            entry.mediaType != DirectoryMediaType.Other -> onOpenMedia(entry)
+                            else -> onOpenWithOtherApp(entry)
                         }
-                    } else {
-                        null
                     },
                     actions = if (showFileActions) {
                         {
@@ -1244,14 +1247,14 @@ private fun DirectoryEntry.entryVisualStyle(): EntryVisualStyle {
         )
 
         mediaType == DirectoryMediaType.Image || mediaType == DirectoryMediaType.Video -> EntryVisualStyle(
-            containerColor = colors.tertiaryContainer.copy(alpha = 0.22f),
-            thumbnailColor = colors.tertiaryContainer.copy(alpha = 0.56f),
+            containerColor = Color.Transparent,
+            thumbnailColor = Color.Transparent,
             accentColor = colors.tertiary,
         )
 
         mediaType == DirectoryMediaType.Archive -> EntryVisualStyle(
-            containerColor = colors.secondaryContainer.copy(alpha = 0.22f),
-            thumbnailColor = colors.secondaryContainer.copy(alpha = 0.58f),
+            containerColor = Color.Transparent,
+            thumbnailColor = Color.Transparent,
             accentColor = colors.secondary,
         )
 
@@ -1357,6 +1360,26 @@ private fun formatBytes(bytes: Long): String {
 
 private val VIDEO_EXTENSIONS = setOf("mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v")
 
+private const val FILE_PROVIDER_AUTHORITY = "srv.scrtvwr.fileprovider"
+
+private fun Context.openWithOtherApp(entry: DirectoryEntry) {
+    val file = File(entry.path)
+    val uri = FileProvider.getUriForFile(this, FILE_PROVIDER_AUTHORITY, file)
+    val mimeType = MimeTypeMap.getSingleton()
+        .getMimeTypeFromExtension(file.extension.lowercase())
+        ?: "*/*"
+
+    val intent = Intent(Intent.ACTION_VIEW)
+        .setDataAndType(uri, mimeType)
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+    try {
+        startActivity(Intent.createChooser(intent, entry.name))
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(this, getString(R.string.no_app_found_to_open_file), Toast.LENGTH_SHORT).show()
+    }
+}
+
 @Preview(showBackground = true)
 @Composable
 fun DirectoryScreenPreview() {
@@ -1402,6 +1425,7 @@ fun DirectoryScreenPreview() {
             onOpenDirectory = {},
             onOpenRecentDirectory = {},
             onOpenMedia = {},
+            onOpenWithOtherApp = {},
             onResumeMedia = {},
             onNavigateUp = {},
             onRefresh = {},
