@@ -65,6 +65,7 @@ class DirectoryViewModel(
     )
     val uiState: StateFlow<DirectoryUiState> = _uiState.asStateFlow()
     private var scanJob: Job? = null
+    private val scrollPositions = mutableMapOf<String, DirectoryScrollPosition>()
 
     init {
         saveLastDirectory(initialDirectory)
@@ -113,6 +114,9 @@ class DirectoryViewModel(
                 currentDirectory = directory,
                 searchQuery = "",
                 canNavigateUp = directory.isDifferentDirectory(root),
+                directoryListing = DirectoryListing(entries = emptyList()),
+                isLoading = true,
+                errorMessage = null,
             )
         }
         saveLastDirectory(directory)
@@ -130,12 +134,24 @@ class DirectoryViewModel(
                     currentDirectory = parentDirectory,
                     searchQuery = "",
                     canNavigateUp = parentDirectory.isDifferentDirectory(state.rootDirectory),
+                    directoryListing = DirectoryListing(entries = emptyList()),
+                    isLoading = true,
+                    errorMessage = null,
                 )
             }
             saveLastDirectory(parentDirectory)
             scanDirectory()
         }
     }
+
+    fun saveScrollPosition(directoryPath: String, position: DirectoryScrollPosition) {
+        scrollPositions[directoryPath] = position.copy(
+            firstVisibleItemIndex = position.firstVisibleItemIndex.coerceAtLeast(0),
+            firstVisibleItemScrollOffset = position.firstVisibleItemScrollOffset.coerceAtLeast(0),
+        )
+    }
+
+    fun scrollPositionFor(directoryPath: String): DirectoryScrollPosition? = scrollPositions[directoryPath]
 
     fun refresh() {
         _uiState.update {
@@ -303,6 +319,11 @@ data class DirectoryListing(
     val entries: List<DirectoryEntry>,
     val canRead: Boolean = true,
     val errorMessage: String? = null,
+)
+
+data class DirectoryScrollPosition(
+    val firstVisibleItemIndex: Int,
+    val firstVisibleItemScrollOffset: Int,
 )
 
 data class DirectoryEntry(

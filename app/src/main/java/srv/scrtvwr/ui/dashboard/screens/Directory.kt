@@ -112,6 +112,7 @@ import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryFileOperationStatus
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryListing
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryMediaFilter
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryMediaType
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryScrollPosition
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewModel
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewMode
@@ -163,6 +164,8 @@ fun Directory(
 
     DirectoryScreen(
         uiState = uiState,
+        onScrollPositionRequested = viewModel::scrollPositionFor,
+        onSaveScrollPosition = viewModel::saveScrollPosition,
         onSearchQueryChange = viewModel::updateSearchQuery,
         onViewModeChange = viewModel::setViewMode,
         onMediaFilterChange = viewModel::setMediaFilter,
@@ -217,6 +220,8 @@ fun Directory(
 @Composable
 fun DirectoryScreen(
     uiState: DirectoryUiState,
+    onScrollPositionRequested: (String) -> DirectoryScrollPosition?,
+    onSaveScrollPosition: (String, DirectoryScrollPosition) -> Unit,
     onSearchQueryChange: (String) -> Unit,
     onViewModeChange: (DirectoryViewMode) -> Unit,
     onMediaFilterChange: (DirectoryMediaFilter) -> Unit,
@@ -421,6 +426,8 @@ fun DirectoryScreen(
         } else when (uiState.viewMode) {
             DirectoryViewMode.List -> DirectoryList(
                 uiState = uiState,
+                onScrollPositionRequested = onScrollPositionRequested,
+                onSaveScrollPosition = onSaveScrollPosition,
                 onOpenDirectory = onOpenDirectory,
                 onOpenMedia = onOpenMedia,
                 onNavigateUp = onNavigateUp,
@@ -432,6 +439,8 @@ fun DirectoryScreen(
 
             DirectoryViewMode.Grid -> DirectoryGrid(
                 uiState = uiState,
+                onScrollPositionRequested = onScrollPositionRequested,
+                onSaveScrollPosition = onSaveScrollPosition,
                 onOpenDirectory = onOpenDirectory,
                 onOpenMedia = onOpenMedia,
                 onNavigateUp = onNavigateUp,
@@ -710,6 +719,8 @@ private fun DirectoryEntryActionMenu(
 @Composable
 private fun DirectoryList(
     uiState: DirectoryUiState,
+    onScrollPositionRequested: (String) -> DirectoryScrollPosition?,
+    onSaveScrollPosition: (String, DirectoryScrollPosition) -> Unit,
     onOpenDirectory: (DirectoryEntry) -> Unit,
     onOpenMedia: (DirectoryEntry) -> Unit,
     onNavigateUp: () -> Unit,
@@ -720,6 +731,27 @@ private fun DirectoryList(
 ) {
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+    val directoryPath = uiState.currentDirectory.absolutePath
+    val itemCount = uiState.entries.size + if (uiState.canNavigateUp) 1 else if (uiState.entries.isEmpty()) 1 else 0
+
+    LaunchedEffect(directoryPath) {
+        val position = onScrollPositionRequested(directoryPath) ?: return@LaunchedEffect
+        listState.scrollToItem(
+            index = position.firstVisibleItemIndex.coerceIn(0, itemCount - 1),
+            scrollOffset = position.firstVisibleItemScrollOffset,
+        )
+    }
+    DisposableEffect(directoryPath) {
+        onDispose {
+            onSaveScrollPosition(
+                directoryPath,
+                DirectoryScrollPosition(
+                    firstVisibleItemIndex = listState.firstVisibleItemIndex,
+                    firstVisibleItemScrollOffset = listState.firstVisibleItemScrollOffset,
+                ),
+            )
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
@@ -846,6 +878,8 @@ private fun DirectoryListRow(
 @Composable
 private fun DirectoryGrid(
     uiState: DirectoryUiState,
+    onScrollPositionRequested: (String) -> DirectoryScrollPosition?,
+    onSaveScrollPosition: (String, DirectoryScrollPosition) -> Unit,
     onOpenDirectory: (DirectoryEntry) -> Unit,
     onOpenMedia: (DirectoryEntry) -> Unit,
     onNavigateUp: () -> Unit,
@@ -856,6 +890,27 @@ private fun DirectoryGrid(
 ) {
     val gridState = rememberLazyGridState()
     val coroutineScope = rememberCoroutineScope()
+    val directoryPath = uiState.currentDirectory.absolutePath
+    val itemCount = uiState.entries.size + if (uiState.canNavigateUp) 1 else if (uiState.entries.isEmpty()) 1 else 0
+
+    LaunchedEffect(directoryPath) {
+        val position = onScrollPositionRequested(directoryPath) ?: return@LaunchedEffect
+        gridState.scrollToItem(
+            index = position.firstVisibleItemIndex.coerceIn(0, itemCount - 1),
+            scrollOffset = position.firstVisibleItemScrollOffset,
+        )
+    }
+    DisposableEffect(directoryPath) {
+        onDispose {
+            onSaveScrollPosition(
+                directoryPath,
+                DirectoryScrollPosition(
+                    firstVisibleItemIndex = gridState.firstVisibleItemIndex,
+                    firstVisibleItemScrollOffset = gridState.firstVisibleItemScrollOffset,
+                ),
+            )
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyVerticalGrid(
@@ -1338,6 +1393,8 @@ fun DirectoryScreenPreview() {
                 canNavigateUp = true,
                 viewMode = DirectoryViewMode.Grid,
             ),
+            onScrollPositionRequested = { null },
+            onSaveScrollPosition = { _, _ -> },
             onSearchQueryChange = {},
             onViewModeChange = {},
             onMediaFilterChange = {},
