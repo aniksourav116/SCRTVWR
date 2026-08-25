@@ -13,10 +13,21 @@ import java.util.zip.ZipFile
 
 object MediaCatalog {
     private const val MAX_ARCHIVE_ITEMS = 5_000
+    private const val ARCHIVE_ENTRY_SEPARATOR = "::"
 
-    fun isArchive(path: String): Boolean {
-        val extension = path.substringBefore("::").substringAfterLast('.', "").lowercase()
-        return extension in setOf("zip", "cbz", "rar", "cbr")
+    enum class ArchiveFormat {
+        Zip,
+        Rar,
+    }
+
+    fun isArchive(path: String): Boolean = archiveFormat(path) != null
+
+    fun archiveFormat(path: String): ArchiveFormat? = when (
+        path.substringBefore(ARCHIVE_ENTRY_SEPARATOR).substringAfterLast('.', "").lowercase()
+    ) {
+        "zip", "cbz" -> ArchiveFormat.Zip
+        "rar", "cbr" -> ArchiveFormat.Rar
+        else -> null
     }
 
     suspend fun listDirectory(directory: File, sortOrder: DirectorySortOrder): List<MediaViewerItem> =
@@ -145,8 +156,8 @@ object MediaCatalog {
 
     suspend fun listArchive(file: File): List<MediaViewerItem> {
         val context = currentCoroutineContext()
-        return when (file.extension.lowercase()) {
-        "zip", "cbz" -> ZipFile(file).use { zip ->
+        return when (archiveFormat(file.path)) {
+        ArchiveFormat.Zip -> ZipFile(file).use { zip ->
             zip.entries().asSequence()
                 .filter { !it.isDirectory && it.name.isImageExtension() }
                 .onEach { context.ensureActive() }
@@ -163,7 +174,7 @@ object MediaCatalog {
                 .sortedBy(MediaViewerItem::name)
                 .toList()
         }
-        "rar", "cbr" -> Archive(file).use { archive ->
+        ArchiveFormat.Rar -> Archive(file).use { archive ->
             archive.fileHeaders.asSequence()
                 .filter { !it.isDirectory && it.fileName.isImageExtension() }
                 .onEach { context.ensureActive() }
@@ -180,7 +191,7 @@ object MediaCatalog {
                 .sortedBy(MediaViewerItem::name)
                 .toList()
         }
-            else -> error("Unsupported archive type")
+            null -> error("Unsupported archive type")
         }
     }
 

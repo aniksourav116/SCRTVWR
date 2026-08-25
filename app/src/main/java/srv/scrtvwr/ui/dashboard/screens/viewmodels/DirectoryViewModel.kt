@@ -7,16 +7,17 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import srv.scrtvwr.R
+import srv.scrtvwr.media.MediaCatalog
 import srv.scrtvwr.preferences.LastMediaSession
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.sort.DirectorySortOrder
@@ -589,7 +590,6 @@ private fun File.mediaType(): DirectoryMediaType {
     return when (extension.lowercase()) {
         "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif" -> DirectoryMediaType.Image
         "mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v" -> DirectoryMediaType.Video
-        "zip", "cbz", "rar", "cbr" -> DirectoryMediaType.Archive
-        else -> DirectoryMediaType.Other
+        else -> if (MediaCatalog.isArchive(path)) DirectoryMediaType.Archive else DirectoryMediaType.Other
     }
 }

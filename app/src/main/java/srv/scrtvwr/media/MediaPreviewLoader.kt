@@ -199,15 +199,15 @@ object MediaPreviewLoader {
         )
 
     private fun <T> openArchiveEntry(file: File, entryName: String, block: (InputStream) -> T): T {
-        return when (file.extension.lowercase()) {
-            "zip", "cbz" -> ZipFile(file).use { zip ->
+        return when (MediaCatalog.archiveFormat(file.path)) {
+            MediaCatalog.ArchiveFormat.Zip -> ZipFile(file).use { zip ->
                 val entry = zip.getEntry(entryName) ?: error("Archive entry no longer exists")
                 require(entry.size < 0 || entry.size <= MAX_ARCHIVE_ENTRY_BYTES) {
                     "Archive image is larger than the 128 MB safety limit"
                 }
                 zip.getInputStream(entry).use { block(LimitedInputStream(it, MAX_ARCHIVE_ENTRY_BYTES)) }
             }
-            "rar", "cbr" -> Archive(file).use { archive ->
+            MediaCatalog.ArchiveFormat.Rar -> Archive(file).use { archive ->
                 val header = archive.fileHeaders.firstOrNull { it.fileName == entryName }
                     ?: error("Archive entry no longer exists")
                 require(header.fullUnpackSize <= MAX_ARCHIVE_ENTRY_BYTES) {
@@ -215,7 +215,7 @@ object MediaPreviewLoader {
                 }
                 archive.getInputStream(header).use { block(LimitedInputStream(it, MAX_ARCHIVE_ENTRY_BYTES)) }
             }
-            else -> error("Unsupported archive type")
+            null -> error("Unsupported archive type")
         }
     }
 
