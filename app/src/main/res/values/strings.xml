@@ -129,6 +129,7 @@
     <string name="stop_repeating_video">Stop repeating video</string>
     <string name="playback_speed">Playback speed</string>
     <string name="video_playback_error">Unable to play this video: %1$s</string>
+    <string name="retry">Retry</string>
     <string name="repeat_none">Repeat: none</string>
     <string name="repeat_one">Repeat: one</string>
     <string name="repeat_all">Repeat: all</string>
