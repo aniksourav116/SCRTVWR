@@ -6,15 +6,15 @@ plugins {
 android {
     namespace = "srv.scrtvwr"
     compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
+        version = release(37) {
+            minorApiLevel = 0
         }
     }
 
     defaultConfig {
         applicationId = "srv.scrtvwr"
         minSdk = 24
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 4
         versionName = "4"
 
