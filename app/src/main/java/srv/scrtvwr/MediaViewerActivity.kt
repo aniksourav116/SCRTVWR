@@ -973,14 +973,7 @@ private fun MediaPage(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .clickable {
-                    context.startActivity(
-                        Intent(context, VideoPlayerActivity::class.java).apply {
-                            putExtra(VideoPlayerActivity.EXTRA_DIRECTORY_PATH, java.io.File(item.path).parent)
-                            putExtra(VideoPlayerActivity.EXTRA_VIDEO_PATH, item.path)
-                        },
-                    )
-                },
+                .clickable(onClick = onContentClick),
             contentAlignment = Alignment.Center,
         ) {
             preview?.bitmap?.let { bitmap ->
@@ -1004,12 +997,24 @@ private fun MediaPage(
                     Text(it, color = Color.White, modifier = Modifier.padding(top = 64.dp, start = 24.dp, end = 24.dp))
                 }
             }
-            Icon(
-                Icons.Default.PlayCircle,
-                contentDescription = stringResource(R.string.play_video),
-                tint = Color.White,
+            IconButton(
+                onClick = {
+                    context.startActivity(
+                        Intent(context, VideoPlayerActivity::class.java).apply {
+                            putExtra(VideoPlayerActivity.EXTRA_DIRECTORY_PATH, java.io.File(item.path).parent)
+                            putExtra(VideoPlayerActivity.EXTRA_VIDEO_PATH, item.path)
+                        },
+                    )
+                },
                 modifier = Modifier.size(72.dp),
-            )
+            ) {
+                Icon(
+                    Icons.Default.PlayCircle,
+                    contentDescription = stringResource(R.string.play_video),
+                    tint = Color.White,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
         return
     }
