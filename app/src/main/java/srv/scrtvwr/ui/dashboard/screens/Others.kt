@@ -121,9 +121,6 @@ fun OthersScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Text(stringResource(R.string.other_options), style = MaterialTheme.typography.headlineSmall)
-        }
-        item {
             ListItem(
                 modifier = Modifier.fillMaxWidth(),
                 headlineContent = { Text(stringResource(R.string.show_hidden_files)) },

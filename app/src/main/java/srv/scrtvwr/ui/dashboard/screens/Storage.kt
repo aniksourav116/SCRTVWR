@@ -141,16 +141,6 @@ fun StorageScreen(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        item {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Icon(Icons.Default.Storage, contentDescription = null)
-                Text(stringResource(R.string.storage_devices), style = MaterialTheme.typography.headlineSmall)
-            }
-        }
-
         if (!hasStorageAccess) {
             item {
                 ElevatedCard(Modifier.fillMaxWidth()) {

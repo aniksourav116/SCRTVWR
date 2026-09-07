@@ -114,7 +114,7 @@ fun ScrtvwrApp(viewModel: DashboardViewModel = viewModel()) {
         }
 
         BaseScaffold(
-            title = stringResource(visibleDestination.label),
+            title = stringResource(visibleDestination.topBarLabel()),
             showBackButton = false,
         ) { modifier ->
             HorizontalPager(
@@ -141,4 +141,11 @@ fun ScrtvwrApp(viewModel: DashboardViewModel = viewModel()) {
             }
         }
     }
+}
+
+private fun AppDestination.topBarLabel(): Int = when (this) {
+    AppDestination.STORAGE -> R.string.storage_devices
+    AppDestination.DIRECTORY -> R.string.directory
+    AppDestination.HISTORY -> R.string.viewing_history
+    AppDestination.OTHERS -> R.string.other_options
 }

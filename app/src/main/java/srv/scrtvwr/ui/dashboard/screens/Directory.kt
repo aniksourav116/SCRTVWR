@@ -263,10 +263,6 @@ fun DirectoryScreen(
             ),
         verticalArrangement = Arrangement.spacedBy(if (isLandscape) 4.dp else 8.dp),
     ) {
-        if (!isLandscape) {
-            DirectoryHeader(uiState = uiState)
-        }
-
         if (isLandscape) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -499,30 +495,6 @@ fun DirectoryScreen(
                 onDeleteEntry(entry)
                 entryPendingDeletion = null
             },
-        )
-    }
-}
-
-@Composable
-private fun DirectoryHeader(uiState: DirectoryUiState) {
-    val folderName = uiState.currentDirectory.name.ifBlank {
-        uiState.currentDirectory.absolutePath
-    }
-
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(
-            text = folderName,
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = uiState.currentDirectory.absolutePath,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
         )
     }
 }
