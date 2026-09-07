@@ -973,7 +973,9 @@ private fun MediaPage(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .clickable(onClick = onContentClick),
+                .pointerInput(item.path, item.lastModifiedMillis) {
+                    detectTapGestures(onTap = { onContentClick() })
+                },
             contentAlignment = Alignment.Center,
         ) {
             preview?.bitmap?.let { bitmap ->
