@@ -113,30 +113,38 @@ fun ScrtvwrApp(viewModel: DashboardViewModel = viewModel()) {
             }
         }
 
-        BaseScaffold(
-            title = stringResource(visibleDestination.topBarLabel()),
-            showBackButton = false,
-        ) { modifier ->
-            HorizontalPager(
-                state = pagerState,
-                modifier = modifier.fillMaxSize(),
-            ) { page ->
-                when (destinations[page]) {
-                    AppDestination.STORAGE -> Storage(
-                        modifier = Modifier.fillMaxSize(),
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize(),
+        ) { page ->
+            when (destinations[page]) {
+                AppDestination.STORAGE -> BaseScaffold(
+                    title = stringResource(AppDestination.STORAGE.topBarLabel()),
+                    showBackButton = false,
+                ) { modifier ->
+                    Storage(
+                        modifier = modifier,
                         onOpenDirectory = viewModel::openDirectoryFromStorage,
                     )
-                    AppDestination.DIRECTORY -> Directory(
-                        modifier = Modifier.fillMaxSize(),
-                        targetDirectoryPath = state.pendingDirectoryPath,
-                        onTargetDirectoryConsumed = viewModel::clearPendingDirectoryPath,
-                        backHandlerEnabled = visibleDestination == AppDestination.DIRECTORY,
-                        isVisible = visibleDestination == AppDestination.DIRECTORY,
-                    )
-                    AppDestination.HISTORY -> History(
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    AppDestination.OTHERS -> Others(Modifier.fillMaxSize())
+                }
+                AppDestination.DIRECTORY -> Directory(
+                    modifier = Modifier.fillMaxSize(),
+                    targetDirectoryPath = state.pendingDirectoryPath,
+                    onTargetDirectoryConsumed = viewModel::clearPendingDirectoryPath,
+                    backHandlerEnabled = visibleDestination == AppDestination.DIRECTORY,
+                    isVisible = visibleDestination == AppDestination.DIRECTORY,
+                )
+                AppDestination.HISTORY -> BaseScaffold(
+                    title = stringResource(AppDestination.HISTORY.topBarLabel()),
+                    showBackButton = false,
+                ) { modifier ->
+                    History(modifier)
+                }
+                AppDestination.OTHERS -> BaseScaffold(
+                    title = stringResource(AppDestination.OTHERS.topBarLabel()),
+                    showBackButton = false,
+                ) { modifier ->
+                    Others(modifier)
                 }
             }
         }
