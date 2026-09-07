@@ -49,11 +49,11 @@ fun BaseScaffold(
                             modifier = Modifier.basicMarquee(),
                         )
                         subtitle?.takeIf(String::isNotBlank)?.let {
-                            Text(
-                                text = it.trim(),
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                        Text(
+                            text = it.trim(),
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.MiddleEllipsis,
                             )
                         }
                     }

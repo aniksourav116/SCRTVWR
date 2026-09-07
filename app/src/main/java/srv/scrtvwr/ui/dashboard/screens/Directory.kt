@@ -251,13 +251,57 @@ fun DirectoryScreen(
     modifier: Modifier = Modifier,
 ) {
     var moreMenuExpanded by remember { mutableStateOf(false) }
+    var sortMenuExpanded by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
     var entryPendingDeletion by remember { mutableStateOf<DirectoryEntry?>(null) }
+    val directoryName = uiState.currentDirectory.name.ifBlank { uiState.currentDirectory.absolutePath }
 
     BaseScaffold(
-        title = stringResource(R.string.directory),
+        title = directoryName,
+        subtitle = uiState.currentDirectory.absolutePath,
         showBackButton = false,
         actions = {
+            Box {
+                IconButton(onClick = { sortMenuExpanded = true }) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Sort,
+                        contentDescription = stringResource(R.string.sort_order),
+                    )
+                }
+                DropdownMenu(
+                    expanded = sortMenuExpanded,
+                    onDismissRequest = { sortMenuExpanded = false },
+                ) {
+                    DirectorySortOrder.entries.forEach { sortOrder ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(sortOrder.labelResource())) },
+                            onClick = {
+                                onSortOrderChange(sortOrder)
+                                sortMenuExpanded = false
+                            },
+                            trailingIcon = if (sortOrder == uiState.sortOrder) {
+                                { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                            } else {
+                                null
+                            },
+                        )
+                    }
+                }
+            }
+            IconButton(
+                onClick = {
+                    onViewModeChange(
+                        if (uiState.viewMode == DirectoryViewMode.List) DirectoryViewMode.Grid else DirectoryViewMode.List,
+                    )
+                },
+            ) {
+                Icon(
+                    imageVector = if (uiState.viewMode == DirectoryViewMode.List) Icons.Default.GridView else Icons.AutoMirrored.Filled.ViewList,
+                    contentDescription = stringResource(
+                        if (uiState.viewMode == DirectoryViewMode.List) R.string.grid_view else R.string.list_view,
+                    ),
+                )
+            }
             IconButton(onClick = { searchVisible = true }) {
                 Icon(Icons.Default.Search, contentDescription = stringResource(R.string.search_files_folders))
             }
@@ -270,9 +314,6 @@ fun DirectoryScreen(
                     onDismissRequest = { moreMenuExpanded = false },
                     uiState = uiState,
                     onRefresh = onRefresh,
-                    onSortOrderChange = onSortOrderChange,
-                    onViewModeChange = onViewModeChange,
-                    onMediaFilterChange = onMediaFilterChange,
                     onResumeMedia = onResumeMedia,
                     onOpenRecentDirectory = onOpenRecentDirectory,
                 )
@@ -291,6 +332,19 @@ fun DirectoryScreen(
                 onQueryChange = onSearchQueryChange,
                 onDismiss = { searchVisible = false },
             )
+        }
+
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            DirectoryMediaFilter.entries.forEach { filter ->
+                FilterChip(
+                    selected = uiState.mediaFilter == filter,
+                    onClick = { onMediaFilterChange(filter) },
+                    label = { Text(stringResource(filter.labelResource())) },
+                )
+            }
         }
 
         if (uiState.showDirectoryFileActions) {
@@ -385,9 +439,6 @@ private fun DirectoryOptionsMenu(
     onDismissRequest: () -> Unit,
     uiState: DirectoryUiState,
     onRefresh: () -> Unit,
-    onSortOrderChange: (DirectorySortOrder) -> Unit,
-    onViewModeChange: (DirectoryViewMode) -> Unit,
-    onMediaFilterChange: (DirectoryMediaFilter) -> Unit,
     onResumeMedia: () -> Unit,
     onOpenRecentDirectory: (String) -> Unit,
 ) {
@@ -403,73 +454,6 @@ private fun DirectoryOptionsMenu(
                 onDismissRequest()
             },
         )
-        DropdownMenuItem(
-            text = {
-                Text(
-                    stringResource(
-                        if (uiState.viewMode == DirectoryViewMode.List) R.string.grid_view else R.string.list_view,
-                    ),
-                )
-            },
-            leadingIcon = {
-                Icon(
-                    if (uiState.viewMode == DirectoryViewMode.List) Icons.Default.GridView else Icons.AutoMirrored.Filled.ViewList,
-                    contentDescription = null,
-                )
-            },
-            onClick = {
-                onViewModeChange(
-                    if (uiState.viewMode == DirectoryViewMode.List) DirectoryViewMode.Grid else DirectoryViewMode.List,
-                )
-                onDismissRequest()
-            },
-        )
-        HorizontalDivider()
-        DropdownMenuItem(
-            text = { Text(stringResource(R.string.filter)) },
-            enabled = false,
-            onClick = {},
-        )
-        DirectoryMediaFilter.entries.forEach { filter ->
-            DropdownMenuItem(
-                text = { Text(stringResource(filter.labelResource())) },
-                onClick = {
-                    onMediaFilterChange(filter)
-                    onDismissRequest()
-                },
-                trailingIcon = if (filter == uiState.mediaFilter) {
-                    { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
-                } else {
-                    null
-                },
-            )
-        }
-        HorizontalDivider()
-        DropdownMenuItem(
-            text = { Text(stringResource(R.string.sort_order)) },
-            enabled = false,
-            onClick = {},
-        )
-        DirectorySortOrder.entries.forEach { sortOrder ->
-            DropdownMenuItem(
-                text = { Text(stringResource(sortOrder.labelResource())) },
-                onClick = {
-                    onSortOrderChange(sortOrder)
-                    onDismissRequest()
-                },
-                trailingIcon = if (sortOrder == uiState.sortOrder) {
-                    {
-                        Icon(
-                            Icons.Default.Check,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                } else {
-                    null
-                },
-            )
-        }
         HorizontalDivider()
         DropdownMenuItem(
             text = { Text(stringResource(R.string.resume)) },
