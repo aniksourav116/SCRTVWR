@@ -2,6 +2,7 @@ package srv.scrtvwr.ui.dashboard.screens
 
 import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.res.Configuration
 import android.content.Intent
 import android.text.TextPaint
 import android.text.TextUtils
@@ -93,6 +94,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -250,24 +252,62 @@ fun DirectoryScreen(
     var sortMenuExpanded by remember { mutableStateOf(false) }
     var moreMenuExpanded by remember { mutableStateOf(false) }
     var entryPendingDeletion by remember { mutableStateOf<DirectoryEntry?>(null) }
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(
+                horizontal = if (isLandscape) 12.dp else 16.dp,
+                vertical = if (isLandscape) 4.dp else 8.dp,
+            ),
+        verticalArrangement = Arrangement.spacedBy(if (isLandscape) 4.dp else 8.dp),
     ) {
-        DirectoryHeader(uiState = uiState)
+        if (!isLandscape) {
+            DirectoryHeader(uiState = uiState)
+        }
 
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.36f),
-        ) {
-            Column(
-                modifier = Modifier.padding(4.dp),
+        if (isLandscape) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                DirectorySearchField(
+                    query = uiState.searchQuery,
+                    onQueryChange = onSearchQueryChange,
+                    modifier = Modifier.weight(1f),
+                )
+                Box {
+                    IconButton(onClick = { moreMenuExpanded = true }) {
+                        Icon(
+                            Icons.Default.MoreVert,
+                            contentDescription = stringResource(R.string.more_options),
+                        )
+                    }
+                    DirectoryOptionsMenu(
+                        expanded = moreMenuExpanded,
+                        onDismissRequest = { moreMenuExpanded = false },
+                        uiState = uiState,
+                        onRefresh = onRefresh,
+                        onSortOrderChange = onSortOrderChange,
+                        onViewModeChange = onViewModeChange,
+                        onMediaFilterChange = onMediaFilterChange,
+                        onResumeMedia = onResumeMedia,
+                        onOpenRecentDirectory = onOpenRecentDirectory,
+                    )
+                }
+            }
+        } else {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.36f),
+            ) {
+                Column(
+                    modifier = Modifier.padding(4.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                     DirectoryToolbarButton(
                         icon = { Icon(Icons.Default.Refresh, contentDescription = null) },
                         label = stringResource(R.string.refresh),
@@ -380,38 +420,28 @@ fun DirectoryScreen(
                             }
                         }
                     }
-                }
-            }
-        }
-
-        OutlinedTextField(
-            value = uiState.searchQuery,
-            onValueChange = onSearchQueryChange,
-            placeholder = { Text(stringResource(R.string.search_files_folders)) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-            trailingIcon = {
-                if (uiState.searchQuery.isNotBlank()) {
-                    IconButton(onClick = { onSearchQueryChange("") }) {
-                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.clear_search))
                     }
                 }
-            },
-            singleLine = true,
-            modifier = Modifier
-                .fillMaxWidth()
-                .wrapContentHeight(),
-        )
+            }
 
-        Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            DirectoryMediaFilter.entries.forEach { filter ->
-                FilterChip(
-                    selected = uiState.mediaFilter == filter,
-                    onClick = { onMediaFilterChange(filter) },
-                    label = { Text(stringResource(filter.labelResource())) },
-                )
+            DirectorySearchField(
+                query = uiState.searchQuery,
+                onQueryChange = onSearchQueryChange,
+            )
+        }
+
+        if (!isLandscape) {
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                DirectoryMediaFilter.entries.forEach { filter ->
+                    FilterChip(
+                        selected = uiState.mediaFilter == filter,
+                        onClick = { onMediaFilterChange(filter) },
+                        label = { Text(stringResource(filter.labelResource())) },
+                    )
+                }
             }
         }
 
@@ -494,6 +524,169 @@ private fun DirectoryHeader(uiState: DirectoryUiState) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+@Composable
+private fun DirectorySearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        placeholder = { Text(stringResource(R.string.search_files_folders)) },
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+        trailingIcon = {
+            if (query.isNotBlank()) {
+                IconButton(onClick = { onQueryChange("") }) {
+                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.clear_search))
+                }
+            }
+        },
+        singleLine = true,
+        modifier = modifier
+            .fillMaxWidth()
+            .wrapContentHeight(),
+    )
+}
+
+@Composable
+private fun DirectoryOptionsMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    uiState: DirectoryUiState,
+    onRefresh: () -> Unit,
+    onSortOrderChange: (DirectorySortOrder) -> Unit,
+    onViewModeChange: (DirectoryViewMode) -> Unit,
+    onMediaFilterChange: (DirectoryMediaFilter) -> Unit,
+    onResumeMedia: () -> Unit,
+    onOpenRecentDirectory: (String) -> Unit,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+    ) {
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.refresh)) },
+            leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+            onClick = {
+                onRefresh()
+                onDismissRequest()
+            },
+        )
+        DropdownMenuItem(
+            text = {
+                Text(
+                    stringResource(
+                        if (uiState.viewMode == DirectoryViewMode.List) R.string.grid_view else R.string.list_view,
+                    ),
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    if (uiState.viewMode == DirectoryViewMode.List) Icons.Default.GridView else Icons.AutoMirrored.Filled.ViewList,
+                    contentDescription = null,
+                )
+            },
+            onClick = {
+                onViewModeChange(
+                    if (uiState.viewMode == DirectoryViewMode.List) DirectoryViewMode.Grid else DirectoryViewMode.List,
+                )
+                onDismissRequest()
+            },
+        )
+        HorizontalDivider()
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.filter)) },
+            enabled = false,
+            onClick = {},
+        )
+        DirectoryMediaFilter.entries.forEach { filter ->
+            DropdownMenuItem(
+                text = { Text(stringResource(filter.labelResource())) },
+                onClick = {
+                    onMediaFilterChange(filter)
+                    onDismissRequest()
+                },
+                trailingIcon = if (filter == uiState.mediaFilter) {
+                    { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                } else {
+                    null
+                },
+            )
+        }
+        HorizontalDivider()
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.sort_order)) },
+            enabled = false,
+            onClick = {},
+        )
+        DirectorySortOrder.entries.forEach { sortOrder ->
+            DropdownMenuItem(
+                text = { Text(stringResource(sortOrder.labelResource())) },
+                onClick = {
+                    onSortOrderChange(sortOrder)
+                    onDismissRequest()
+                },
+                trailingIcon = if (sortOrder == uiState.sortOrder) {
+                    {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                } else {
+                    null
+                },
+            )
+        }
+        HorizontalDivider()
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.resume)) },
+            leadingIcon = { Icon(Icons.Default.PlayCircle, contentDescription = null) },
+            enabled = uiState.lastMediaSession != null,
+            onClick = {
+                onResumeMedia()
+                onDismissRequest()
+            },
+        )
+        if (uiState.recentDirectories.isNotEmpty()) {
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.recent)) },
+                leadingIcon = { Icon(Icons.Default.History, contentDescription = null) },
+                enabled = false,
+                onClick = {},
+            )
+        }
+        uiState.recentDirectories.forEach { path ->
+            DropdownMenuItem(
+                text = {
+                    Column {
+                        Text(
+                            text = File(path).name.ifBlank { path },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = path,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                },
+                leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null) },
+                onClick = {
+                    onOpenRecentDirectory(path)
+                    onDismissRequest()
+                },
+            )
+        }
     }
 }
 

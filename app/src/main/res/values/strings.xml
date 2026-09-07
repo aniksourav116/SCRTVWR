@@ -53,6 +53,7 @@
     <string name="no_search_results">No files or folders match \"%1$s\".</string>
     <string name="viewing_history">Viewing history</string>
     <string name="all">All</string>
+    <string name="filter">Filter</string>
     <string name="folders">Folders</string>
     <string name="images">Images</string>
     <string name="videos">Videos</string>

@@ -1,6 +1,7 @@
 package srv.scrtvwr
 
 import android.os.Bundle
+import android.content.res.Configuration
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -11,6 +12,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -19,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewScreenSizes
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -48,6 +51,7 @@ class DashboardActivity : ComponentActivity() {
 @Composable
 fun ScrtvwrApp(viewModel: DashboardViewModel = viewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val destinations = state.destinations
     val initialPage = remember(destinations) {
         destinations.indexOf(state.currentDestination).coerceAtLeast(0)
@@ -74,6 +78,11 @@ fun ScrtvwrApp(viewModel: DashboardViewModel = viewModel()) {
     }
 
     NavigationSuiteScaffold(
+        layoutType = if (isLandscape) {
+            NavigationSuiteType.NavigationRail
+        } else {
+            NavigationSuiteType.NavigationBar
+        },
         navigationSuiteItems = {
             destinations.forEachIndexed { page, destination ->
                 item(

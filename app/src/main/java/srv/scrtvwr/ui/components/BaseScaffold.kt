@@ -1,5 +1,6 @@
 package srv.scrtvwr.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,7 +17,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import srv.scrtvwr.R
 
@@ -31,6 +34,8 @@ fun BaseScaffold(
     actions: @Composable () -> Unit = {},
     content: @Composable (Modifier) -> Unit,
 ) {
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
@@ -64,6 +69,7 @@ fun BaseScaffold(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                 ),
+                expandedHeight = if (isLandscape) 48.dp else TopAppBarDefaults.TopAppBarExpandedHeight,
             )
         },
     ) { padding ->
