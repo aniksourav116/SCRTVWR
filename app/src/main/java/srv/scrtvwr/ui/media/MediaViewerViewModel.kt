@@ -1,6 +1,7 @@
 package srv.scrtvwr.ui.media
 
 import android.app.Application
+import android.os.Environment
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
@@ -22,6 +23,7 @@ class MediaViewerViewModel(
     private val savedStateHandle: SavedStateHandle,
 ) : AndroidViewModel(application) {
     private val preferences = ScrtvwrPreferences(application)
+    private val traversalRoot = runCatching { Environment.getExternalStorageDirectory() }.getOrNull()
     private var loadJob: Job? = null
     private val _uiState = MutableStateFlow(
         MediaViewerUiState(
@@ -95,8 +97,8 @@ class MediaViewerViewModel(
 
             sourceDirectoryPath = sourceDirectory?.absolutePath ?: directoryPath
             initialPage = items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
-            previousSource = sourceDirectory?.let { MediaCatalog.previousDirectory(it, sortOrder) }
-            nextSource = sourceDirectory?.let { MediaCatalog.nextDirectory(it, sortOrder) }
+            previousSource = sourceDirectory?.let { MediaCatalog.previousDirectory(it, sortOrder, traversalRoot) }
+            nextSource = sourceDirectory?.let { MediaCatalog.nextDirectory(it, sortOrder, traversalRoot) }
         }
 
         val sourceKey = "${directoryPath.orEmpty()}|${selectedPath.orEmpty()}"

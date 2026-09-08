@@ -90,6 +90,66 @@ class MediaCatalogTest {
         assertNull(MediaCatalog.previousDirectory(current, DirectorySortOrder.NameAscending))
     }
 
+    @Test
+    fun nextDirectory_entersSubdirectoriesBeforeMovingToTheNextSibling() = runBlocking {
+        val root = temporaryFolder.newFolder("directories")
+        val current = root.mediaDirectory("a", "page.jpg")
+        val expected = current.mediaDirectory("a1", "page.jpg")
+        root.mediaDirectory("b", "page.jpg")
+
+        val result = MediaCatalog.nextDirectory(current, DirectorySortOrder.NameAscending, root)
+
+        assertEquals(expected.absolutePath, result?.path)
+        assertEquals("a1", result?.name)
+    }
+
+    @Test
+    fun nextDirectory_climbsBackUpToTheParentSiblingOnceASubtreeIsExhausted() = runBlocking {
+        val root = temporaryFolder.newFolder("directories")
+        val a = root.mediaDirectory("a", "page.jpg")
+        val current = a.mediaDirectory("a2", "page.jpg")
+        val expected = root.mediaDirectory("b", "page.jpg")
+
+        val result = MediaCatalog.nextDirectory(current, DirectorySortOrder.NameAscending, root)
+
+        assertEquals(expected.absolutePath, result?.path)
+        assertEquals("b", result?.name)
+    }
+
+    @Test
+    fun nextDirectory_stopsAtTheTraversalRoot() = runBlocking {
+        val root = temporaryFolder.newFolder("directories")
+        val current = root.mediaDirectory("a", "page.jpg")
+        root.parentFile.mediaDirectory("sibling-of-root", "page.jpg")
+
+        assertNull(MediaCatalog.nextDirectory(current, DirectorySortOrder.NameAscending, root))
+    }
+
+    @Test
+    fun previousDirectory_entersTheDeepestTailOfThePrecedingSibling() = runBlocking {
+        val root = temporaryFolder.newFolder("directories")
+        val a = root.mediaDirectory("a", "page.jpg")
+        val expected = a.mediaDirectory("a2", "page.jpg").mediaDirectory("a2a", "page.jpg")
+        val current = root.mediaDirectory("b", "page.jpg")
+
+        val result = MediaCatalog.previousDirectory(current, DirectorySortOrder.NameAscending, root)
+
+        assertEquals(expected.absolutePath, result?.path)
+        assertEquals("a/a2/a2a", result?.name)
+    }
+
+    @Test
+    fun previousDirectory_returnsTheParentWhenThereIsNoPrecedingSibling() = runBlocking {
+        val root = temporaryFolder.newFolder("directories")
+        val expected = root.mediaDirectory("a", "page.jpg")
+        val current = expected.mediaDirectory("a1", "page.jpg")
+
+        val result = MediaCatalog.previousDirectory(current, DirectorySortOrder.NameAscending, root)
+
+        assertEquals(expected.absolutePath, result?.path)
+        assertEquals("a", result?.name)
+    }
+
     private fun File.archive(name: String, entryName: String): File =
         resolve(name).also { archive ->
             ZipOutputStream(archive.outputStream()).use { output ->

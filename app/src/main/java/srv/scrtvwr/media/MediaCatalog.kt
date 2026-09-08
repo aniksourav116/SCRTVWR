@@ -58,48 +58,48 @@ object MediaCatalog {
         )
     }
 
-    suspend fun nextDirectory(directory: File, sortOrder: DirectorySortOrder): MediaViewerSource? {
-        return adjacentDirectory(
-            directory = directory,
-            sortOrder = sortOrder,
-            candidateSelector = { directories, currentPath ->
-                directories
-                    .dropWhile { it.canonicalPathOrAbsolute() != currentPath }
-                    .drop(1)
-            },
-        )
-    }
-
-    suspend fun previousDirectory(directory: File, sortOrder: DirectorySortOrder): MediaViewerSource? {
-        return adjacentDirectory(
-            directory = directory,
-            sortOrder = sortOrder,
-            candidateSelector = { directories, currentPath ->
-                directories
-                    .takeWhile { it.canonicalPathOrAbsolute() != currentPath }
-                    .asReversed()
-            },
-        )
-    }
-
-    private suspend fun adjacentDirectory(
+    /**
+     * Next directory holding media in depth-first order: the current directory's subfolders first,
+     * then the following siblings, then the siblings of each ancestor up to [root].
+     */
+    suspend fun nextDirectory(
         directory: File,
         sortOrder: DirectorySortOrder,
-        candidateSelector: (List<File>, String) -> List<File>,
+        root: File? = null,
+    ): MediaViewerSource? = firstDirectoryWithMedia(
+        from = directory,
+        candidates = DirectoryTraversal.forward(
+            start = directory,
+            root = DirectoryTraversal.resolveRoot(directory, root),
+            sortOrder = sortOrder,
+        ),
+        sortOrder = sortOrder,
+    )
+
+    /** Previous directory holding media, walking [nextDirectory]'s depth-first order backwards. */
+    suspend fun previousDirectory(
+        directory: File,
+        sortOrder: DirectorySortOrder,
+        root: File? = null,
+    ): MediaViewerSource? = firstDirectoryWithMedia(
+        from = directory,
+        candidates = DirectoryTraversal.backward(
+            start = directory,
+            root = DirectoryTraversal.resolveRoot(directory, root),
+            sortOrder = sortOrder,
+        ),
+        sortOrder = sortOrder,
+    )
+
+    private suspend fun firstDirectoryWithMedia(
+        from: File,
+        candidates: Sequence<File>,
+        sortOrder: DirectorySortOrder,
     ): MediaViewerSource? {
-        val currentPath = directory.canonicalPathOrAbsolute()
-        val directories = directory.parentFile
-            ?.listFiles()
-            ?.asSequence()
-            ?.filter(File::isDirectory)
-            ?.sortedWith(sortOrder.fileComparator(directoriesFirst = false))
-            ?.toList()
-            .orEmpty()
-        val candidates = candidateSelector(directories, currentPath)
         for (candidate in candidates) {
             currentCoroutineContext().ensureActive()
             if (listDirectory(candidate, sortOrder).isNotEmpty()) {
-                return MediaViewerSource(candidate.name.ifBlank { candidate.absolutePath }, candidate.absolutePath)
+                return MediaViewerSource(DirectoryTraversal.displayName(from, candidate), candidate.absolutePath)
             }
         }
         return null
@@ -194,9 +194,6 @@ object MediaCatalog {
             null -> error("Unsupported archive type")
         }
     }
-
-    private fun File.canonicalPathOrAbsolute(): String =
-        runCatching { canonicalPath }.getOrElse { absolutePath }
 
     private fun String.isImageExtension(): Boolean =
         substringAfterLast('.', "").lowercase() in setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif")

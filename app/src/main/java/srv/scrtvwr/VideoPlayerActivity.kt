@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -87,6 +88,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import srv.scrtvwr.media.DirectoryTraversal
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.sort.DirectorySortOrder
@@ -170,6 +172,7 @@ private fun VideoPagerScreen(
     val preferences = remember { ScrtvwrPreferences(context) }
     val sortOrder = remember { preferences.getDirectorySortOrder() }
     val videoPreloadDistance = remember { preferences.getVideoPreloadDistance() }
+    val traversalRoot = remember { runCatching { Environment.getExternalStorageDirectory() }.getOrNull() }
     var currentDirectoryPath by rememberSaveable(directoryPath, selectedPath) {
         mutableStateOf(directoryPath ?: selectedPath?.let(::File)?.parent)
     }
@@ -182,6 +185,7 @@ private fun VideoPagerScreen(
                 directoryPath = currentDirectoryPath,
                 selectedPath = selectedPath.takeIf { currentDirectoryPath == directoryPath },
                 sortOrder = sortOrder,
+                traversalRoot = traversalRoot,
             )
         }
     }
@@ -787,6 +791,7 @@ private fun loadVideoDirectory(
     directoryPath: String?,
     selectedPath: String?,
     sortOrder: DirectorySortOrder,
+    traversalRoot: File?,
 ): VideoDirectory {
     val directory = directoryPath?.let(::File)?.takeIf(File::isDirectory)
         ?: selectedPath?.let(::File)?.parentFile
@@ -798,8 +803,8 @@ private fun loadVideoDirectory(
     }
     return VideoDirectory(
         videos = fallbackVideos,
-        previousDirectory = directory?.findPreviousMediaDirectory(sortOrder),
-        nextDirectory = directory?.findNextMediaDirectory(sortOrder),
+        previousDirectory = directory?.findPreviousMediaDirectory(sortOrder, traversalRoot),
+        nextDirectory = directory?.findNextMediaDirectory(sortOrder, traversalRoot),
     )
 }
 
@@ -812,51 +817,37 @@ private fun File?.listVideos(sortOrder: DirectorySortOrder): List<VideoItem> = t
         ?.toList()
         .orEmpty()
 
-private fun File.findNextMediaDirectory(sortOrder: DirectorySortOrder): VideoDirectoryTarget? {
-    return findAdjacentMediaDirectory(
-        sortOrder = sortOrder,
-        candidateSelector = { directories, currentPath ->
-            directories
-                .dropWhile { candidate ->
-                    runCatching { candidate.canonicalPath }.getOrElse { candidate.absolutePath } != currentPath
-                }
-                .drop(1)
-        },
-    )
-}
-
-private fun File.findPreviousMediaDirectory(sortOrder: DirectorySortOrder): VideoDirectoryTarget? {
-    return findAdjacentMediaDirectory(
-        sortOrder = sortOrder,
-        candidateSelector = { directories, currentPath ->
-            directories
-                .takeWhile { candidate ->
-                    runCatching { candidate.canonicalPath }.getOrElse { candidate.absolutePath } != currentPath
-                }
-                .asReversed()
-        },
-    )
-}
-
-private fun File.findAdjacentMediaDirectory(
+private fun File.findNextMediaDirectory(
     sortOrder: DirectorySortOrder,
-    candidateSelector: (List<File>, String) -> List<File>,
+    traversalRoot: File?,
+): VideoDirectoryTarget? = firstMediaDirectory(sortOrder, traversalRoot) { root ->
+    DirectoryTraversal.forward(this, root, sortOrder)
+}
+
+private fun File.findPreviousMediaDirectory(
+    sortOrder: DirectorySortOrder,
+    traversalRoot: File?,
+): VideoDirectoryTarget? = firstMediaDirectory(sortOrder, traversalRoot) { root ->
+    DirectoryTraversal.backward(this, root, sortOrder)
+}
+
+/**
+ * First directory holding playable media along [candidates], the depth-first walk starting here:
+ * subfolders first, then following siblings, then the siblings of each ancestor up to the root.
+ */
+private fun File.firstMediaDirectory(
+    sortOrder: DirectorySortOrder,
+    traversalRoot: File?,
+    candidates: (root: File) -> Sequence<File>,
 ): VideoDirectoryTarget? {
-    val currentPath = runCatching { canonicalPath }.getOrElse { absolutePath }
-    val directories = parentFile
-        ?.listFiles()
-        ?.asSequence()
-        ?.filter(File::isDirectory)
-        ?.sortedWith(sortOrder.fileComparator(directoriesFirst = false))
-        ?.toList()
-        .orEmpty()
-    return candidateSelector(directories, currentPath)
-        .asSequence()
+    val root = DirectoryTraversal.resolveRoot(this, traversalRoot)
+    return candidates(root)
         .mapNotNull { candidate ->
+            val name = DirectoryTraversal.displayName(this, candidate)
             val videos = candidate.listVideos(sortOrder)
             if (videos.isNotEmpty()) {
                 VideoDirectoryTarget(
-                    name = candidate.name.ifBlank { candidate.absolutePath },
+                    name = name,
                     path = candidate.absolutePath,
                     type = VideoDirectoryType.Video,
                     selectedMediaPath = videos.first().path,
@@ -864,7 +855,7 @@ private fun File.findAdjacentMediaDirectory(
             } else {
                 candidate.listImages(sortOrder).firstOrNull()?.let { image ->
                     VideoDirectoryTarget(
-                        name = candidate.name.ifBlank { candidate.absolutePath },
+                        name = name,
                         path = candidate.absolutePath,
                         type = VideoDirectoryType.Image,
                         selectedMediaPath = image.absolutePath,
