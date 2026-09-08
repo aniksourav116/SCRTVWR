@@ -109,6 +109,11 @@
     <string name="clear_search">Clear search</string>
     <string name="fit_screen">Fit to screen</string>
     <string name="fill_screen">Fill screen</string>
+    <string name="video_resize_fit">Fit</string>
+    <string name="video_resize_fill">Fill</string>
+    <string name="video_resize_zoom">Zoom</string>
+    <string name="more_controls">More controls</string>
+    <string name="hide_more_controls">Hide more controls</string>
     <string name="rotate_90">Rotate 90 degrees</string>
     <string name="bookmark">Bookmark</string>
     <string name="remove_bookmark">Remove bookmark</string>
