@@ -198,6 +198,17 @@ class MediaViewerViewModel(
         }
     }
 
+    /**
+     * Double-tap "like": only ever adds, so a stray double tap can never drop an existing
+     * bookmark. Removing one stays an explicit action in the options menu.
+     */
+    fun addBookmark(path: String) {
+        preferences.setMediaBookmarked(path, true)
+        _uiState.update { state ->
+            if (path == state.selectedPath) state.copy(bookmarked = true) else state
+        }
+    }
+
     fun toggleChrome() {
         _uiState.update { it.copy(isChromeHidden = !it.isChromeHidden) }
     }

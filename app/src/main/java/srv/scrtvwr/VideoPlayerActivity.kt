@@ -41,6 +41,8 @@ import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Pause
@@ -68,6 +70,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -104,6 +107,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import srv.scrtvwr.media.DirectoryTraversal
+import srv.scrtvwr.ui.components.BookmarkFlash
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.sort.DirectorySortOrder
@@ -339,6 +343,7 @@ private fun VideoPage(
     onEnded: () -> Unit,
 ) {
     val context = LocalContext.current
+    val preferences = remember { ScrtvwrPreferences(context) }
     var savedPlaybackPosition by rememberSaveable(item.path) { mutableLongStateOf(0L) }
     val mediaItem = remember(item.path) { MediaItem.fromUri(Uri.fromFile(File(item.path))) }
     val player = remember(item.path) {
@@ -358,6 +363,8 @@ private fun VideoPage(
     var controlsExpanded by rememberSaveable(item.path) { mutableStateOf(false) }
     var speedMenuOpen by remember { mutableStateOf(false) }
     var optionsMenuOpen by remember { mutableStateOf(false) }
+    var bookmarked by remember(item.path) { mutableStateOf(preferences.isMediaBookmarked(item.path)) }
+    var bookmarkFlashId by remember(item.path) { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var prepareRequested by remember { mutableStateOf(false) }
     var reloadWhenActive by remember { mutableStateOf(false) }
@@ -379,6 +386,13 @@ private fun VideoPage(
         if (savedPlaybackPosition > 0L) player.seekTo(savedPlaybackPosition)
         player.prepare()
         prepareRequested = true
+    }
+
+    fun setBookmarked(value: Boolean) {
+        preferences.setMediaBookmarked(item.path, value)
+        bookmarked = value
+        // Replay the heart even when it was already bookmarked, so a double tap always confirms.
+        if (value) bookmarkFlashId += 1
     }
 
     DisposableEffect(player) {
@@ -487,9 +501,19 @@ private fun VideoPage(
                 .pointerInput(player, duration) {
                     detectTapGestures(
                         onTap = { controlsVisible = !controlsVisible },
+                        // Outer thirds keep the seek gesture; the middle third is the instant "like".
                         onDoubleTap = { offset ->
-                            val delta = if (offset.x < size.width / 2f) -DOUBLE_TAP_SEEK_MILLIS else DOUBLE_TAP_SEEK_MILLIS
-                            player.seekTo((player.currentPosition + delta).coerceIn(0L, duration.coerceAtLeast(0L)))
+                            val zoneWidth = size.width / 3f
+                            val delta = when {
+                                offset.x < zoneWidth -> -DOUBLE_TAP_SEEK_MILLIS
+                                offset.x > size.width - zoneWidth -> DOUBLE_TAP_SEEK_MILLIS
+                                else -> null
+                            }
+                            if (delta == null) {
+                                setBookmarked(true)
+                            } else {
+                                player.seekTo((player.currentPosition + delta).coerceIn(0L, duration.coerceAtLeast(0L)))
+                            }
                         },
                     )
                 }
@@ -581,11 +605,18 @@ private fun VideoPage(
                 onControlsExpandedChange = { controlsExpanded = it },
                 optionsMenuOpen = optionsMenuOpen,
                 onOptionsMenuChange = { optionsMenuOpen = it },
+                bookmarked = bookmarked,
+                onBookmarkToggle = { setBookmarked(!bookmarked) },
                 onBack = onBack,
                 onMoveToFirst = onMoveToFirst,
                 onMoveToLast = onMoveToLast,
             )
         }
+
+        BookmarkFlash(
+            flashId = bookmarkFlashId,
+            modifier = Modifier.align(Alignment.Center),
+        )
     }
 }
 
@@ -610,6 +641,8 @@ private fun BoxScope.VideoControls(
     onControlsExpandedChange: (Boolean) -> Unit,
     optionsMenuOpen: Boolean,
     onOptionsMenuChange: (Boolean) -> Unit,
+    bookmarked: Boolean,
+    onBookmarkToggle: () -> Unit,
     onBack: () -> Unit,
     onMoveToFirst: () -> Unit,
     onMoveToLast: () -> Unit,
@@ -648,6 +681,19 @@ private fun BoxScope.VideoControls(
                 Icon(Icons.Default.MoreVert, stringResource(R.string.more_options), tint = Color.White)
             }
             DropdownMenu(expanded = optionsMenuOpen, onDismissRequest = { onOptionsMenuChange(false) }) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(if (bookmarked) R.string.remove_bookmark else R.string.bookmark)) },
+                    leadingIcon = {
+                        Icon(
+                            if (bookmarked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = null,
+                        )
+                    },
+                    onClick = {
+                        onBookmarkToggle()
+                        onOptionsMenuChange(false)
+                    },
+                )
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.move_first_item)) },
                     enabled = pageCount > 0 && page != 0,

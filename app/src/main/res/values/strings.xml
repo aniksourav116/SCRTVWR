@@ -117,6 +117,7 @@
     <string name="rotate_90">Rotate 90 degrees</string>
     <string name="bookmark">Bookmark</string>
     <string name="remove_bookmark">Remove bookmark</string>
+    <string name="bookmarked">Bookmarked</string>
     <string name="details">Details</string>
     <string name="rotate">Rotate</string>
     <string name="flip_horizontal">Flip horizontal</string>

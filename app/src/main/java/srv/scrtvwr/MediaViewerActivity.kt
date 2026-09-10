@@ -40,6 +40,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.LastPage
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FirstPage
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.ImageNotSupported
@@ -70,6 +72,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -108,6 +111,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.PreviewResult
+import srv.scrtvwr.ui.components.BookmarkFlash
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.MediaViewerItem
 import srv.scrtvwr.ui.media.MediaViewerSource
@@ -178,6 +182,7 @@ private fun MediaViewerRoute(
         onRotateClick = viewModel::rotateClockwise,
         onFlipClick = viewModel::toggleFlip,
         onBookmarkClick = viewModel::toggleBookmark,
+        onBookmarkAdd = viewModel::addBookmark,
         onChromeToggle = viewModel::toggleChrome,
         onPreviousSourceClick = viewModel::loadPreviousSource,
         onNextSourceClick = viewModel::loadNextSource,
@@ -197,6 +202,7 @@ private fun MediaViewerScreen(
     onRotateClick: () -> Unit,
     onFlipClick: () -> Unit,
     onBookmarkClick: () -> Unit,
+    onBookmarkAdd: (String) -> Unit,
     onChromeToggle: () -> Unit,
     onPreviousSourceClick: () -> Unit,
     onNextSourceClick: () -> Unit,
@@ -225,6 +231,7 @@ private fun MediaViewerScreen(
     val readyMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
     val zoomedMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
     var zoomCommand by remember { mutableStateOf<ZoomCommand?>(null) }
+    var bookmarkFlashId by remember { mutableIntStateOf(0) }
     val isAnySlideShowRunning = uiState.isSlideShowRunning || isPseudoSlideShowRunning
     val activeSlideShowStayMillis = if (isPseudoSlideShowRunning) {
         pseudoSlideShowStayMillis
@@ -341,6 +348,11 @@ private fun MediaViewerScreen(
         )
     }
 
+    fun bookmarkOnDoubleTap(path: String) {
+        onBookmarkAdd(path)
+        bookmarkFlashId += 1
+    }
+
     val splits = selectedItem?.name?.split("_") ?: emptyList()
 
     val selectedName =  selectedItem?.name?: stringResource(R.string.no_media_selected)
@@ -410,6 +422,12 @@ private fun MediaViewerScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text(stringResource(if (uiState.bookmarked) R.string.remove_bookmark else R.string.bookmark)) },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (uiState.bookmarked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                            contentDescription = null,
+                                        )
+                                    },
                                     onClick = {
                                         onBookmarkClick()
                                         menuExpanded = false
@@ -649,6 +667,7 @@ private fun MediaViewerScreen(
                                 }
                             },
                             onContentClick = onChromeToggle,
+                            onBookmark = { bookmarkOnDoubleTap(item.path) },
                         )
                         else -> EmptyViewerMessage()
                     }
@@ -689,6 +708,11 @@ private fun MediaViewerScreen(
                             .clickable(onClick = onSlideShowStop),
                     )
                 }
+
+                BookmarkFlash(
+                    flashId = bookmarkFlashId,
+                    modifier = Modifier.align(Alignment.Center),
+                )
             }
 
             if (!uiState.isChromeHidden) {
@@ -955,6 +979,7 @@ private fun MediaPage(
     onReady: () -> Unit,
     onZoomChanged: (Boolean) -> Unit,
     onContentClick: () -> Unit,
+    onBookmark: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     if (item.type == MediaViewerType.Video) {
@@ -973,7 +998,12 @@ private fun MediaPage(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .clickable(onClick = onContentClick),
+                .pointerInput(item.path, item.lastModifiedMillis) {
+                    detectTapGestures(
+                        onTap = { onContentClick() },
+                        onDoubleTap = { onBookmark() },
+                    )
+                },
             contentAlignment = Alignment.Center,
         ) {
             preview?.bitmap?.let { bitmap ->
@@ -1080,23 +1110,8 @@ private fun MediaPage(
             .pointerInput(item.path, item.lastModifiedMillis) {
                 detectTapGestures(
                     onTap = { onContentClick() },
-                    onDoubleTap = { tapOffset ->
-                        if (imageScale > MIN_IMAGE_ZOOM) {
-                            resetImageZoom()
-                        } else {
-                            val targetScale = DOUBLE_TAP_IMAGE_ZOOM
-                            val center = Offset(size.width / 2f, size.height / 2f)
-                            val nextOffset = constrainImageOffset(
-                                offset = (center - tapOffset) * (targetScale - MIN_IMAGE_ZOOM),
-                                width = size.width.toFloat(),
-                                height = size.height.toFloat(),
-                                scale = targetScale,
-                            )
-                            imageScale = targetScale
-                            imageOffsetX = nextOffset.x
-                            imageOffsetY = nextOffset.y
-                        }
-                    },
+                    // Double tap is the instant "like"; zooming stays on pinch and the options menu.
+                    onDoubleTap = { onBookmark() },
                 )
             }
             .pointerInput(item.path, item.lastModifiedMillis) {
@@ -1658,6 +1673,7 @@ private fun MediaViewerScreenPreview() {
             onRotateClick = {},
             onFlipClick = {},
             onBookmarkClick = {},
+            onBookmarkAdd = {},
             onChromeToggle = {},
             onPreviousSourceClick = {},
             onNextSourceClick = {},
