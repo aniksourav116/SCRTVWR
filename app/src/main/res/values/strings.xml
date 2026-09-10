@@ -147,7 +147,7 @@
     <string name="first_video">First</string>
     <string name="last_video">Last</string>
     <string name="aspect_ratio">Aspect ratio</string>
-    <string name="video_on_complete">When the video ends</string>
+    <string name="video_on_complete_state">When the video ends: %1$s</string>
     <string name="video_on_complete_stop">Stop</string>
     <string name="video_on_complete_repeat_one">Repeat one</string>
     <string name="video_on_complete_play_next">Play next</string>

@@ -37,10 +37,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Forward
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FitScreen
@@ -54,11 +56,9 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
-import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VerticalAlignBottom
 import androidx.compose.material.icons.filled.VerticalAlignTop
 import androidx.compose.material3.CircularProgressIndicator
@@ -763,8 +763,6 @@ private fun BoxScope.VideoControls(
             exit = fadeOut() + shrinkVertically(),
         ) {
             PlayerOptionsRow(
-                completionAction = completionAction,
-                onCompletionActionChange = onCompletionActionChange,
                 speed = speed,
                 onSpeedChange = onSpeedChange,
                 speedMenuOpen = speedMenuOpen,
@@ -780,7 +778,7 @@ private fun BoxScope.VideoControls(
     }
 
     // Bottom: scrim-gradient overlay with a compact scrubber, then the transport row - lock on the
-    // far left, playback centred, aspect ratio on the far right.
+    // far left, playback centred, and the two cycling toggles on the far right.
     Column(
         modifier = Modifier
             .align(Alignment.BottomCenter)
@@ -848,7 +846,7 @@ private fun BoxScope.VideoControls(
                     onClick = { player.seekTo((player.currentPosition - SHORT_SEEK_MILLIS).coerceAtLeast(0L)) },
                     modifier = Modifier.padding(start = 8.dp).size(40.dp),
                 ) {
-                    Icon(Icons.Default.Replay, stringResource(R.string.seek_back_2_seconds), tint = Color.White)
+                    Icon(Icons.Default.FastRewind, stringResource(R.string.seek_back_2_seconds), tint = Color.White)
                 }
                 IconButton(
                     onClick = {
@@ -874,7 +872,7 @@ private fun BoxScope.VideoControls(
                     modifier = Modifier.padding(end = 8.dp).size(40.dp),
                 ) {
                     Icon(
-                        Icons.AutoMirrored.Filled.Forward,
+                        Icons.Default.FastForward,
                         stringResource(R.string.seek_forward_2_seconds),
                         tint = Color.White,
                     )
@@ -890,6 +888,20 @@ private fun BoxScope.VideoControls(
                         tint = transportTint(canMoveNext),
                     )
                 }
+            }
+            IconButton(
+                onClick = { onCompletionActionChange(completionAction.next()) },
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(
+                    completionAction.icon(),
+                    stringResource(R.string.video_on_complete_state, completionAction.label()),
+                    tint = if (completionAction == VideoCompletionAction.Stop) {
+                        Color.White
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                )
             }
             IconButton(
                 onClick = { onResizeModeChange(resizeMode.next()) },
@@ -910,14 +922,12 @@ private fun BoxScope.VideoControls(
 }
 
 /**
- * Every option the player exposes, as one scrollable tray of icon-over-label entries. Each entry
- * is labelled with the value it currently holds rather than only its name, so the tray doubles as
- * the player status readout.
+ * The options that are not frequent enough to earn a slot in the transport bar, as one scrollable
+ * tray of icon-over-label entries. Each entry is labelled with the value it currently holds rather
+ * than only its name, so the tray doubles as a status readout.
  */
 @Composable
 private fun PlayerOptionsRow(
-    completionAction: VideoCompletionAction,
-    onCompletionActionChange: (VideoCompletionAction) -> Unit,
     speed: Float,
     onSpeedChange: (Float) -> Unit,
     speedMenuOpen: Boolean,
@@ -936,13 +946,6 @@ private fun PlayerOptionsRow(
             .padding(top = 10.dp, start = 8.dp, end = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        PlayerOption(
-            icon = completionAction.icon(),
-            label = completionAction.label(),
-            active = completionAction != VideoCompletionAction.Stop,
-            onClick = { onCompletionActionChange(completionAction.next()) },
-            contentDescription = stringResource(R.string.video_on_complete),
-        )
         Box {
             PlayerOption(
                 icon = Icons.Default.Speed,
@@ -1060,9 +1063,12 @@ private fun VideoCompletionAction.label(): String = stringResource(
 )
 
 private fun VideoCompletionAction.icon(): ImageVector = when (this) {
-    VideoCompletionAction.Stop -> Icons.Default.Stop
+    // Stop is the familiar repeat-off state: the same glyph as Repeat All, only shown inactive.
+    // A stop square would read as "stop playing" this close to the play button, and Play Next
+    // borrows the playlist glyph for the same reason - Skip Next already sits two slots away.
+    VideoCompletionAction.Stop -> Icons.Default.Repeat
     VideoCompletionAction.RepeatOne -> Icons.Default.RepeatOne
-    VideoCompletionAction.PlayNext -> Icons.Default.SkipNext
+    VideoCompletionAction.PlayNext -> Icons.AutoMirrored.Filled.PlaylistPlay
     VideoCompletionAction.RepeatAll -> Icons.Default.Repeat
 }
 
