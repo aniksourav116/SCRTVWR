@@ -117,6 +117,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import srv.scrtvwr.media.DirectoryTraversal
 import srv.scrtvwr.ui.components.BookmarkFlash
+import srv.scrtvwr.ui.components.TapeTransportButton
 import srv.scrtvwr.ui.components.VideoSideGestures
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.preferences.ScrtvwrPreferences
@@ -662,6 +663,7 @@ private fun VideoPage(
                     onOptionsExpandedChange = { optionsExpanded = it },
                     bookmarked = bookmarked,
                     onBookmarkToggle = { setBookmarked(!bookmarked) },
+                    onScrubPreview = { dragTargetPosition = it },
                     onBack = onBack,
                     onLock = { onControlsLockedChange(true) },
                     onMovePrevious = onMovePrevious,
@@ -700,6 +702,7 @@ private fun BoxScope.VideoControls(
     onOptionsExpandedChange: (Boolean) -> Unit,
     bookmarked: Boolean,
     onBookmarkToggle: () -> Unit,
+    onScrubPreview: (Long?) -> Unit,
     onBack: () -> Unit,
     onLock: () -> Unit,
     onMovePrevious: () -> Unit,
@@ -707,6 +710,9 @@ private fun BoxScope.VideoControls(
     onMoveToFirst: () -> Unit,
     onMoveToLast: () -> Unit,
 ) {
+    // Whether the tape transport interrupted playback, so releasing it can pick up where it left off.
+    var resumeAfterSpool by remember { mutableStateOf(false) }
+
     // Top: compact chrome over a scrim, with the options tray unfolding directly beneath it so the
     // options read as belonging to the title bar that opened them.
     Column(
@@ -842,12 +848,25 @@ private fun BoxScope.VideoControls(
                         tint = transportTint(canMovePrevious),
                     )
                 }
-                IconButton(
-                    onClick = { player.seekTo((player.currentPosition - SHORT_SEEK_MILLIS).coerceAtLeast(0L)) },
+                TapeTransportButton(
+                    icon = Icons.Default.FastRewind,
+                    contentDescription = stringResource(R.string.rewind),
+                    forward = false,
+                    positionMillis = { player.currentPosition },
+                    durationMillis = duration,
+                    nudgeMillis = SHORT_SEEK_MILLIS,
+                    onSeek = { player.seekTo(it) },
+                    onSpoolPreview = onScrubPreview,
+                    onSpoolingChange = { spooling ->
+                        if (spooling) {
+                            resumeAfterSpool = player.isPlaying
+                            player.pause()
+                        } else if (resumeAfterSpool) {
+                            player.play()
+                        }
+                    },
                     modifier = Modifier.padding(start = 8.dp).size(40.dp),
-                ) {
-                    Icon(Icons.Default.FastRewind, stringResource(R.string.seek_back_2_seconds), tint = Color.White)
-                }
+                )
                 IconButton(
                     onClick = {
                         if (player.isPlaying) player.pause() else {
@@ -863,20 +882,31 @@ private fun BoxScope.VideoControls(
                     Icon(
                         if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                         stringResource(if (isPlaying) R.string.pause_video else R.string.play_video),
-                        tint = Color.White,
+                        // The rest of the chrome is white on video, but this icon sits on a primary
+                        // fill, and dark schemes make primary a pale tone - white would vanish.
+                        tint = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(30.dp),
                     )
                 }
-                IconButton(
-                    onClick = { player.seekTo((player.currentPosition + SHORT_SEEK_MILLIS).coerceAtMost(duration)) },
+                TapeTransportButton(
+                    icon = Icons.Default.FastForward,
+                    contentDescription = stringResource(R.string.fast_forward),
+                    forward = true,
+                    positionMillis = { player.currentPosition },
+                    durationMillis = duration,
+                    nudgeMillis = SHORT_SEEK_MILLIS,
+                    onSeek = { player.seekTo(it) },
+                    onSpoolPreview = onScrubPreview,
+                    onSpoolingChange = { spooling ->
+                        if (spooling) {
+                            resumeAfterSpool = player.isPlaying
+                            player.pause()
+                        } else if (resumeAfterSpool) {
+                            player.play()
+                        }
+                    },
                     modifier = Modifier.padding(end = 8.dp).size(40.dp),
-                ) {
-                    Icon(
-                        Icons.Default.FastForward,
-                        stringResource(R.string.seek_forward_2_seconds),
-                        tint = Color.White,
-                    )
-                }
+                )
                 IconButton(
                     onClick = onMoveNext,
                     enabled = canMoveNext,

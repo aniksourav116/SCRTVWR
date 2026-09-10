@@ -128,8 +128,8 @@
     <string name="cancel">Cancel</string>
     <string name="play_video">Play video</string>
     <string name="pause_video">Pause video</string>
-    <string name="seek_back_2_seconds">Go back 2 seconds</string>
-    <string name="seek_forward_2_seconds">Go forward 2 seconds</string>
+    <string name="rewind">Rewind 2 seconds, hold to rewind continuously</string>
+    <string name="fast_forward">Forward 2 seconds, hold to fast forward continuously</string>
     <string name="repeat_video">Repeat video</string>
     <string name="stop_repeating_video">Stop repeating video</string>
     <string name="playback_speed">Playback speed</string>
