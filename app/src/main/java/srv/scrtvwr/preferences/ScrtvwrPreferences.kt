@@ -4,6 +4,7 @@ import android.content.Context
 import org.json.JSONArray
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
+import srv.scrtvwr.ui.media.VideoCompletionAction
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import java.io.File
 
@@ -52,6 +53,17 @@ class ScrtvwrPreferences(context: Context) {
     fun saveVideoPreloadDistance(distance: Int) {
         preferences.edit()
             .putInt(KEY_VIDEO_PRELOAD_DISTANCE, distance.coerceAtLeast(0))
+            .apply()
+    }
+
+    fun getVideoCompletionAction(): VideoCompletionAction =
+        preferences.getString(KEY_VIDEO_COMPLETION_ACTION, null)
+            ?.let { value -> VideoCompletionAction.entries.firstOrNull { it.name == value } }
+            ?: VideoCompletionAction.Stop
+
+    fun saveVideoCompletionAction(action: VideoCompletionAction) {
+        preferences.edit()
+            .putString(KEY_VIDEO_COMPLETION_ACTION, action.name)
             .apply()
     }
 
@@ -196,6 +208,7 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_SLIDE_SHOW_DIRECTION = "slide_show_direction"
         const val KEY_IMAGE_PRELOAD_DISTANCE = "image_preload_distance"
         const val KEY_VIDEO_PRELOAD_DISTANCE = "video_preload_distance"
+        const val KEY_VIDEO_COMPLETION_ACTION = "video_completion_action"
         const val KEY_MEDIA_EDGE_DIALOG_STYLE = "media_edge_dialog_style"
         const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
         const val KEY_SHOW_DIRECTORY_FILE_ACTIONS = "show_directory_file_actions"

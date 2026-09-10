@@ -137,9 +137,11 @@
     <string name="playback_speed">Playback speed</string>
     <string name="video_playback_error">Unable to play this video: %1$s</string>
     <string name="retry">Retry</string>
-    <string name="repeat_none">Repeat: none</string>
-    <string name="repeat_one">Repeat: one</string>
-    <string name="repeat_all">Repeat: all</string>
+    <string name="video_on_complete">When the video ends</string>
+    <string name="video_on_complete_stop">Stop</string>
+    <string name="video_on_complete_repeat_one">Repeat one</string>
+    <string name="video_on_complete_play_next">Play next</string>
+    <string name="video_on_complete_repeat_all">Repeat all</string>
     <string name="video_count">%1$d of %2$d</string>
     <string name="no_videos_found">No videos found in this directory.</string>
     <string name="seek_preview">Seek to %1$s</string>

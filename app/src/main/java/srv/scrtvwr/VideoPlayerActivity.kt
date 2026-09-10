@@ -51,8 +51,11 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -110,6 +113,10 @@ import srv.scrtvwr.media.DirectoryTraversal
 import srv.scrtvwr.ui.components.BookmarkFlash
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.preferences.ScrtvwrPreferences
+import srv.scrtvwr.ui.media.VideoCompletionAction
+import srv.scrtvwr.ui.media.loopsCurrentVideo
+import srv.scrtvwr.ui.media.nextVideoIndex
+import srv.scrtvwr.ui.media.wrapsAtDirectoryEnd
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.sort.fileComparator
 import java.io.File
@@ -212,7 +219,7 @@ private fun VideoPagerScreen(
     val previousDirectory = loadedDirectory?.previousDirectory
     val nextDirectory = loadedDirectory?.nextDirectory
     val firstVideoPageIndex = if (previousDirectory != null) 1 else 0
-    var repeatMode by rememberSaveable { mutableStateOf(VideoRepeatMode.None) }
+    var completionAction by rememberSaveable { mutableStateOf(preferences.getVideoCompletionAction()) }
     val initialPage = remember(videos, selectedVideoPath, firstVideoPageIndex) {
         videos.indexOfFirst { it.path == selectedVideoPath }.coerceAtLeast(0) + firstVideoPageIndex
     }
@@ -269,8 +276,11 @@ private fun VideoPagerScreen(
                         page = videoIndex,
                         pageCount = videos.size,
                         isActive = page == pagerState.currentPage,
-                        repeatMode = repeatMode,
-                        onRepeatModeChange = { repeatMode = it },
+                        completionAction = completionAction,
+                        onCompletionActionChange = { action ->
+                            completionAction = action
+                            preferences.saveVideoCompletionAction(action)
+                        },
                         onBack = onBack,
                         onMoveToFirst = {
                             scope.launch {
@@ -283,14 +293,9 @@ private fun VideoPagerScreen(
                             }
                         },
                         onEnded = {
-                            if (repeatMode == VideoRepeatMode.All) {
+                            completionAction.nextVideoIndex(videoIndex, videos.size)?.let { nextIndex ->
                                 scope.launch {
-                                    val nextVideoPage = if (videoIndex == videos.lastIndex) {
-                                        firstVideoPageIndex
-                                    } else {
-                                        page + 1
-                                    }
-                                    pagerState.animateScrollToPage(nextVideoPage)
+                                    pagerState.animateScrollToPage(firstVideoPageIndex + nextIndex)
                                 }
                             }
                         },
@@ -335,8 +340,8 @@ private fun VideoPage(
     page: Int,
     pageCount: Int,
     isActive: Boolean,
-    repeatMode: VideoRepeatMode,
-    onRepeatModeChange: (VideoRepeatMode) -> Unit,
+    completionAction: VideoCompletionAction,
+    onCompletionActionChange: (VideoCompletionAction) -> Unit,
     onBack: () -> Unit,
     onMoveToFirst: () -> Unit,
     onMoveToLast: () -> Unit,
@@ -374,7 +379,9 @@ private fun VideoPage(
     fun saveCurrentPosition() {
         if (prepareRequested || player.playbackState != Player.STATE_IDLE) {
             val currentPosition = player.currentPosition.coerceAtLeast(0L)
-            savedPlaybackPosition = currentPosition
+            // A finished video resumes from the top rather than from its last frame, so coming
+            // back to it plays it again instead of instantly re-running the completion action.
+            savedPlaybackPosition = if (player.playbackState == Player.STATE_ENDED) 0L else currentPosition
             position = currentPosition
         }
     }
@@ -408,7 +415,10 @@ private fun VideoPage(
                     reloadWhenActive = false
                     activeReloadAttempts = 0
                 }
-                if (state == Player.STATE_ENDED) onEnded()
+                if (state == Player.STATE_ENDED) {
+                    savedPlaybackPosition = 0L
+                    onEnded()
+                }
             }
 
             override fun onPlayerError(playbackError: PlaybackException) {
@@ -463,18 +473,17 @@ private fun VideoPage(
     LaunchedEffect(player, isActive) {
         while (isActive) {
             position = player.currentPosition.coerceAtLeast(0L)
-            savedPlaybackPosition = position
+            if (player.playbackState != Player.STATE_ENDED) savedPlaybackPosition = position
             if (player.duration > 0) duration = player.duration
             delay(250)
         }
     }
 
-    LaunchedEffect(repeatMode) {
-        player.repeatMode = if (repeatMode == VideoRepeatMode.One) {
-            Player.REPEAT_MODE_ONE
-        } else {
-            Player.REPEAT_MODE_OFF
-        }
+    LaunchedEffect(completionAction, pageCount) {
+        // Repeating a whole directory of one video has nowhere to advance to, so it loops in place.
+        val loopsInPlayer = completionAction.loopsCurrentVideo ||
+            (completionAction.wrapsAtDirectoryEnd && pageCount <= 1)
+        player.repeatMode = if (loopsInPlayer) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
     }
 
     LaunchedEffect(speed) { player.setPlaybackSpeed(speed) }
@@ -593,8 +602,8 @@ private fun VideoPage(
                 isPlaying = isPlaying,
                 position = position,
                 duration = duration,
-                repeatMode = repeatMode,
-                onRepeatModeChange = onRepeatModeChange,
+                completionAction = completionAction,
+                onCompletionActionChange = onCompletionActionChange,
                 speed = speed,
                 onSpeedChange = { speed = it },
                 speedMenuOpen = speedMenuOpen,
@@ -629,8 +638,8 @@ private fun BoxScope.VideoControls(
     isPlaying: Boolean,
     position: Long,
     duration: Long,
-    repeatMode: VideoRepeatMode,
-    onRepeatModeChange: (VideoRepeatMode) -> Unit,
+    completionAction: VideoCompletionAction,
+    onCompletionActionChange: (VideoCompletionAction) -> Unit,
     speed: Float,
     onSpeedChange: (Float) -> Unit,
     speedMenuOpen: Boolean,
@@ -715,7 +724,7 @@ private fun BoxScope.VideoControls(
     }
 
     // Bottom bar: scrim-gradient overlay with a compact scrubber, primary transport controls,
-    // and a collapsible panel for secondary functions (repeat, speed, aspect ratio).
+    // and a collapsible panel for secondary functions (end-of-video action, speed, aspect ratio).
     Column(
         modifier = Modifier
             .align(Alignment.BottomCenter)
@@ -737,10 +746,11 @@ private fun BoxScope.VideoControls(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 ControlChip(
-                    icon = Icons.Default.Repeat,
-                    label = repeatMode.label(),
-                    active = repeatMode != VideoRepeatMode.None,
-                    onClick = { onRepeatModeChange(repeatMode.next()) },
+                    icon = completionAction.icon(),
+                    label = completionAction.label(),
+                    active = completionAction != VideoCompletionAction.Stop,
+                    onClick = { onCompletionActionChange(completionAction.next()) },
+                    contentDescription = stringResource(R.string.video_on_complete),
                 )
                 Box {
                     ControlChip(
@@ -904,18 +914,28 @@ private fun Int.labelRes(): Int = when (this) {
 }
 
 @Composable
-private fun VideoRepeatMode.label(): String = stringResource(
+private fun VideoCompletionAction.label(): String = stringResource(
     when (this) {
-        VideoRepeatMode.None -> R.string.repeat_none
-        VideoRepeatMode.One -> R.string.repeat_one
-        VideoRepeatMode.All -> R.string.repeat_all
+        VideoCompletionAction.Stop -> R.string.video_on_complete_stop
+        VideoCompletionAction.RepeatOne -> R.string.video_on_complete_repeat_one
+        VideoCompletionAction.PlayNext -> R.string.video_on_complete_play_next
+        VideoCompletionAction.RepeatAll -> R.string.video_on_complete_repeat_all
     },
 )
 
-private fun VideoRepeatMode.next(): VideoRepeatMode = when (this) {
-    VideoRepeatMode.None -> VideoRepeatMode.One
-    VideoRepeatMode.One -> VideoRepeatMode.All
-    VideoRepeatMode.All -> VideoRepeatMode.None
+private fun VideoCompletionAction.icon(): ImageVector = when (this) {
+    VideoCompletionAction.Stop -> Icons.Default.Stop
+    VideoCompletionAction.RepeatOne -> Icons.Default.RepeatOne
+    VideoCompletionAction.PlayNext -> Icons.Default.SkipNext
+    VideoCompletionAction.RepeatAll -> Icons.Default.Repeat
+}
+
+/** Chip cycle: do nothing, loop this video, move on once, then move on forever. */
+private fun VideoCompletionAction.next(): VideoCompletionAction = when (this) {
+    VideoCompletionAction.Stop -> VideoCompletionAction.RepeatOne
+    VideoCompletionAction.RepeatOne -> VideoCompletionAction.PlayNext
+    VideoCompletionAction.PlayNext -> VideoCompletionAction.RepeatAll
+    VideoCompletionAction.RepeatAll -> VideoCompletionAction.Stop
 }
 
 @Composable
@@ -1091,7 +1111,6 @@ private fun VideoDirectoryDirection.moveStringRes(isArchive: Boolean): Int = whe
     VideoDirectoryDirection.Next -> if (isArchive) R.string.move_next_archive else R.string.move_next_directory
 }
 
-private enum class VideoRepeatMode { None, One, All }
 private enum class VideoDirectoryType { Video, Image }
 
 private val VIDEO_EXTENSIONS = setOf("mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v")
