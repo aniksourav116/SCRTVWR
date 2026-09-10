@@ -112,8 +112,6 @@
     <string name="video_resize_fit">Fit</string>
     <string name="video_resize_fill">Fill</string>
     <string name="video_resize_zoom">Zoom</string>
-    <string name="more_controls">More controls</string>
-    <string name="hide_more_controls">Hide more controls</string>
     <string name="rotate_90">Rotate 90 degrees</string>
     <string name="bookmark">Bookmark</string>
     <string name="remove_bookmark">Remove bookmark</string>
@@ -137,6 +135,18 @@
     <string name="playback_speed">Playback speed</string>
     <string name="video_playback_error">Unable to play this video: %1$s</string>
     <string name="retry">Retry</string>
+    <string name="brightness">Brightness</string>
+    <string name="volume">Volume</string>
+    <string name="percentage">%1$d%%</string>
+    <string name="lock_controls">Lock controls</string>
+    <string name="unlock_controls">Unlock controls</string>
+    <string name="previous_video">Previous video</string>
+    <string name="next_video">Next video</string>
+    <string name="player_options">Player options</string>
+    <string name="hide_player_options">Hide player options</string>
+    <string name="first_video">First</string>
+    <string name="last_video">Last</string>
+    <string name="aspect_ratio">Aspect ratio</string>
     <string name="video_on_complete">When the video ends</string>
     <string name="video_on_complete_stop">Stop</string>
     <string name="video_on_complete_repeat_one">Repeat one</string>

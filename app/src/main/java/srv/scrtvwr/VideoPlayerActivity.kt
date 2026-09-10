@@ -16,15 +16,15 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -40,11 +41,12 @@ import androidx.compose.material.icons.automirrored.filled.Forward
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Folder
@@ -53,9 +55,12 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.VerticalAlignBottom
+import androidx.compose.material.icons.filled.VerticalAlignTop
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -67,7 +72,6 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -86,11 +90,13 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -111,6 +117,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import srv.scrtvwr.media.DirectoryTraversal
 import srv.scrtvwr.ui.components.BookmarkFlash
+import srv.scrtvwr.ui.components.VideoSideGestures
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.media.VideoCompletionAction
@@ -220,6 +227,7 @@ private fun VideoPagerScreen(
     val nextDirectory = loadedDirectory?.nextDirectory
     val firstVideoPageIndex = if (previousDirectory != null) 1 else 0
     var completionAction by rememberSaveable { mutableStateOf(preferences.getVideoCompletionAction()) }
+    var controlsLocked by rememberSaveable { mutableStateOf(false) }
     val initialPage = remember(videos, selectedVideoPath, firstVideoPageIndex) {
         videos.indexOfFirst { it.path == selectedVideoPath }.coerceAtLeast(0) + firstVideoPageIndex
     }
@@ -267,6 +275,7 @@ private fun VideoPagerScreen(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
                 beyondViewportPageCount = minOf(videoPreloadDistance, pagerState.pageCount - 1),
+                userScrollEnabled = !controlsLocked,
             ) { page ->
                 val videoIndex = page - firstVideoPageIndex
                 val item = videos.getOrNull(videoIndex)
@@ -281,7 +290,19 @@ private fun VideoPagerScreen(
                             completionAction = action
                             preferences.saveVideoCompletionAction(action)
                         },
+                        controlsLocked = controlsLocked,
+                        onControlsLockedChange = { controlsLocked = it },
                         onBack = onBack,
+                        onMovePrevious = {
+                            scope.launch {
+                                pagerState.animateScrollToPage(page - 1)
+                            }
+                        },
+                        onMoveNext = {
+                            scope.launch {
+                                pagerState.animateScrollToPage(page + 1)
+                            }
+                        },
                         onMoveToFirst = {
                             scope.launch {
                                 pagerState.animateScrollToPage(firstVideoPageIndex)
@@ -342,7 +363,11 @@ private fun VideoPage(
     isActive: Boolean,
     completionAction: VideoCompletionAction,
     onCompletionActionChange: (VideoCompletionAction) -> Unit,
+    controlsLocked: Boolean,
+    onControlsLockedChange: (Boolean) -> Unit,
     onBack: () -> Unit,
+    onMovePrevious: () -> Unit,
+    onMoveNext: () -> Unit,
     onMoveToFirst: () -> Unit,
     onMoveToLast: () -> Unit,
     onEnded: () -> Unit,
@@ -365,9 +390,8 @@ private fun VideoPage(
     var horizontalDrag by remember { mutableFloatStateOf(0f) }
     var speed by rememberSaveable { mutableFloatStateOf(1f) }
     var resizeMode by rememberSaveable { mutableStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
-    var controlsExpanded by rememberSaveable(item.path) { mutableStateOf(false) }
+    var optionsExpanded by rememberSaveable(item.path) { mutableStateOf(false) }
     var speedMenuOpen by remember { mutableStateOf(false) }
-    var optionsMenuOpen by remember { mutableStateOf(false) }
     var bookmarked by remember(item.path) { mutableStateOf(preferences.isMediaBookmarked(item.path)) }
     var bookmarkFlashId by remember(item.path) { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -507,11 +531,12 @@ private fun VideoPage(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(player, duration) {
+                .pointerInput(player, duration, controlsLocked) {
                     detectTapGestures(
                         onTap = { controlsVisible = !controlsVisible },
                         // Outer thirds keep the seek gesture; the middle third is the instant "like".
                         onDoubleTap = { offset ->
+                            if (controlsLocked) return@detectTapGestures
                             val zoneWidth = size.width / 3f
                             val delta = when {
                                 offset.x < zoneWidth -> -DOUBLE_TAP_SEEK_MILLIS
@@ -526,28 +551,38 @@ private fun VideoPage(
                         },
                     )
                 }
-                .pointerInput(player, duration) {
-                    detectHorizontalDragGestures(
-                        onDragStart = {
-                            dragStartPosition = player.currentPosition
-                            horizontalDrag = 0f
-                            dragTargetPosition = dragStartPosition
-                        },
-                        onHorizontalDrag = { change, amount ->
-                            change.consume()
-                            horizontalDrag += amount
-                            val seekWindow = duration.coerceAtMost(MAX_SWIPE_SEEK_MILLIS)
-                            val delta = (horizontalDrag / size.width.coerceAtLeast(1) * seekWindow).toLong()
-                            dragTargetPosition = (dragStartPosition + delta).coerceIn(0L, duration.coerceAtLeast(0L))
-                        },
-                        onDragEnd = {
-                            dragTargetPosition?.let(player::seekTo)
-                            dragTargetPosition = null
-                        },
-                        onDragCancel = { dragTargetPosition = null },
-                    )
-                },
-        )
+                .then(
+                    if (controlsLocked) {
+                        Modifier
+                    } else {
+                        Modifier.pointerInput(player, duration) {
+                            detectHorizontalDragGestures(
+                                onDragStart = {
+                                    dragStartPosition = player.currentPosition
+                                    horizontalDrag = 0f
+                                    dragTargetPosition = dragStartPosition
+                                },
+                                onHorizontalDrag = { change, amount ->
+                                    change.consume()
+                                    horizontalDrag += amount
+                                    val seekWindow = duration.coerceAtMost(MAX_SWIPE_SEEK_MILLIS)
+                                    val delta = (horizontalDrag / size.width.coerceAtLeast(1) * seekWindow).toLong()
+                                    dragTargetPosition =
+                                        (dragStartPosition + delta).coerceIn(0L, duration.coerceAtLeast(0L))
+                                },
+                                onDragEnd = {
+                                    dragTargetPosition?.let(player::seekTo)
+                                    dragTargetPosition = null
+                                },
+                                onDragCancel = { dragTargetPosition = null },
+                            )
+                        }
+                    },
+                ),
+        ) {
+            // Nested inside the gesture layer so taps still reach the handlers above.
+            VideoSideGestures(enabled = isActive && !controlsLocked)
+        }
 
         dragTargetPosition?.let { target ->
             Text(
@@ -594,32 +629,47 @@ private fun VideoPage(
         }
 
         if (isActive && controlsVisible) {
-            VideoControls(
-                item = item,
-                page = page,
-                pageCount = pageCount,
-                player = player,
-                isPlaying = isPlaying,
-                position = position,
-                duration = duration,
-                completionAction = completionAction,
-                onCompletionActionChange = onCompletionActionChange,
-                speed = speed,
-                onSpeedChange = { speed = it },
-                speedMenuOpen = speedMenuOpen,
-                onSpeedMenuChange = { speedMenuOpen = it },
-                resizeMode = resizeMode,
-                onResizeModeChange = { resizeMode = it },
-                controlsExpanded = controlsExpanded,
-                onControlsExpandedChange = { controlsExpanded = it },
-                optionsMenuOpen = optionsMenuOpen,
-                onOptionsMenuChange = { optionsMenuOpen = it },
-                bookmarked = bookmarked,
-                onBookmarkToggle = { setBookmarked(!bookmarked) },
-                onBack = onBack,
-                onMoveToFirst = onMoveToFirst,
-                onMoveToLast = onMoveToLast,
-            )
+            if (controlsLocked) {
+                // Locked keeps the frame clear: one button, and every other gesture is inert.
+                IconButton(
+                    onClick = { onControlsLockedChange(false) },
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 16.dp)
+                        .size(48.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), CircleShape),
+                ) {
+                    Icon(Icons.Default.Lock, stringResource(R.string.unlock_controls), tint = Color.White)
+                }
+            } else {
+                VideoControls(
+                    item = item,
+                    page = page,
+                    pageCount = pageCount,
+                    player = player,
+                    isPlaying = isPlaying,
+                    position = position,
+                    duration = duration,
+                    completionAction = completionAction,
+                    onCompletionActionChange = onCompletionActionChange,
+                    speed = speed,
+                    onSpeedChange = { speed = it },
+                    speedMenuOpen = speedMenuOpen,
+                    onSpeedMenuChange = { speedMenuOpen = it },
+                    resizeMode = resizeMode,
+                    onResizeModeChange = { resizeMode = it },
+                    optionsExpanded = optionsExpanded,
+                    onOptionsExpandedChange = { optionsExpanded = it },
+                    bookmarked = bookmarked,
+                    onBookmarkToggle = { setBookmarked(!bookmarked) },
+                    onBack = onBack,
+                    onLock = { onControlsLockedChange(true) },
+                    onMovePrevious = onMovePrevious,
+                    onMoveNext = onMoveNext,
+                    onMoveToFirst = onMoveToFirst,
+                    onMoveToLast = onMoveToLast,
+                )
+            }
         }
 
         BookmarkFlash(
@@ -646,85 +696,91 @@ private fun BoxScope.VideoControls(
     onSpeedMenuChange: (Boolean) -> Unit,
     resizeMode: Int,
     onResizeModeChange: (Int) -> Unit,
-    controlsExpanded: Boolean,
-    onControlsExpandedChange: (Boolean) -> Unit,
-    optionsMenuOpen: Boolean,
-    onOptionsMenuChange: (Boolean) -> Unit,
+    optionsExpanded: Boolean,
+    onOptionsExpandedChange: (Boolean) -> Unit,
     bookmarked: Boolean,
     onBookmarkToggle: () -> Unit,
     onBack: () -> Unit,
+    onLock: () -> Unit,
+    onMovePrevious: () -> Unit,
+    onMoveNext: () -> Unit,
     onMoveToFirst: () -> Unit,
     onMoveToLast: () -> Unit,
 ) {
-    // Top bar: compact, scrim-gradient chrome so it reads as an overlay rather than a solid panel.
-    Row(
+    // Top: compact chrome over a scrim, with the options tray unfolding directly beneath it so the
+    // options read as belonging to the title bar that opened them.
+    Column(
         modifier = Modifier
+            .align(Alignment.TopCenter)
             .fillMaxWidth()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(Color.Black.copy(alpha = 0.75f), Color.Transparent),
+                    colors = listOf(
+                        Color.Black.copy(alpha = 0.85f),
+                        Color.Black.copy(alpha = 0.6f),
+                        Color.Transparent,
+                    ),
                 ),
             )
-            .padding(top = 18.dp, bottom = 14.dp, start = 4.dp, end = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(top = 18.dp, bottom = 14.dp),
     ) {
-        IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back), tint = Color.White)
-        }
-        Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
-            Text(
-                item.name,
-                color = Color.White,
-                style = MaterialTheme.typography.titleSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                stringResource(R.string.video_count, page + 1, pageCount),
-                color = Color.White.copy(alpha = 0.7f),
-                style = MaterialTheme.typography.labelSmall,
-            )
-        }
-        Box {
-            IconButton(onClick = { onOptionsMenuChange(true) }, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Default.MoreVert, stringResource(R.string.more_options), tint = Color.White)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back), tint = Color.White)
             }
-            DropdownMenu(expanded = optionsMenuOpen, onDismissRequest = { onOptionsMenuChange(false) }) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(if (bookmarked) R.string.remove_bookmark else R.string.bookmark)) },
-                    leadingIcon = {
-                        Icon(
-                            if (bookmarked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                            contentDescription = null,
-                        )
-                    },
-                    onClick = {
-                        onBookmarkToggle()
-                        onOptionsMenuChange(false)
-                    },
+            Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
+                Text(
+                    item.name,
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.move_first_item)) },
-                    enabled = pageCount > 0 && page != 0,
-                    onClick = {
-                        onMoveToFirst()
-                        onOptionsMenuChange(false)
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.move_last_item)) },
-                    enabled = pageCount > 0 && page != pageCount - 1,
-                    onClick = {
-                        onMoveToLast()
-                        onOptionsMenuChange(false)
-                    },
+                Text(
+                    stringResource(R.string.video_count, page + 1, pageCount),
+                    color = Color.White.copy(alpha = 0.7f),
+                    style = MaterialTheme.typography.labelSmall,
                 )
             }
+            IconButton(
+                onClick = { onOptionsExpandedChange(!optionsExpanded) },
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(
+                    if (optionsExpanded) Icons.Default.ExpandLess else Icons.Default.MoreVert,
+                    stringResource(if (optionsExpanded) R.string.hide_player_options else R.string.player_options),
+                    tint = Color.White,
+                )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = optionsExpanded,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
+            PlayerOptionsRow(
+                completionAction = completionAction,
+                onCompletionActionChange = onCompletionActionChange,
+                speed = speed,
+                onSpeedChange = onSpeedChange,
+                speedMenuOpen = speedMenuOpen,
+                onSpeedMenuChange = onSpeedMenuChange,
+                bookmarked = bookmarked,
+                onBookmarkToggle = onBookmarkToggle,
+                canMoveToFirst = pageCount > 0 && page != 0,
+                onMoveToFirst = onMoveToFirst,
+                canMoveToLast = pageCount > 0 && page != pageCount - 1,
+                onMoveToLast = onMoveToLast,
+            )
         }
     }
 
-    // Bottom bar: scrim-gradient overlay with a compact scrubber, primary transport controls,
-    // and a collapsible panel for secondary functions (end-of-video action, speed, aspect ratio).
+    // Bottom: scrim-gradient overlay with a compact scrubber, then the transport row - lock on the
+    // far left, playback centred, aspect ratio on the far right.
     Column(
         modifier = Modifier
             .align(Alignment.BottomCenter)
@@ -736,51 +792,6 @@ private fun BoxScope.VideoControls(
             )
             .padding(top = 24.dp, bottom = 14.dp, start = 12.dp, end = 12.dp),
     ) {
-        AnimatedVisibility(
-            visible = controlsExpanded,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically(),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                ControlChip(
-                    icon = completionAction.icon(),
-                    label = completionAction.label(),
-                    active = completionAction != VideoCompletionAction.Stop,
-                    onClick = { onCompletionActionChange(completionAction.next()) },
-                    contentDescription = stringResource(R.string.video_on_complete),
-                )
-                Box {
-                    ControlChip(
-                        icon = Icons.Default.Speed,
-                        label = formatSpeed(speed),
-                        active = speed != 1f,
-                        onClick = { onSpeedMenuChange(true) },
-                        contentDescription = stringResource(R.string.playback_speed),
-                    )
-                    DropdownMenu(expanded = speedMenuOpen, onDismissRequest = { onSpeedMenuChange(false) }) {
-                        PLAYBACK_SPEEDS.forEach { option ->
-                            DropdownMenuItem(
-                                text = { Text(formatSpeed(option)) },
-                                onClick = {
-                                    onSpeedChange(option)
-                                    onSpeedMenuChange(false)
-                                },
-                            )
-                        }
-                    }
-                }
-                ControlChip(
-                    icon = resizeMode.icon(),
-                    label = stringResource(resizeMode.labelRes()),
-                    active = resizeMode != AspectRatioFrameLayout.RESIZE_MODE_FIT,
-                    onClick = { onResizeModeChange(resizeMode.next()) },
-                )
-            }
-        }
-
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Text(
                 formatVideoTime(position),
@@ -812,15 +823,30 @@ private fun BoxScope.VideoControls(
             modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Spacer(modifier = Modifier.width(40.dp))
+            IconButton(onClick = onLock, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Default.LockOpen, stringResource(R.string.lock_controls), tint = Color.White)
+            }
             Row(
                 modifier = Modifier.weight(1f),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                val canMovePrevious = page > 0
+                val canMoveNext = page < pageCount - 1
+                IconButton(
+                    onClick = onMovePrevious,
+                    enabled = canMovePrevious,
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Icon(
+                        Icons.Default.SkipPrevious,
+                        stringResource(R.string.previous_video),
+                        tint = transportTint(canMovePrevious),
+                    )
+                }
                 IconButton(
                     onClick = { player.seekTo((player.currentPosition - SHORT_SEEK_MILLIS).coerceAtLeast(0L)) },
-                    modifier = Modifier.size(40.dp),
+                    modifier = Modifier.padding(start = 8.dp).size(40.dp),
                 ) {
                     Icon(Icons.Default.Replay, stringResource(R.string.seek_back_2_seconds), tint = Color.White)
                 }
@@ -845,55 +871,165 @@ private fun BoxScope.VideoControls(
                 }
                 IconButton(
                     onClick = { player.seekTo((player.currentPosition + SHORT_SEEK_MILLIS).coerceAtMost(duration)) },
+                    modifier = Modifier.padding(end = 8.dp).size(40.dp),
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Forward,
+                        stringResource(R.string.seek_forward_2_seconds),
+                        tint = Color.White,
+                    )
+                }
+                IconButton(
+                    onClick = onMoveNext,
+                    enabled = canMoveNext,
                     modifier = Modifier.size(40.dp),
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.Forward, stringResource(R.string.seek_forward_2_seconds), tint = Color.White)
+                    Icon(
+                        Icons.Default.SkipNext,
+                        stringResource(R.string.next_video),
+                        tint = transportTint(canMoveNext),
+                    )
                 }
             }
             IconButton(
-                onClick = { onControlsExpandedChange(!controlsExpanded) },
+                onClick = { onResizeModeChange(resizeMode.next()) },
                 modifier = Modifier.size(40.dp),
             ) {
                 Icon(
-                    if (controlsExpanded) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
-                    stringResource(if (controlsExpanded) R.string.hide_more_controls else R.string.more_controls),
-                    tint = Color.White,
+                    resizeMode.icon(),
+                    stringResource(R.string.aspect_ratio),
+                    tint = if (resizeMode == AspectRatioFrameLayout.RESIZE_MODE_FIT) {
+                        Color.White
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
                 )
             }
         }
     }
 }
 
+/**
+ * Every option the player exposes, as one scrollable tray of icon-over-label entries. Each entry
+ * is labelled with the value it currently holds rather than only its name, so the tray doubles as
+ * the player status readout.
+ */
 @Composable
-private fun ControlChip(
+private fun PlayerOptionsRow(
+    completionAction: VideoCompletionAction,
+    onCompletionActionChange: (VideoCompletionAction) -> Unit,
+    speed: Float,
+    onSpeedChange: (Float) -> Unit,
+    speedMenuOpen: Boolean,
+    onSpeedMenuChange: (Boolean) -> Unit,
+    bookmarked: Boolean,
+    onBookmarkToggle: () -> Unit,
+    canMoveToFirst: Boolean,
+    onMoveToFirst: () -> Unit,
+    canMoveToLast: Boolean,
+    onMoveToLast: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(top = 10.dp, start = 8.dp, end = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        PlayerOption(
+            icon = completionAction.icon(),
+            label = completionAction.label(),
+            active = completionAction != VideoCompletionAction.Stop,
+            onClick = { onCompletionActionChange(completionAction.next()) },
+            contentDescription = stringResource(R.string.video_on_complete),
+        )
+        Box {
+            PlayerOption(
+                icon = Icons.Default.Speed,
+                label = formatSpeed(speed),
+                active = speed != 1f,
+                onClick = { onSpeedMenuChange(true) },
+                contentDescription = stringResource(R.string.playback_speed),
+            )
+            DropdownMenu(expanded = speedMenuOpen, onDismissRequest = { onSpeedMenuChange(false) }) {
+                PLAYBACK_SPEEDS.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(formatSpeed(option)) },
+                        onClick = {
+                            onSpeedChange(option)
+                            onSpeedMenuChange(false)
+                        },
+                    )
+                }
+            }
+        }
+        PlayerOption(
+            icon = if (bookmarked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+            label = stringResource(if (bookmarked) R.string.bookmarked else R.string.bookmark),
+            active = bookmarked,
+            onClick = onBookmarkToggle,
+        )
+        PlayerOption(
+            icon = Icons.Default.VerticalAlignTop,
+            label = stringResource(R.string.first_video),
+            active = false,
+            enabled = canMoveToFirst,
+            onClick = onMoveToFirst,
+            contentDescription = stringResource(R.string.move_first_item),
+        )
+        PlayerOption(
+            icon = Icons.Default.VerticalAlignBottom,
+            label = stringResource(R.string.last_video),
+            active = false,
+            enabled = canMoveToLast,
+            onClick = onMoveToLast,
+            contentDescription = stringResource(R.string.move_last_item),
+        )
+    }
+}
+
+@Composable
+private fun PlayerOption(
     icon: ImageVector,
     label: String,
     active: Boolean,
     onClick: () -> Unit,
+    enabled: Boolean = true,
     contentDescription: String? = null,
 ) {
-    TextButton(
-        onClick = onClick,
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-        modifier = Modifier.background(
-            if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.12f),
-            RoundedCornerShape(50),
-        ),
+    val tint = when {
+        !enabled -> Color.White.copy(alpha = 0.35f)
+        active -> MaterialTheme.colorScheme.primary
+        else -> Color.White
+    }
+    Column(
+        modifier = Modifier
+            .width(PLAYER_OPTION_WIDTH)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 8.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Icon(
             icon,
             contentDescription = contentDescription ?: label,
-            tint = if (active) MaterialTheme.colorScheme.primary else Color.White,
-            modifier = Modifier.size(18.dp),
+            tint = tint,
+            modifier = Modifier.size(24.dp),
         )
         Text(
             label,
-            color = if (active) MaterialTheme.colorScheme.primary else Color.White,
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(start = 4.dp),
+            color = tint,
+            style = MaterialTheme.typography.labelSmall,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
+
+private fun transportTint(enabled: Boolean): Color =
+    if (enabled) Color.White else Color.White.copy(alpha = 0.35f)
 
 private fun Int.next(): Int = when (this) {
     AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_FILL
@@ -1116,6 +1252,7 @@ private enum class VideoDirectoryType { Video, Image }
 private val VIDEO_EXTENSIONS = setOf("mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v")
 private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif")
 private val PLAYBACK_SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
+private val PLAYER_OPTION_WIDTH = 76.dp
 private const val SHORT_SEEK_MILLIS = 2_000L
 private const val DOUBLE_TAP_SEEK_MILLIS = 10_000L
 private const val MAX_SWIPE_SEEK_MILLIS = 300_000L
