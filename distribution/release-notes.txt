@@ -1,0 +1,4 @@
+SCRTVWR 0.0.8
+
+- Firebase Crashlytics reporting is now enabled for release builds.
+- Push notifications (Firebase Cloud Messaging) are supported.

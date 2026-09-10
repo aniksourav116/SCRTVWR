@@ -186,4 +186,7 @@
     <string name="sort_smallest">Smallest first</string>
     <string name="sort_order">Sort order</string>
     <string name="version">Version</string>
+    <string name="notification_channel_general_id" translatable="false">scrtvwr_general</string>
+    <string name="notification_channel_general_name">General</string>
+    <string name="notification_channel_general_description">Announcements and updates about SCRTVWR.</string>
 </resources>

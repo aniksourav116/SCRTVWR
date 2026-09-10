@@ -25,9 +25,12 @@ render.experimental.xml
 # Keystore files
 *.jks
 *.keystore
+keystore.properties
 
 # Google Services (e.g. APIs or Firebase)
-# google-services.json
+# google-services.json is checked in on purpose; the service account key is not.
+firebase-service-account.json
+distribution/*.json
 
 # Android Profiling
 *.hprof

@@ -29,6 +29,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import srv.scrtvwr.ui.components.BaseScaffold
+import srv.scrtvwr.ui.components.NotificationPermissionRequest
 import srv.scrtvwr.ui.dashboard.screens.Directory
 import srv.scrtvwr.ui.dashboard.screens.History
 import srv.scrtvwr.ui.dashboard.screens.Others
@@ -41,6 +42,7 @@ class DashboardActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             SCRTVWRTheme {
+                NotificationPermissionRequest()
                 ScrtvwrApp()
             }
         }
