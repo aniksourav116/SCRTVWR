@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "715397747565",
+    "project_id": "srvgallery-41cc2",
+    "storage_bucket": "srvgallery-41cc2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:715397747565:android:860aca1cb7adf184014064",
+        "android_client_info": {
+          "package_name": "srv.scrtvwr"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA4thoOaOoZ1_wpI2O0uVPa7zHQ3asmoZw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
