@@ -182,10 +182,12 @@ private fun RenameCharacterDialog(
     )
 }
 
-/** Inline progress for the whole-storage pass, with a way to stop it. */
+/** Inline progress for the whole-storage pass, with a way to pause it or stop it outright. */
 @Composable
 fun TaggingProgressPanel(
     progress: TagScanProgress,
+    paused: Boolean,
+    onPausedChange: (Boolean) -> Unit,
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -206,23 +208,30 @@ fun TaggingProgressPanel(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = stringResource(R.string.tagging_images),
+                        text = stringResource(
+                            if (paused) R.string.tagging_status_paused else R.string.tagging_images,
+                        ),
                         style = MaterialTheme.typography.titleSmall,
                     )
                     Text(
-                        text = if (progress.total > 0) {
-                            stringResource(R.string.tagging_progress, progress.processed, progress.total)
-                        } else {
-                            stringResource(R.string.tagging_counting_images)
+                        text = when {
+                            paused -> stringResource(R.string.tagging_paused_hint)
+                            progress.total > 0 ->
+                                stringResource(R.string.tagging_progress, progress.processed, progress.total)
+                            else -> stringResource(R.string.tagging_counting_images)
                         },
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                TextButton(onClick = { onPausedChange(!paused) }) {
+                    Text(stringResource(if (paused) R.string.resume_tagging else R.string.pause_tagging))
+                }
                 TextButton(onClick = onStop) { Text(stringResource(R.string.stop_tagging)) }
             }
-            if (progress.total > 0) {
+            // A paused scan keeps its place, so the bar stays put rather than spinning.
+            if (progress.total > 0 || paused) {
                 LinearProgressIndicator(
                     progress = { progress.fraction },
                     modifier = Modifier.fillMaxWidth(),

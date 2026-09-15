@@ -82,6 +82,42 @@ fun BoxScope.CharacterTagBadge(
     }
 }
 
+/** A thumbnail for one tagged image, used in a character's photo grid. */
+@Composable
+fun TaggedImageThumbnail(
+    path: String,
+    modifiedMillis: Long,
+    modifier: Modifier = Modifier,
+    dimension: Int = THUMBNAIL_DIMENSION,
+) {
+    val preview by produceState<PreviewResult?>(initialValue = null, key1 = path, key2 = modifiedMillis) {
+        value = MediaPreviewLoader.loadImage(path, modifiedMillis, dimension)
+    }
+
+    Box(
+        modifier = modifier
+            .clip(MaterialTheme.shapes.small)
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center,
+    ) {
+        val bitmap = preview?.bitmap
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Default.Face,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
 /** The first image a character was found in, used as its avatar in the characters list. */
 @Composable
 fun CharacterCover(
@@ -124,3 +160,4 @@ fun CharacterCover(
 }
 
 private const val COVER_DIMENSION = 128
+private const val THUMBNAIL_DIMENSION = 192

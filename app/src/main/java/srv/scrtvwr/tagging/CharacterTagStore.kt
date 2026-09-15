@@ -64,6 +64,7 @@ class CharacterTagStore(private val directory: File) {
                 id = id,
                 ordinal = json.optInt(KEY_ORDINAL, index + 1),
                 label = json.optString(KEY_LABEL).takeIf(String::isNotEmpty),
+                note = json.optString(KEY_NOTE).takeIf(String::isNotEmpty),
                 centroid = centroid,
                 sampleCount = json.optInt(KEY_SAMPLES, 1),
                 coverPath = json.optString(KEY_COVER).takeIf(String::isNotEmpty),
@@ -111,6 +112,7 @@ class CharacterTagStore(private val directory: File) {
                 .put(KEY_COVER_MODIFIED, character.coverModifiedMillis)
                 .put(KEY_CENTROID, JSONArray().apply { character.centroid.forEach { put(it.toDouble()) } })
             character.label?.let { json.put(KEY_LABEL, it) }
+            character.note?.let { json.put(KEY_NOTE, it) }
             character.coverPath?.let { json.put(KEY_COVER, it) }
             array.put(json)
         }
@@ -144,6 +146,7 @@ class CharacterTagStore(private val directory: File) {
         const val KEY_ID = "id"
         const val KEY_ORDINAL = "ordinal"
         const val KEY_LABEL = "label"
+        const val KEY_NOTE = "note"
         const val KEY_SAMPLES = "samples"
         const val KEY_COVER = "cover"
         const val KEY_COVER_MODIFIED = "coverModified"

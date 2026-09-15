@@ -18,7 +18,7 @@ class CharacterRegistryTest {
         assertEquals(1, profiles.size)
         assertEquals(2, profiles.single().imageCount)
         assertEquals(2, profiles.single().sampleCount)
-        assertEquals(listOf("/a.jpg", "/b.jpg"), registry.pathsFor(profiles.single().id))
+        assertEquals(listOf("/a.jpg", "/b.jpg"), registry.imagesFor(profiles.single().id).map(ImageTags::path))
     }
 
     @Test
@@ -63,7 +63,7 @@ class CharacterRegistryTest {
 
         assertEquals(1, registry.taggedImageCount())
         assertEquals(0, registry.profiles().single().imageCount)
-        assertTrue(registry.pathsFor(characterId).isEmpty())
+        assertTrue(registry.imagesFor(characterId).isEmpty())
     }
 
     @Test
@@ -87,6 +87,39 @@ class CharacterRegistryTest {
         assertTrue(registry.rename(characterId, "   "))
         assertNull(registry.profiles().single().label)
         assertFalse(registry.rename("missing", "Nobody"))
+    }
+
+    @Test
+    fun `a note and a chosen cover survive a snapshot`() {
+        registry.record("/a.jpg", 1L, faceCount = 1, signatures = listOf(signature(0f)), taggedAtMillis = 10L)
+        registry.record("/b.jpg", 2L, faceCount = 1, signatures = listOf(signature(0.01f)), taggedAtMillis = 20L)
+        val characterId = registry.profiles().single().id
+
+        assertTrue(registry.setNote(characterId, "  Wears the red scarf  "))
+        assertTrue(registry.setCover(characterId, "/b.jpg", 2L))
+
+        val restored = CharacterRegistry()
+        restored.restore(registry.snapshot())
+        val profile = restored.profiles().single()
+
+        assertEquals("Wears the red scarf", profile.note)
+        assertEquals("/b.jpg", profile.coverPath)
+        assertEquals(2L, profile.coverModifiedMillis)
+
+        assertTrue(registry.setNote(characterId, "  "))
+        assertNull(registry.profiles().single().note)
+        assertFalse(registry.setNote("missing", "Nobody"))
+        assertFalse(registry.setCover("missing", "/a.jpg", 1L))
+    }
+
+    @Test
+    fun `the first image a character appears in becomes its cover`() {
+        registry.record("/a.jpg", 7L, faceCount = 1, signatures = listOf(signature(0f)), taggedAtMillis = 10L)
+        registry.record("/b.jpg", 8L, faceCount = 1, signatures = listOf(signature(0.01f)), taggedAtMillis = 20L)
+
+        val profile = registry.profiles().single()
+        assertEquals("/a.jpg", profile.coverPath)
+        assertEquals(7L, profile.coverModifiedMillis)
     }
 
     @Test

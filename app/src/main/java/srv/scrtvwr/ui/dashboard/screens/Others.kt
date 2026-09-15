@@ -16,6 +16,8 @@ import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.ImageSearch
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -68,6 +70,7 @@ fun Others(
         onVideoPreloadDistanceChange = viewModel::setVideoPreloadDistance,
         onMediaEdgeDialogStyleChange = viewModel::setMediaEdgeDialogStyle,
         onFaceTaggingEnabledChange = viewModel::setFaceTaggingEnabled,
+        onTaggingPausedChange = viewModel::setTaggingPaused,
         onStartStorageScan = viewModel::startStorageScan,
         onStopStorageScan = viewModel::stopStorageScan,
         onClearCharacterTags = viewModel::clearCharacterTags,
@@ -87,6 +90,7 @@ fun OthersScreen(
     onVideoPreloadDistanceChange: (Int) -> Unit,
     onMediaEdgeDialogStyleChange: (MediaEdgeDialogStyle) -> Unit,
     onFaceTaggingEnabledChange: (Boolean) -> Unit = {},
+    onTaggingPausedChange: (Boolean) -> Unit = {},
     onStartStorageScan: () -> Unit = {},
     onStopStorageScan: () -> Unit = {},
     onClearCharacterTags: () -> Unit = {},
@@ -282,6 +286,43 @@ fun OthersScreen(
                     )
                 },
             )
+        }
+        if (uiState.faceTaggingEnabled) {
+            item {
+                ListItem(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onTaggingPausedChange(!uiState.taggingPaused) },
+                    headlineContent = {
+                        Text(
+                            stringResource(
+                                if (uiState.taggingPaused) R.string.resume_tagging else R.string.pause_tagging,
+                            ),
+                        )
+                    },
+                    supportingContent = {
+                        Text(
+                            stringResource(
+                                if (uiState.taggingPaused) {
+                                    R.string.tagging_paused_hint
+                                } else {
+                                    R.string.tagging_status_running
+                                },
+                            ),
+                        )
+                    },
+                    leadingContent = {
+                        Icon(
+                            imageVector = if (uiState.taggingPaused) {
+                                Icons.Default.PlayArrow
+                            } else {
+                                Icons.Default.Pause
+                            },
+                            contentDescription = null,
+                        )
+                    },
+                )
+            }
         }
         item {
             val isScanning = uiState.tagScanProgress.isRunning

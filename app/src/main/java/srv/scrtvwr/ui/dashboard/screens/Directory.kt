@@ -233,6 +233,7 @@ fun Directory(
         onRemoveCharacter = viewModel::removeCharacter,
         onStorageScanConsent = viewModel::onStorageScanConsent,
         onStopStorageScan = viewModel::stopStorageScan,
+        onTaggingPausedChange = viewModel::setTaggingPaused,
         modifier = modifier,
     )
 }
@@ -264,6 +265,7 @@ fun DirectoryScreen(
     onRemoveCharacter: (String) -> Unit = {},
     onStorageScanConsent: (Boolean) -> Unit = {},
     onStopStorageScan: () -> Unit = {},
+    onTaggingPausedChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var moreMenuExpanded by remember { mutableStateOf(false) }
@@ -392,7 +394,12 @@ fun DirectoryScreen(
         }
 
         if (uiState.tagScanProgress.isRunning) {
-            TaggingProgressPanel(progress = uiState.tagScanProgress, onStop = onStopStorageScan)
+            TaggingProgressPanel(
+                progress = uiState.tagScanProgress,
+                paused = uiState.taggingPaused,
+                onPausedChange = onTaggingPausedChange,
+                onStop = onStopStorageScan,
+            )
         }
 
         if (uiState.showDirectoryFileActions) {

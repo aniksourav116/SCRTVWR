@@ -7,6 +7,8 @@ data class CharacterProfile(
     val ordinal: Int,
     /** User-assigned name, or null while the character still uses its default label. */
     val label: String?,
+    /** Free-text detail the user attached to this character. */
+    val note: String? = null,
     val sampleCount: Int,
     val imageCount: Int,
     val coverPath: String? = null,
@@ -30,6 +32,7 @@ data class StoredCharacter(
     val id: String,
     val ordinal: Int,
     val label: String?,
+    val note: String?,
     val centroid: FloatArray,
     val sampleCount: Int,
     val coverPath: String?,
@@ -37,13 +40,15 @@ data class StoredCharacter(
 ) {
     override fun equals(other: Any?): Boolean =
         this === other || (other is StoredCharacter && id == other.id && ordinal == other.ordinal &&
-            label == other.label && centroid.contentEquals(other.centroid) && sampleCount == other.sampleCount &&
-            coverPath == other.coverPath && coverModifiedMillis == other.coverModifiedMillis)
+            label == other.label && note == other.note && centroid.contentEquals(other.centroid) &&
+            sampleCount == other.sampleCount && coverPath == other.coverPath &&
+            coverModifiedMillis == other.coverModifiedMillis)
 
     override fun hashCode(): Int {
         var result = id.hashCode()
         result = 31 * result + ordinal
         result = 31 * result + (label?.hashCode() ?: 0)
+        result = 31 * result + (note?.hashCode() ?: 0)
         result = 31 * result + centroid.contentHashCode()
         result = 31 * result + sampleCount
         result = 31 * result + (coverPath?.hashCode() ?: 0)
@@ -57,6 +62,13 @@ data class CharacterTagSnapshot(
     val characters: List<StoredCharacter> = emptyList(),
     val images: List<ImageTags> = emptyList(),
 )
+
+/** Tagging can be switched off entirely, or paused and picked up again where it stopped. */
+enum class TaggingState {
+    Off,
+    Paused,
+    Running,
+}
 
 data class TagScanProgress(
     val isRunning: Boolean = false,

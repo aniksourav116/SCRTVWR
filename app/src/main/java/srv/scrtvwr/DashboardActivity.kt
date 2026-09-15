@@ -33,6 +33,7 @@ import srv.scrtvwr.ui.components.NotificationPermissionRequest
 import srv.scrtvwr.ui.dashboard.screens.Directory
 import srv.scrtvwr.ui.dashboard.screens.History
 import srv.scrtvwr.ui.dashboard.screens.Others
+import srv.scrtvwr.ui.dashboard.screens.People
 import srv.scrtvwr.ui.dashboard.screens.Storage
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 
@@ -136,6 +137,10 @@ fun ScrtvwrApp(viewModel: DashboardViewModel = viewModel()) {
                     backHandlerEnabled = visibleDestination == AppDestination.DIRECTORY,
                     isVisible = visibleDestination == AppDestination.DIRECTORY,
                 )
+                AppDestination.PEOPLE -> People(
+                    modifier = Modifier.fillMaxSize(),
+                    isVisible = visibleDestination == AppDestination.PEOPLE,
+                )
                 AppDestination.HISTORY -> BaseScaffold(
                     title = stringResource(AppDestination.HISTORY.topBarLabel()),
                     showBackButton = false,
@@ -156,6 +161,7 @@ fun ScrtvwrApp(viewModel: DashboardViewModel = viewModel()) {
 private fun AppDestination.topBarLabel(): Int = when (this) {
     AppDestination.STORAGE -> R.string.storage_devices
     AppDestination.DIRECTORY -> R.string.directory
+    AppDestination.PEOPLE -> R.string.people
     AppDestination.HISTORY -> R.string.viewing_history
     AppDestination.OTHERS -> R.string.other_options
 }

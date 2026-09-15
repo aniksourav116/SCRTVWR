@@ -44,6 +44,11 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
         viewModelScope.launch {
+            CharacterTagRepository.paused.collect { paused ->
+                _uiState.update { it.copy(taggingPaused = paused) }
+            }
+        }
+        viewModelScope.launch {
             CharacterTagRepository.scanProgress.collect { progress ->
                 _uiState.update {
                     it.copy(
@@ -68,6 +73,10 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
 
     fun stopStorageScan() {
         CharacterTagRepository.cancelStorageScan()
+    }
+
+    fun setTaggingPaused(paused: Boolean) {
+        CharacterTagRepository.setPaused(paused)
     }
 
     fun clearCharacterTags() {
@@ -128,6 +137,7 @@ data class OthersUiState(
     val videoPreloadDistance: Int = 0,
     val mediaEdgeDialogStyle: MediaEdgeDialogStyle = MediaEdgeDialogStyle.Bottom,
     val faceTaggingEnabled: Boolean = true,
+    val taggingPaused: Boolean = false,
     val taggedImageCount: Int = 0,
     val characterCount: Int = 0,
     val lastStorageScanMillis: Long = 0L,

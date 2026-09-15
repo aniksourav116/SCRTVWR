@@ -302,6 +302,11 @@ class DirectoryViewModel(
             }
         }
         viewModelScope.launch {
+            CharacterTagRepository.paused.collect { paused ->
+                _uiState.update { it.copy(taggingPaused = paused) }
+            }
+        }
+        viewModelScope.launch {
             CharacterTagRepository.revision.collect {
                 unfilteredListing?.let { listing -> applyCharacterTags(listing) }
             }
@@ -373,6 +378,10 @@ class DirectoryViewModel(
         CharacterTagRepository.cancelStorageScan()
     }
 
+    fun setTaggingPaused(paused: Boolean) {
+        CharacterTagRepository.setPaused(paused)
+    }
+
     override fun onCleared() {
         tagJob?.cancel()
         super.onCleared()
@@ -403,6 +412,7 @@ data class DirectoryUiState(
     val imageTags: Map<String, ImageTags> = emptyMap(),
     val characterFilter: String? = null,
     val tagScanProgress: TagScanProgress = TagScanProgress(),
+    val taggingPaused: Boolean = false,
     val showStorageScanPrompt: Boolean = false,
     val isLoading: Boolean = false,
     val isFileOperationRunning: Boolean = false,

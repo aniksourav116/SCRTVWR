@@ -15,6 +15,7 @@ class CharacterRegistry(
         val id: String,
         val ordinal: Int,
         var label: String?,
+        var note: String?,
         var centroid: FloatArray,
         var sampleCount: Int,
         var coverPath: String?,
@@ -81,6 +82,20 @@ class CharacterRegistry(
         return true
     }
 
+    fun setNote(characterId: String, note: String?): Boolean {
+        val cluster = clusters[characterId] ?: return false
+        cluster.note = note?.trim()?.takeIf(String::isNotEmpty)
+        return true
+    }
+
+    /** Picks which of the character's images represents them. */
+    fun setCover(characterId: String, path: String, modifiedMillis: Long): Boolean {
+        val cluster = clusters[characterId] ?: return false
+        cluster.coverPath = path
+        cluster.coverModifiedMillis = modifiedMillis
+        return true
+    }
+
     /** Drops a character and the references to it, for example when the user deletes a bad cluster. */
     fun remove(characterId: String): Boolean {
         if (clusters.remove(characterId) == null) return false
@@ -115,6 +130,7 @@ class CharacterRegistry(
                 id = cluster.id,
                 ordinal = cluster.ordinal,
                 label = cluster.label,
+                note = cluster.note,
                 sampleCount = cluster.sampleCount,
                 imageCount = imageCounts[cluster.id] ?: 0,
                 coverPath = cluster.coverPath,
@@ -125,8 +141,9 @@ class CharacterRegistry(
 
     fun taggedImageCount(): Int = images.size
 
-    fun pathsFor(characterId: String): List<String> =
-        images.values.filter { characterId in it.characterIds }.map(ImageTags::path)
+    /** Every image the character appears in, newest tag first. */
+    fun imagesFor(characterId: String): List<ImageTags> =
+        images.values.filter { characterId in it.characterIds }
 
     fun snapshot(): CharacterTagSnapshot = CharacterTagSnapshot(
         characters = clusters.values.map { cluster ->
@@ -134,6 +151,7 @@ class CharacterRegistry(
                 id = cluster.id,
                 ordinal = cluster.ordinal,
                 label = cluster.label,
+                note = cluster.note,
                 centroid = cluster.centroid.copyOf(),
                 sampleCount = cluster.sampleCount,
                 coverPath = cluster.coverPath,
@@ -150,6 +168,7 @@ class CharacterRegistry(
                 id = stored.id,
                 ordinal = stored.ordinal,
                 label = stored.label,
+                note = stored.note,
                 centroid = stored.centroid.copyOf(),
                 sampleCount = stored.sampleCount,
                 coverPath = stored.coverPath,
@@ -183,6 +202,7 @@ class CharacterRegistry(
             id = "c$ordinal",
             ordinal = ordinal,
             label = null,
+            note = null,
             centroid = signature.copyOf(),
             sampleCount = 0,
             coverPath = null,

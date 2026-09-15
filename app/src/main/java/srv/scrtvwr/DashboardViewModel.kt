@@ -2,6 +2,7 @@ package srv.scrtvwr
 
 import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -62,6 +63,7 @@ enum class AppDestination(
 ) {
     STORAGE(R.string.storage, Icons.Default.Storage),
     DIRECTORY(R.string.directory, Icons.Default.Folder),
+    PEOPLE(R.string.people, Icons.Default.Face),
     HISTORY(R.string.history, Icons.Default.History),
     OTHERS(R.string.others, Icons.Default.MoreHoriz),
 }

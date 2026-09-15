@@ -226,4 +226,23 @@
     <string name="clear_character_tags_final_message">This cannot be undone. Any name you gave a character is lost, and tagging has to go through your images again from scratch.</string>
     <string name="continue_action">Continue</string>
     <string name="delete_everything">Delete everything</string>
+    <!-- People tab -->
+    <string name="people">People</string>
+    <string name="people_empty">No one here yet. Tagging adds people as it finds faces in your images.</string>
+    <string name="people_summary">%1$d people · %2$d images tagged</string>
+    <string name="tagging_status_off">Tagging is off</string>
+    <string name="tagging_status_paused">Tagging paused</string>
+    <string name="tagging_status_running">Tagging is on</string>
+    <string name="tagging_paused_hint">Paused. Resuming picks up where it stopped.</string>
+    <string name="pause_tagging">Pause tagging</string>
+    <string name="resume_tagging">Resume tagging</string>
+    <string name="character_note">Note</string>
+    <string name="character_stats">Seen in %1$d images · %2$d faces matched</string>
+    <string name="change_cover">Change cover</string>
+    <string name="pick_cover_hint">Tap a photo to use it as the cover.</string>
+    <string name="cover_label">Cover</string>
+    <string name="photos_count">Photos (%1$d)</string>
+    <string name="remove_person_title">Remove this person?</string>
+    <string name="remove_person_message">Their tags are removed from %1$d images. The images themselves are untouched, and tagging can find them again later.</string>
+    <string name="remove">Remove</string>
 </resources>

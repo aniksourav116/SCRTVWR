@@ -100,6 +100,13 @@ class ScrtvwrPreferences(context: Context) {
         preferences.edit().putBoolean(KEY_FACE_TAGGING_ENABLED, enabled).apply()
     }
 
+    fun getTaggingPaused(): Boolean =
+        preferences.getBoolean(KEY_TAGGING_PAUSED, false)
+
+    fun saveTaggingPaused(paused: Boolean) {
+        preferences.edit().putBoolean(KEY_TAGGING_PAUSED, paused).apply()
+    }
+
     fun getStorageScanConsent(): StorageScanConsent =
         preferences.getString(KEY_STORAGE_SCAN_CONSENT, null)
             ?.let { value -> StorageScanConsent.entries.firstOrNull { it.name == value } }
@@ -237,6 +244,7 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
         const val KEY_SHOW_DIRECTORY_FILE_ACTIONS = "show_directory_file_actions"
         const val KEY_FACE_TAGGING_ENABLED = "face_tagging_enabled"
+        const val KEY_TAGGING_PAUSED = "tagging_paused"
         const val KEY_STORAGE_SCAN_CONSENT = "storage_scan_consent"
         const val KEY_LAST_STORAGE_SCAN_MILLIS = "last_storage_scan_millis"
         const val KEY_BOOKMARKED_MEDIA = "bookmarked_media"

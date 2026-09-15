@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -75,10 +76,20 @@ object CharacterTagRepository {
     private val _taggedImageCount = MutableStateFlow(0)
     val taggedImageCount: StateFlow<Int> = _taggedImageCount.asStateFlow()
 
+    private val _enabled = MutableStateFlow(false)
+    val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
+
+    /** Paused work parks where it is instead of being thrown away, so resuming picks up mid-scan. */
+    private val _paused = MutableStateFlow(false)
+    val paused: StateFlow<Boolean> = _paused.asStateFlow()
+
     fun initialize(context: Context) {
         if (store != null) return
         val applicationContext = context.applicationContext
-        preferences = ScrtvwrPreferences(applicationContext)
+        val scrtvwrPreferences = ScrtvwrPreferences(applicationContext)
+        preferences = scrtvwrPreferences
+        _enabled.value = scrtvwrPreferences.getFaceTaggingEnabled()
+        _paused.value = scrtvwrPreferences.getTaggingPaused()
         store = CharacterTagStore(File(applicationContext.filesDir, TAG_DIRECTORY_NAME))
         scope.launch {
             val snapshot = withContext(Dispatchers.IO) { store?.read() ?: CharacterTagSnapshot() }
@@ -94,11 +105,26 @@ object CharacterTagRepository {
         }
     }
 
-    fun isEnabled(): Boolean = preferences?.getFaceTaggingEnabled() ?: false
+    fun isEnabled(): Boolean = _enabled.value
 
     fun setEnabled(enabled: Boolean) {
         preferences?.saveFaceTaggingEnabled(enabled)
+        _enabled.value = enabled
         if (!enabled) cancelStorageScan()
+    }
+
+    fun isPaused(): Boolean = _paused.value
+
+    /** Parks every tagging job. The storage scan keeps its place and its progress on screen. */
+    fun setPaused(paused: Boolean) {
+        preferences?.saveTaggingPaused(paused)
+        _paused.value = paused
+    }
+
+    fun taggingState(): TaggingState = when {
+        !_enabled.value -> TaggingState.Off
+        _paused.value -> TaggingState.Paused
+        else -> TaggingState.Running
     }
 
     fun storageScanConsent(): StorageScanConsent =
@@ -116,10 +142,11 @@ object CharacterTagRepository {
         return mutex.withLock { registry.tagsFor(paths) }
     }
 
-    suspend fun pathsFor(characterId: String): List<String> {
+    /** Every image a character appears in, for their page in the People tab. */
+    suspend fun imagesFor(characterId: String): List<ImageTags> {
         if (store == null) return emptyList()
         ready.await()
-        return mutex.withLock { registry.pathsFor(characterId) }
+        return mutex.withLock { registry.imagesFor(characterId) }
     }
 
     /**
@@ -129,6 +156,8 @@ object CharacterTagRepository {
     suspend fun tag(path: String, modifiedMillis: Long): ImageTags? {
         if (store == null || !isEnabled()) return null
         ready.await()
+        // Parking here rather than returning keeps a paused scan exactly where it stopped.
+        if (_paused.value) _paused.first { !it }
         mutex.withLock { registry.tagsFor(path) }
             ?.takeIf { it.modifiedMillis == modifiedMillis }
             ?.let { return it }
@@ -174,6 +203,18 @@ object CharacterTagRepository {
 
     suspend fun rename(characterId: String, label: String?) {
         mutex.withLock { registry.rename(characterId, label) }
+        publish(force = true)
+        saveRequests.tryEmit(Unit)
+    }
+
+    suspend fun setNote(characterId: String, note: String?) {
+        mutex.withLock { registry.setNote(characterId, note) }
+        publish(force = true)
+        saveRequests.tryEmit(Unit)
+    }
+
+    suspend fun setCover(characterId: String, path: String, modifiedMillis: Long) {
+        mutex.withLock { registry.setCover(characterId, path, modifiedMillis) }
         publish(force = true)
         saveRequests.tryEmit(Unit)
     }
