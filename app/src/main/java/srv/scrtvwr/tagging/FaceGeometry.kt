@@ -32,18 +32,12 @@ data class FaceLandmarks(
  * of the face remain.
  *
  * This is geometry, not face recognition: it groups faces with similar proportions and will confuse
- * genuinely similar-looking people. [FaceEmbedder] is the seam where a real embedding model
- * (FaceNet/MobileFaceNet via TFLite) can replace it without touching the rest of the pipeline.
+ * genuinely similar-looking people. It is only the fallback for when no recognition model is
+ * installed - see [FaceEmbeddingModel] - and how far apart two signatures may be is decided by
+ * [MatchingRules.forGeometry].
  */
 object FaceGeometry {
     const val SIGNATURE_SIZE = 8
-
-    /**
-     * Largest distance between two signatures still considered the same character. Tuned to stay on the
-     * cautious side: a miss leaves a second character the user can merge by renaming, a false merge
-     * silently mislabels images.
-     */
-    const val MATCH_THRESHOLD = 0.18f
 
     /** Faces turned further than this are too foreshortened for the proportions to hold up. */
     const val MAX_HEAD_ANGLE_DEGREES = 22f
@@ -89,14 +83,5 @@ object FaceGeometry {
             sum += difference * difference
         }
         return sqrt(sum)
-    }
-
-    /** Running mean of every signature assigned to a character, so a profile keeps improving as it sees more faces. */
-    fun mergeIntoCentroid(centroid: FloatArray, sampleCount: Int, signature: FloatArray): FloatArray {
-        if (centroid.size != signature.size || sampleCount <= 0) return signature.copyOf()
-        val weight = 1f / (sampleCount + 1)
-        return FloatArray(centroid.size) { index ->
-            centroid[index] + (signature[index] - centroid[index]) * weight
-        }
     }
 }

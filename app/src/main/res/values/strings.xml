@@ -245,4 +245,14 @@
     <string name="remove_person_title">Remove this person?</string>
     <string name="remove_person_message">Their tags are removed from %1$d images. The images themselves are untouched, and tagging can find them again later.</string>
     <string name="remove">Remove</string>
+    <string name="tagging_idle">Nothing to do right now</string>
+    <string name="regroup_people">Regroup</string>
+    <string name="regrouping">Regrouping everyone…</string>
+    <string name="recognition_model_missing">No face recognition model installed, so people are grouped by face proportions alone and the groups will be rough. Add mobilefacenet.tflite to the app assets.</string>
+    <string name="remove_photos">Remove photos</string>
+    <string name="remove_photo_hint">Tap a photo to take it off this person.</string>
+    <string name="merge_person">Merge</string>
+    <string name="merge_person_title">Merge into %1$s</string>
+    <string name="merge_person_message">Pick the character who is the same person. Their photos, name and note move here.</string>
+    <string name="merge_person_empty">There is nobody else to merge with yet.</string>
 </resources>

@@ -1,6 +1,7 @@
 package srv.scrtvwr.tagging
 
 import android.graphics.Bitmap
+import android.graphics.Rect
 import com.google.android.gms.tasks.Task
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.Face
@@ -12,50 +13,68 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+/**
+ * What one image yielded: how many faces were in it, and an identity vector for each face that was
+ * good enough to identify. A face can be counted but skipped for identity - too small, too turned,
+ * too blurred - which keeps poor detections from inventing or polluting characters.
+ */
 data class FaceDetectionResult(
     val faceCount: Int,
-    val signatures: List<FloatArray>,
+    val embeddings: List<FloatArray>,
 ) {
     companion object {
-        val Empty = FaceDetectionResult(faceCount = 0, signatures = emptyList())
+        val Empty = FaceDetectionResult(faceCount = 0, embeddings = emptyList())
     }
 }
 
 /**
- * Turns one detected face into a comparable signature, or null when the face is unusable.
- * Swapping in a TFLite embedding model later means implementing this and nothing else.
+ * Turns one detected face into a comparable vector, or null when the face is unusable.
+ * [descriptorId] identifies the vector space: stored vectors from a different one cannot be compared
+ * against new ones, so changing embedder invalidates the tags rather than silently mixing them.
  */
-fun interface FaceEmbedder {
+interface FaceEmbedder {
+    val descriptorId: String
     fun embed(bitmap: Bitmap, face: Face): FloatArray?
 }
 
-/** Default embedder: landmark proportions only, no extra model to ship. See [FaceGeometry]. */
+/**
+ * Landmark proportions, used only when no recognition model is installed. It can group obviously
+ * similar faces but confuses people who merely have similar proportions - see [FaceGeometry].
+ */
 class GeometricFaceEmbedder : FaceEmbedder {
+    override val descriptorId: String = "geometry-v1-${FaceGeometry.SIGNATURE_SIZE}"
+
     override fun embed(bitmap: Bitmap, face: Face): FloatArray? {
         if (!FaceGeometry.isPoseUsable(face.headEulerAngleY, face.headEulerAngleZ)) return null
-        val landmarks = FaceLandmarks(
-            leftEye = face.point(FaceLandmark.LEFT_EYE) ?: return null,
-            rightEye = face.point(FaceLandmark.RIGHT_EYE) ?: return null,
-            noseBase = face.point(FaceLandmark.NOSE_BASE) ?: return null,
-            mouthLeft = face.point(FaceLandmark.MOUTH_LEFT) ?: return null,
-            mouthRight = face.point(FaceLandmark.MOUTH_RIGHT) ?: return null,
-            mouthBottom = face.point(FaceLandmark.MOUTH_BOTTOM) ?: return null,
-        )
+        val landmarks = face.landmarks() ?: return null
         return FaceGeometry.signature(landmarks)
     }
-
-    private fun Face.point(type: Int): FacePoint? =
-        getLandmark(type)?.position?.let { FacePoint(it.x, it.y) }
 }
 
-/** Thin wrapper around ML Kit face detection: bitmap in, face count and character signatures out. */
-class FaceTagger(private val embedder: FaceEmbedder = GeometricFaceEmbedder()) {
+/** The real thing: an aligned crop through a face recognition model. See [FaceEmbeddingModel]. */
+class ModelFaceEmbedder(private val model: FaceEmbeddingModel) : FaceEmbedder {
+    override val descriptorId: String = "mobilefacenet-${model.inputSize}-${model.embeddingSize}"
+
+    override fun embed(bitmap: Bitmap, face: Face): FloatArray? {
+        val leftEye = face.point(FaceLandmark.LEFT_EYE) ?: return null
+        val rightEye = face.point(FaceLandmark.RIGHT_EYE) ?: return null
+        val aligned = FaceAligner.align(bitmap, leftEye, rightEye, model.inputSize) ?: return null
+        return try {
+            if (FaceQuality.isTooBlurred(aligned)) null else model.embed(aligned)
+        } finally {
+            aligned.recycle()
+        }
+    }
+}
+
+/** Thin wrapper around ML Kit face detection: bitmap in, face count and identity vectors out. */
+class FaceTagger(val embedder: FaceEmbedder = GeometricFaceEmbedder()) {
     private val detector: FaceDetector by lazy {
         FaceDetection.getClient(
             FaceDetectorOptions.Builder()
-                // FAST still reports landmarks and is what makes a whole-device pass finish in
-                // reasonable time; ACCURATE mainly helps with small or heavily rotated faces.
-                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                // Identity depends on landmark positions being right, so this pays for itself even
+                // though it is slower than FAST - a misplaced eye skews the whole aligned crop.
+                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
                 .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
                 .setContourMode(FaceDetectorOptions.CONTOUR_MODE_NONE)
                 .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
@@ -70,13 +89,27 @@ class FaceTagger(private val embedder: FaceEmbedder = GeometricFaceEmbedder()) {
         if (faces.isEmpty()) return FaceDetectionResult.Empty
         return FaceDetectionResult(
             faceCount = faces.size,
-            signatures = faces.mapNotNull { face -> embedder.embed(bitmap, face) },
+            embeddings = faces
+                .filter { face -> face.isBigEnoughToIdentify() && face.isFacingCameraEnough() }
+                .mapNotNull { face -> embedder.embed(bitmap, face) },
         )
     }
 
     fun close() {
         detector.close()
     }
+
+    /**
+     * A face has to occupy real pixels before its identity means anything. Below this the landmarks
+     * are guesses, the aligned crop is mostly interpolation, and the embedding lands anywhere - which
+     * is how unrelated people end up merged.
+     */
+    private fun Face.isBigEnoughToIdentify(): Boolean = boundingBox.shortestSide() >= MIN_IDENTITY_FACE_PIXELS
+
+    private fun Face.isFacingCameraEnough(): Boolean =
+        FaceGeometry.isPoseUsable(headEulerAngleY, headEulerAngleZ)
+
+    private fun Rect.shortestSide(): Int = minOf(width(), height())
 
     private suspend fun <T> Task<T>.await(): T = suspendCancellableCoroutine { continuation ->
         addOnCompleteListener { task ->
@@ -90,7 +123,26 @@ class FaceTagger(private val embedder: FaceEmbedder = GeometricFaceEmbedder()) {
     }
 
     private companion object {
-        /** Fraction of the image width a face must cover. Low enough for group shots and comic panels. */
-        const val MIN_FACE_SIZE = 0.08f
+        /** Low enough to still count faces in group shots and comic panels for the badge. */
+        const val MIN_FACE_SIZE = 0.06f
+
+        /**
+         * Measured on the analysis bitmap, which the repository decodes at 1024 pixels. Below this a
+         * face is mostly interpolation by the time it reaches the model, and its vector says more
+         * about the blur than about the person.
+         */
+        const val MIN_IDENTITY_FACE_PIXELS = 96
     }
 }
+
+private fun Face.landmarks(): FaceLandmarks? = FaceLandmarks(
+    leftEye = point(FaceLandmark.LEFT_EYE) ?: return null,
+    rightEye = point(FaceLandmark.RIGHT_EYE) ?: return null,
+    noseBase = point(FaceLandmark.NOSE_BASE) ?: return null,
+    mouthLeft = point(FaceLandmark.MOUTH_LEFT) ?: return null,
+    mouthRight = point(FaceLandmark.MOUTH_RIGHT) ?: return null,
+    mouthBottom = point(FaceLandmark.MOUTH_BOTTOM) ?: return null,
+)
+
+private fun Face.point(type: Int): FacePoint? =
+    getLandmark(type)?.position?.let { FacePoint(it.x, it.y) }

@@ -15,7 +15,7 @@ data class CharacterProfile(
     val coverModifiedMillis: Long = 0L,
 )
 
-/** Everything tagging knows about one image. [modifiedMillis] invalidates the entry when the file changes. */
+/** Everything tagging knows about one image. [modifiedMillis] invalidates the entry when it changes. */
 data class ImageTags(
     val path: String,
     val modifiedMillis: Long,
@@ -27,38 +27,69 @@ data class ImageTags(
         get() = faceCount > 0
 }
 
-/** One character stored on disk, including the centroid new faces are matched against. */
+/**
+ * One face and the vector that identifies it. These are kept on disk rather than in memory: they are
+ * what makes it possible to regroup everyone, retune the thresholds, or split a character apart
+ * without decoding a single image again.
+ */
+data class FaceVector(
+    val path: String,
+    val modifiedMillis: Long,
+    val index: Int,
+    val embedding: FloatArray,
+    val characterId: String?,
+) {
+    override fun equals(other: Any?): Boolean =
+        this === other || (other is FaceVector && path == other.path && modifiedMillis == other.modifiedMillis &&
+            index == other.index && characterId == other.characterId && embedding.contentEquals(other.embedding))
+
+    override fun hashCode(): Int {
+        var result = path.hashCode()
+        result = 31 * result + modifiedMillis.hashCode()
+        result = 31 * result + index
+        result = 31 * result + (characterId?.hashCode() ?: 0)
+        result = 31 * result + embedding.contentHashCode()
+        return result
+    }
+}
+
+/** One character on disk, including the exemplar vectors new faces are matched against. */
 data class StoredCharacter(
     val id: String,
     val ordinal: Int,
     val label: String?,
     val note: String?,
-    val centroid: FloatArray,
+    val exemplars: List<FloatArray>,
     val sampleCount: Int,
     val coverPath: String?,
     val coverModifiedMillis: Long,
 ) {
     override fun equals(other: Any?): Boolean =
         this === other || (other is StoredCharacter && id == other.id && ordinal == other.ordinal &&
-            label == other.label && note == other.note && centroid.contentEquals(other.centroid) &&
-            sampleCount == other.sampleCount && coverPath == other.coverPath &&
-            coverModifiedMillis == other.coverModifiedMillis)
+            label == other.label && note == other.note && sampleCount == other.sampleCount &&
+            coverPath == other.coverPath && coverModifiedMillis == other.coverModifiedMillis &&
+            exemplars.size == other.exemplars.size &&
+            exemplars.indices.all { index -> exemplars[index].contentEquals(other.exemplars[index]) })
 
     override fun hashCode(): Int {
         var result = id.hashCode()
         result = 31 * result + ordinal
         result = 31 * result + (label?.hashCode() ?: 0)
         result = 31 * result + (note?.hashCode() ?: 0)
-        result = 31 * result + centroid.contentHashCode()
         result = 31 * result + sampleCount
         result = 31 * result + (coverPath?.hashCode() ?: 0)
         result = 31 * result + coverModifiedMillis.hashCode()
+        exemplars.forEach { exemplar -> result = 31 * result + exemplar.contentHashCode() }
         return result
     }
 }
 
-/** The complete tagging state, as written to and read back from disk. */
+/**
+ * The tagging state as written to and read back from disk. [descriptorId] names the vector space the
+ * exemplars live in; state from a different embedder is discarded rather than compared against.
+ */
 data class CharacterTagSnapshot(
+    val descriptorId: String = "",
     val characters: List<StoredCharacter> = emptyList(),
     val images: List<ImageTags> = emptyList(),
 )

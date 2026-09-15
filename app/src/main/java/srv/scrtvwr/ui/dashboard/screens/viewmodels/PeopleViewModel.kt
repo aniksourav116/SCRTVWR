@@ -64,6 +64,30 @@ class PeopleViewModel(application: Application) : AndroidViewModel(application) 
                 _uiState.update { it.copy(taggingPaused = paused) }
             }
         }
+        viewModelScope.launch {
+            CharacterTagRepository.usingRecognitionModel.collect { usingModel ->
+                _uiState.update { it.copy(usingRecognitionModel = usingModel) }
+            }
+        }
+        viewModelScope.launch {
+            CharacterTagRepository.rebuilding.collect { rebuilding ->
+                _uiState.update { it.copy(rebuilding = rebuilding) }
+            }
+        }
+    }
+
+    /** Folds another character into this one, for when one person was split in two. */
+    fun merge(characterId: String, otherId: String) {
+        viewModelScope.launch { CharacterTagRepository.merge(characterId, otherId) }
+    }
+
+    /** "Not this person": drops one image from the character without touching the file. */
+    fun unassign(characterId: String, path: String) {
+        viewModelScope.launch { CharacterTagRepository.unassign(characterId, path) }
+    }
+
+    fun rebuildGroups() {
+        viewModelScope.launch { CharacterTagRepository.rebuildGroups() }
     }
 
     fun openCharacter(profile: CharacterProfile) {
@@ -146,6 +170,8 @@ data class PeopleUiState(
     val taggingPaused: Boolean = false,
     val scanProgress: TagScanProgress = TagScanProgress(),
     val lastStorageScanMillis: Long = 0L,
+    val usingRecognitionModel: Boolean = true,
+    val rebuilding: Boolean = false,
 ) {
     val taggingState: TaggingState
         get() = when {

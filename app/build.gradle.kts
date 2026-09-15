@@ -82,6 +82,10 @@ android {
         compose = true
         buildConfig = true
     }
+    androidResources {
+        // The face model is memory-mapped straight out of the APK, which only works uncompressed.
+        noCompress += "tflite"
+    }
 }
 
 // App Distribution defaults for every build type. The app id comes from google-services.json.
@@ -112,6 +116,7 @@ dependencies {
     implementation(libs.firebase.crashlytics)
     implementation(libs.firebase.messaging)
     implementation(libs.mlkit.face.detection)
+    implementation(libs.tensorflow.lite)
     implementation(libs.timber)
     implementation(libs.junrar)
     implementation(libs.androidx.media3.exoplayer)

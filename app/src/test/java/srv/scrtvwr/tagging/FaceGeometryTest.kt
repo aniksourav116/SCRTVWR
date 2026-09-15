@@ -25,7 +25,7 @@ class FaceGeometryTest {
     }
 
     @Test
-    fun `different face proportions are further apart than the match threshold`() {
+    fun `different face proportions fall short of the fallback join threshold`() {
         val face = FaceGeometry.signature(FACE)
         val longerFace = FaceGeometry.signature(
             FACE.copy(
@@ -38,7 +38,8 @@ class FaceGeometryTest {
 
         assertNotNull(face)
         assertNotNull(longerFace)
-        assertTrue(FaceGeometry.distance(face!!, longerFace!!) > FaceGeometry.MATCH_THRESHOLD)
+        val rules = MatchingRules.forGeometry("geometry-test")
+        assertTrue(rules.similarity(face!!, longerFace!!) < rules.joinSimilarity)
     }
 
     @Test
@@ -66,12 +67,12 @@ class FaceGeometryTest {
     }
 
     @Test
-    fun `centroid moves towards the new sample`() {
-        val centroid = floatArrayOf(0f, 0f)
-        val merged = FaceGeometry.mergeIntoCentroid(centroid, sampleCount = 1, signature = floatArrayOf(2f, 4f))
+    fun `the same face stays above the fallback join threshold`() {
+        val rules = MatchingRules.forGeometry("geometry-test")
+        val face = FaceGeometry.signature(FACE)
+        val moved = FaceGeometry.signature(FACE.transformed(scale = 2f, rotationDegrees = 12f, dx = 40f, dy = 15f))
 
-        assertEquals(1f, merged[0], 0.0001f)
-        assertEquals(2f, merged[1], 0.0001f)
+        assertTrue(rules.similarity(face!!, moved!!) >= rules.joinSimilarity)
     }
 
     private fun FaceLandmarks.transformed(scale: Float, rotationDegrees: Float, dx: Float, dy: Float): FaceLandmarks {

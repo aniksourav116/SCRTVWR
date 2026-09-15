@@ -34,17 +34,20 @@ import timber.log.Timber
 import java.io.File
 
 /**
- * Runs ML Kit face detection over images and keeps the resulting character tags.
+ * Runs face detection and recognition over images and keeps the resulting character tags.
  *
  * Two ways in: [tagDirectory] tags what the user is currently browsing, and [startStorageScan] walks
  * every image in shared storage once the user has agreed to it. Both funnel through [tag], which skips
  * images that are already tagged and unchanged, so the two can overlap without repeating work.
+ *
+ * Identity comes from a recognition model when one is installed (see [FaceEmbeddingModel]); without
+ * it the app falls back to landmark geometry, which can only group obviously similar faces.
  */
 object CharacterTagRepository {
     private val registry = CharacterRegistry()
     private val mutex = Mutex()
 
-    /** Face detection is memory hungry; two images in flight keeps the rest of the app responsive. */
+    /** Face detection and embedding are memory hungry; two images in flight keeps the app responsive. */
     private val detectionSemaphore = Semaphore(2)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val saveRequests = MutableSharedFlow<Unit>(
@@ -52,10 +55,11 @@ object CharacterTagRepository {
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     private val ready = CompletableDeferred<Unit>()
-    private val tagger by lazy { FaceTagger() }
 
     private var store: CharacterTagStore? = null
     private var preferences: ScrtvwrPreferences? = null
+    private var tagger: FaceTagger? = null
+    private var embeddingModel: FaceEmbeddingModel? = null
     private var scanJob: Job? = null
     private var lastPublishMillis = 0L
 
@@ -83,6 +87,13 @@ object CharacterTagRepository {
     private val _paused = MutableStateFlow(false)
     val paused: StateFlow<Boolean> = _paused.asStateFlow()
 
+    /** False when no recognition model is installed and tagging is running on landmark geometry. */
+    private val _usingRecognitionModel = MutableStateFlow(false)
+    val usingRecognitionModel: StateFlow<Boolean> = _usingRecognitionModel.asStateFlow()
+
+    private val _rebuilding = MutableStateFlow(false)
+    val rebuilding: StateFlow<Boolean> = _rebuilding.asStateFlow()
+
     fun initialize(context: Context) {
         if (store != null) return
         val applicationContext = context.applicationContext
@@ -90,10 +101,27 @@ object CharacterTagRepository {
         preferences = scrtvwrPreferences
         _enabled.value = scrtvwrPreferences.getFaceTaggingEnabled()
         _paused.value = scrtvwrPreferences.getTaggingPaused()
-        store = CharacterTagStore(File(applicationContext.filesDir, TAG_DIRECTORY_NAME))
+        val tagStore = CharacterTagStore(File(applicationContext.filesDir, TAG_DIRECTORY_NAME))
+        store = tagStore
+
         scope.launch {
-            val snapshot = withContext(Dispatchers.IO) { store?.read() ?: CharacterTagSnapshot() }
-            mutex.withLock { registry.restore(snapshot) }
+            val model = withContext(Dispatchers.IO) { FaceEmbeddingModel.load(applicationContext) }
+            embeddingModel = model
+            val embedder = model?.let(::ModelFaceEmbedder) ?: GeometricFaceEmbedder()
+            tagger = FaceTagger(embedder)
+            _usingRecognitionModel.value = model != null
+
+            val snapshot = withContext(Dispatchers.IO) { tagStore.read() }
+            val restored = mutex.withLock {
+                registry.useRules(MatchingRules.forEmbedder(embedder))
+                registry.restore(snapshot)
+            }
+            if (!restored) {
+                // Tags came from a different embedder: their vectors mean nothing here, so the
+                // images are tagged again rather than compared across incompatible spaces.
+                Timber.i("Stored tags were built by another embedder; clearing them")
+                withContext(Dispatchers.IO) { tagStore.clear() }
+            }
             ready.complete(Unit)
             publish(force = true)
         }
@@ -142,7 +170,7 @@ object CharacterTagRepository {
         return mutex.withLock { registry.tagsFor(paths) }
     }
 
-    /** Every image a character appears in, for their page in the People tab. */
+    /** Every image a character appears in, for their page and their album. */
     suspend fun imagesFor(characterId: String): List<ImageTags> {
         if (store == null) return emptyList()
         ready.await()
@@ -168,7 +196,7 @@ object CharacterTagRepository {
                 path = path,
                 modifiedMillis = modifiedMillis,
                 faceCount = detection.faceCount,
-                signatures = detection.signatures,
+                embeddings = detection.embeddings,
                 taggedAtMillis = System.currentTimeMillis(),
             )
         }
@@ -201,6 +229,38 @@ object CharacterTagRepository {
         scanJob?.cancel()
     }
 
+    /**
+     * Regroups every stored face. Worth doing after a big scan, after corrections, or whenever the
+     * groups look wrong: it removes the effect of the order images happened to be tagged in.
+     */
+    suspend fun rebuildGroups(): Boolean {
+        val store = store ?: return false
+        if (_rebuilding.value) return false
+        ready.await()
+        _rebuilding.value = true
+        return try {
+            persist()
+            val descriptorId = mutex.withLock { registry.descriptorId }
+            val faces = withContext(Dispatchers.IO) { store.readFaces(descriptorId) }
+            if (faces.isEmpty()) {
+                false
+            } else {
+                val regrouped = mutex.withLock { registry.rebuild(faces) }
+                withContext(NonCancellable + Dispatchers.IO) { store.writeFaces(descriptorId, regrouped) }
+                persist()
+                publish(force = true)
+                true
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Exception) {
+            Timber.w(error, "Rebuilding character groups failed")
+            false
+        } finally {
+            _rebuilding.value = false
+        }
+    }
+
     suspend fun rename(characterId: String, label: String?) {
         mutex.withLock { registry.rename(characterId, label) }
         publish(force = true)
@@ -219,6 +279,26 @@ object CharacterTagRepository {
         saveRequests.tryEmit(Unit)
     }
 
+    /** Folds two characters together when tagging split one person in two. */
+    suspend fun merge(characterId: String, otherId: String): Boolean {
+        val merged = mutex.withLock { registry.merge(characterId, otherId) }
+        if (merged) {
+            publish(force = true)
+            saveRequests.tryEmit(Unit)
+        }
+        return merged
+    }
+
+    /** "Not this person": drops one image from a character. */
+    suspend fun unassign(characterId: String, path: String): Boolean {
+        val changed = mutex.withLock { registry.unassign(characterId, path) }
+        if (changed) {
+            publish(force = true)
+            saveRequests.tryEmit(Unit)
+        }
+        return changed
+    }
+
     suspend fun removeCharacter(characterId: String) {
         mutex.withLock { registry.remove(characterId) }
         publish(force = true)
@@ -227,7 +307,10 @@ object CharacterTagRepository {
 
     suspend fun clearAll() {
         cancelStorageScan()
-        mutex.withLock { registry.clear() }
+        mutex.withLock {
+            registry.clear()
+            registry.drainPendingFaces()
+        }
         _facesFound.value = false
         withContext(NonCancellable + Dispatchers.IO) { store?.clear() }
         publish(force = true)
@@ -235,6 +318,7 @@ object CharacterTagRepository {
 
     private suspend fun runStorageScan() {
         _scanProgress.value = TagScanProgress(isRunning = true)
+        var completed = false
         try {
             val images = withContext(Dispatchers.IO) { collectStorageImages() }
             _scanProgress.update { it.copy(total = images.size) }
@@ -245,6 +329,7 @@ object CharacterTagRepository {
             }
             preferences?.saveLastStorageScanMillis(System.currentTimeMillis())
             _scanProgress.update { it.copy(processed = it.total, currentName = null) }
+            completed = true
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (error: Exception) {
@@ -256,6 +341,9 @@ object CharacterTagRepository {
                 persist()
             }
         }
+        // A full pass is exactly when regrouping pays off: every face is known, so nobody stays
+        // split up just because their worst photo happened to be tagged first.
+        if (completed) rebuildGroups()
     }
 
     private fun collectStorageImages(): List<File> {
@@ -273,6 +361,7 @@ object CharacterTagRepository {
     }
 
     private suspend fun detect(path: String): FaceDetectionResult? {
+        val tagger = tagger ?: return null
         val bitmap = MediaPreviewLoader.decodeForAnalysis(path, ANALYSIS_DIMENSION).bitmap ?: return null
         return try {
             tagger.detect(bitmap, rotationDegrees(path))
@@ -314,14 +403,21 @@ object CharacterTagRepository {
 
     private suspend fun persist() {
         val store = store ?: return
-        val snapshot = mutex.withLock { registry.snapshot() }
-        withContext(NonCancellable + Dispatchers.IO) { store.write(snapshot) }
+        val (snapshot, faces) = mutex.withLock { registry.snapshot() to registry.drainPendingFaces() }
+        withContext(NonCancellable + Dispatchers.IO) {
+            store.write(snapshot)
+            store.appendFaces(snapshot.descriptorId, faces)
+        }
     }
 
     private const val TAG_DIRECTORY_NAME = "character_tags"
 
-    /** Large enough for ML Kit to find faces in a group shot, small enough to decode quickly. */
-    private const val ANALYSIS_DIMENSION = 640
+    /**
+     * Faces have to survive being decoded before they can be recognised: at 1024 pixels a face that
+     * fills a tenth of the frame still arrives near the 112-pixel crop the model wants, where at 640
+     * it would be mostly interpolation.
+     */
+    private const val ANALYSIS_DIMENSION = 1024
     private const val MAX_SCAN_IMAGES = 100_000
     private const val SAVE_DEBOUNCE_MILLIS = 2_000L
     private const val PUBLISH_INTERVAL_MILLIS = 300L

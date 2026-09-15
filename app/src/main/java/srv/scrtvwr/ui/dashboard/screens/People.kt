@@ -5,6 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,20 +14,28 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.ImageSearch
+import androidx.compose.material.icons.filled.Merge
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -38,6 +47,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -62,12 +72,11 @@ import srv.scrtvwr.ui.dashboard.screens.viewmodels.PeopleViewModel
 import srv.scrtvwr.ui.tagging.CharacterCover
 import srv.scrtvwr.ui.tagging.TaggedImageThumbnail
 import srv.scrtvwr.ui.tagging.displayLabel
-import srv.scrtvwr.util.time.TimeUtil
-import java.io.File
 
 /**
  * The People tab: everyone tagging has found, and the controls for the tagging itself.
- * Opening a person swaps this screen for their page, which is where their details are edited.
+ * Opening a person swaps this screen for their page, where their details are edited, their photos
+ * are corrected, and their album can be paged through as though it were one folder.
  */
 @Composable
 fun People(
@@ -91,21 +100,26 @@ fun People(
             onPausedChange = viewModel::setPaused,
             onStartStorageScan = viewModel::startStorageScan,
             onStopStorageScan = viewModel::stopStorageScan,
+            onRebuildGroups = viewModel::rebuildGroups,
             modifier = modifier,
         )
     } else {
         CharacterScreen(
             profile = selected,
             images = uiState.selectedCharacterImages,
+            otherCharacters = uiState.characters.filterNot { it.id == selected.id },
             onBack = viewModel::closeCharacter,
             onSave = { label, note -> viewModel.saveDetails(selected.id, label, note) },
             onSetCover = { image -> viewModel.setCover(selected.id, image) },
+            onUnassign = { image -> viewModel.unassign(selected.id, image.path) },
+            onMerge = { otherId -> viewModel.merge(selected.id, otherId) },
             onRemove = { viewModel.removeCharacter(selected.id) },
-            onOpenImage = { image ->
-                val directoryPath = File(image.path.substringBefore("::")).parent ?: return@CharacterScreen
+            onOpenAlbum = { image, album ->
+                // The album is handed to the viewer as an explicit list, so paging through one
+                // person's pictures works the same as paging through a folder.
                 mediaLauncher.launch(
                     Intent(context, MediaViewerActivity::class.java).apply {
-                        putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, directoryPath)
+                        putStringArrayListExtra(MediaViewerActivity.EXTRA_MEDIA_PATHS, ArrayList(album))
                         putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, image.path)
                     },
                 )
@@ -122,6 +136,7 @@ fun PeopleScreen(
     onPausedChange: (Boolean) -> Unit,
     onStartStorageScan: () -> Unit,
     onStopStorageScan: () -> Unit,
+    onRebuildGroups: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     BaseScaffold(
@@ -155,10 +170,13 @@ fun PeopleScreen(
             TaggingStatusCard(
                 state = uiState.taggingState,
                 progress = uiState.scanProgress,
-                lastScanMillis = uiState.lastStorageScanMillis,
+                usingRecognitionModel = uiState.usingRecognitionModel,
+                rebuilding = uiState.rebuilding,
+                canRebuild = uiState.characters.isNotEmpty(),
                 onPausedChange = onPausedChange,
                 onStartStorageScan = onStartStorageScan,
                 onStopStorageScan = onStopStorageScan,
+                onRebuildGroups = onRebuildGroups,
             )
 
             if (uiState.characters.isEmpty()) {
@@ -218,15 +236,18 @@ private fun PersonCard(profile: CharacterProfile, onClick: () -> Unit) {
     }
 }
 
-/** Tagging state in one place: what it is doing now, and the two controls that change it. */
+/** Tagging state in one place: what it is doing now, and the controls that change it. */
 @Composable
 private fun TaggingStatusCard(
     state: TaggingState,
     progress: TagScanProgress,
-    lastScanMillis: Long,
+    usingRecognitionModel: Boolean,
+    rebuilding: Boolean,
+    canRebuild: Boolean,
     onPausedChange: (Boolean) -> Unit,
     onStartStorageScan: () -> Unit,
     onStopStorageScan: () -> Unit,
+    onRebuildGroups: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -244,11 +265,7 @@ private fun TaggingStatusCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
-                    imageVector = when (state) {
-                        TaggingState.Paused -> Icons.Default.Pause
-                        TaggingState.Off -> Icons.Default.Face
-                        TaggingState.Running -> Icons.Default.Face
-                    },
+                    imageVector = if (state == TaggingState.Paused) Icons.Default.Pause else Icons.Default.Face,
                     contentDescription = null,
                 )
                 Column(modifier = Modifier.weight(1f)) {
@@ -264,6 +281,7 @@ private fun TaggingStatusCard(
                     )
                     Text(
                         text = when {
+                            rebuilding -> stringResource(R.string.regrouping)
                             state == TaggingState.Paused -> stringResource(R.string.tagging_paused_hint)
                             progress.isRunning && progress.total > 0 -> stringResource(
                                 R.string.tagging_progress,
@@ -271,8 +289,7 @@ private fun TaggingStatusCard(
                                 progress.total,
                             )
                             progress.isRunning -> stringResource(R.string.tagging_counting_images)
-                            lastScanMillis > 0L -> TimeUtil.formatDisplayDate(lastScanMillis)
-                            else -> stringResource(R.string.never)
+                            else -> stringResource(R.string.tagging_idle)
                         },
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
@@ -290,51 +307,102 @@ private fun TaggingStatusCard(
                 }
             }
 
-            if (progress.isRunning && progress.total > 0) {
-                LinearProgressIndicator(
-                    progress = { progress.fraction },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+            if (rebuilding || (progress.isRunning && progress.total > 0)) {
+                if (rebuilding) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                } else {
+                    LinearProgressIndicator(
+                        progress = { progress.fraction },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
+            if (!usingRecognitionModel) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                    Text(
+                        text = stringResource(R.string.recognition_model_missing),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
 
             if (state != TaggingState.Off) {
-                TextButton(
-                    onClick = { if (progress.isRunning) onStopStorageScan() else onStartStorageScan() },
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ImageSearch,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Text(
-                        text = stringResource(
-                            if (progress.isRunning) R.string.stop_tagging else R.string.scan_storage_for_characters,
-                        ),
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick = { if (progress.isRunning) onStopStorageScan() else onStartStorageScan() },
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ImageSearch,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = stringResource(
+                                if (progress.isRunning) R.string.stop_tagging else R.string.scan_storage_for_characters,
+                            ),
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                    TextButton(onClick = onRebuildGroups, enabled = canRebuild && !rebuilding) {
+                        Icon(
+                            imageVector = Icons.Default.Autorenew,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = stringResource(R.string.regroup_people),
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-/** One person's page: their name and note, which photo represents them, and every image they are in. */
+/** What tapping a photo on a character's page does. */
+private enum class PhotoAction {
+    Open,
+    PickCover,
+    Remove,
+}
+
+/**
+ * One person's page: their name and note, which photo represents them, the corrections that keep
+ * their group honest, and every image they appear in.
+ */
 @Composable
 fun CharacterScreen(
     profile: CharacterProfile,
     images: List<ImageTags>,
+    otherCharacters: List<CharacterProfile>,
     onBack: () -> Unit,
     onSave: (String?, String?) -> Unit,
     onSetCover: (ImageTags) -> Unit,
+    onUnassign: (ImageTags) -> Unit,
+    onMerge: (String) -> Unit,
     onRemove: () -> Unit,
-    onOpenImage: (ImageTags) -> Unit,
+    onOpenAlbum: (ImageTags, List<String>) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var name by rememberSaveable(profile.id) { mutableStateOf(profile.label.orEmpty()) }
     var note by rememberSaveable(profile.id) { mutableStateOf(profile.note.orEmpty()) }
-    var pickingCover by rememberSaveable(profile.id) { mutableStateOf(false) }
+    var photoAction by remember(profile.id) { mutableStateOf(PhotoAction.Open) }
+    var merging by rememberSaveable(profile.id) { mutableStateOf(false) }
     var confirmingRemoval by rememberSaveable(profile.id) { mutableStateOf(false) }
     val hasChanges = name.trim() != profile.label.orEmpty() || note.trim() != profile.note.orEmpty()
+    val albumPaths = remember(images) { images.map(ImageTags::path) }
 
     BaseScaffold(
         title = profile.displayLabel(),
@@ -361,11 +429,41 @@ fun CharacterScreen(
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     CharacterCover(profile = profile, modifier = Modifier.size(112.dp))
-                    TextButton(onClick = { pickingCover = !pickingCover }) {
-                        Text(stringResource(R.string.change_cover))
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilterChip(
+                            selected = photoAction == PhotoAction.PickCover,
+                            onClick = {
+                                photoAction = if (photoAction == PhotoAction.PickCover) {
+                                    PhotoAction.Open
+                                } else {
+                                    PhotoAction.PickCover
+                                }
+                            },
+                            label = { Text(stringResource(R.string.change_cover)) },
+                        )
+                        FilterChip(
+                            selected = photoAction == PhotoAction.Remove,
+                            onClick = {
+                                photoAction = if (photoAction == PhotoAction.Remove) {
+                                    PhotoAction.Open
+                                } else {
+                                    PhotoAction.Remove
+                                }
+                            },
+                            label = { Text(stringResource(R.string.remove_photos)) },
+                        )
+                        FilterChip(
+                            selected = false,
+                            onClick = { merging = true },
+                            label = { Text(stringResource(R.string.merge_person)) },
+                            leadingIcon = { Icon(Icons.Default.Merge, contentDescription = null) },
+                        )
                     }
                 }
             }
@@ -411,16 +509,16 @@ fun CharacterScreen(
 
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Text(
-                    text = if (pickingCover) {
-                        stringResource(R.string.pick_cover_hint)
-                    } else {
-                        stringResource(R.string.photos_count, images.size)
+                    text = when (photoAction) {
+                        PhotoAction.PickCover -> stringResource(R.string.pick_cover_hint)
+                        PhotoAction.Remove -> stringResource(R.string.remove_photo_hint)
+                        PhotoAction.Open -> stringResource(R.string.photos_count, images.size)
                     },
                     style = MaterialTheme.typography.titleSmall,
-                    color = if (pickingCover) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
+                    color = if (photoAction == PhotoAction.Open) {
                         MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.primary
                     },
                     modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
                 )
@@ -432,11 +530,14 @@ fun CharacterScreen(
                         .fillMaxWidth()
                         .aspectRatio(1f)
                         .clickable {
-                            if (pickingCover) {
-                                onSetCover(image)
-                                pickingCover = false
-                            } else {
-                                onOpenImage(image)
+                            when (photoAction) {
+                                PhotoAction.Open -> onOpenAlbum(image, albumPaths)
+                                PhotoAction.PickCover -> {
+                                    onSetCover(image)
+                                    photoAction = PhotoAction.Open
+                                }
+                                // Stays in remove mode: a wrong group usually has several strays.
+                                PhotoAction.Remove -> onUnassign(image)
                             }
                         },
                 ) {
@@ -466,6 +567,18 @@ fun CharacterScreen(
         }
     }
 
+    if (merging) {
+        MergeCharacterDialog(
+            profile = profile,
+            candidates = otherCharacters,
+            onMerge = { otherId ->
+                onMerge(otherId)
+                merging = false
+            },
+            onDismiss = { merging = false },
+        )
+    }
+
     if (confirmingRemoval) {
         AlertDialog(
             onDismissRequest = { confirmingRemoval = false },
@@ -489,4 +602,65 @@ fun CharacterScreen(
             },
         )
     }
+}
+
+/** Pick the character who is really the same person; their photos move into this one. */
+@Composable
+private fun MergeCharacterDialog(
+    profile: CharacterProfile,
+    candidates: List<CharacterProfile>,
+    onMerge: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.merge_person_title, profile.displayLabel())) },
+        text = {
+            if (candidates.isEmpty()) {
+                Text(stringResource(R.string.merge_person_empty))
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = stringResource(R.string.merge_person_message),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 320.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        items(candidates, key = CharacterProfile::id) { candidate ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onMerge(candidate.id) }
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CharacterCover(profile = candidate, modifier = Modifier.size(40.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = candidate.displayLabel(),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        text = stringResource(
+                                            R.string.character_image_count,
+                                            candidate.imageCount,
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
 }

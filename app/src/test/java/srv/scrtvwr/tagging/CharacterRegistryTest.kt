@@ -5,28 +5,44 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 class CharacterRegistryTest {
-    private val registry = CharacterRegistry()
+    private val rules = MatchingRules.forModel(DESCRIPTOR)
+    private val registry = CharacterRegistry(rules)
 
     @Test
-    fun `the same face in two images becomes one character`() {
-        registry.record("/a.jpg", 1L, faceCount = 1, signatures = listOf(signature(0f)), taggedAtMillis = 10L)
-        registry.record("/b.jpg", 2L, faceCount = 1, signatures = listOf(signature(0.01f)), taggedAtMillis = 20L)
+    fun `two photos of the same face become one character`() {
+        registry.record("/a.jpg", 1L, faceCount = 1, embeddings = listOf(face(0)), taggedAtMillis = 10L)
+        registry.record("/b.jpg", 2L, faceCount = 1, embeddings = listOf(face(18)), taggedAtMillis = 20L)
 
         val profiles = registry.profiles()
         assertEquals(1, profiles.size)
         assertEquals(2, profiles.single().imageCount)
-        assertEquals(2, profiles.single().sampleCount)
         assertEquals(listOf("/a.jpg", "/b.jpg"), registry.imagesFor(profiles.single().id).map(ImageTags::path))
     }
 
     @Test
-    fun `faces further apart than the threshold become separate characters`() {
-        registry.record("/a.jpg", 1L, faceCount = 1, signatures = listOf(signature(0f)), taggedAtMillis = 10L)
-        registry.record("/b.jpg", 1L, faceCount = 1, signatures = listOf(signature(5f)), taggedAtMillis = 10L)
+    fun `a clearly different face starts a new character`() {
+        registry.record("/a.jpg", 1L, faceCount = 1, embeddings = listOf(face(0)), taggedAtMillis = 10L)
+        registry.record("/b.jpg", 1L, faceCount = 1, embeddings = listOf(face(90)), taggedAtMillis = 10L)
 
         assertEquals(2, registry.profiles().size)
+    }
+
+    @Test
+    fun `a face between the thresholds is left unassigned rather than guessed at`() {
+        registry.record("/a.jpg", 1L, faceCount = 1, embeddings = listOf(face(0)), taggedAtMillis = 10L)
+
+        // Similar enough to be suspicious, not similar enough to be sure. Joining would risk welding
+        // two people together for good, so the face is counted but belongs to nobody yet.
+        val tags = registry.record("/b.jpg", 1L, faceCount = 1, embeddings = listOf(face(55)), taggedAtMillis = 10L)
+
+        assertEquals(1, registry.profiles().size)
+        assertEquals(1, tags.faceCount)
+        assertTrue(tags.characterIds.isEmpty())
     }
 
     @Test
@@ -35,7 +51,7 @@ class CharacterRegistryTest {
             path = "/a.jpg",
             modifiedMillis = 1L,
             faceCount = 2,
-            signatures = listOf(signature(0f), signature(0.01f)),
+            embeddings = listOf(face(0), face(10)),
             taggedAtMillis = 10L,
         )
 
@@ -45,8 +61,8 @@ class CharacterRegistryTest {
     }
 
     @Test
-    fun `an image without usable signatures is still tagged with its face count`() {
-        val tags = registry.record("/a.jpg", 1L, faceCount = 3, signatures = emptyList(), taggedAtMillis = 10L)
+    fun `an image whose faces were all rejected is still tagged with its face count`() {
+        val tags = registry.record("/a.jpg", 1L, faceCount = 3, embeddings = emptyList(), taggedAtMillis = 10L)
 
         assertTrue(tags.hasFaces)
         assertEquals(3, tags.faceCount)
@@ -56,10 +72,10 @@ class CharacterRegistryTest {
 
     @Test
     fun `retagging an edited image replaces its previous tags`() {
-        registry.record("/a.jpg", 1L, faceCount = 1, signatures = listOf(signature(0f)), taggedAtMillis = 10L)
+        registry.record("/a.jpg", 1L, faceCount = 1, embeddings = listOf(face(0)), taggedAtMillis = 10L)
         val characterId = registry.profiles().single().id
 
-        registry.record("/a.jpg", 2L, faceCount = 0, signatures = emptyList(), taggedAtMillis = 20L)
+        registry.record("/a.jpg", 2L, faceCount = 0, embeddings = emptyList(), taggedAtMillis = 20L)
 
         assertEquals(1, registry.taggedImageCount())
         assertEquals(0, registry.profiles().single().imageCount)
@@ -70,15 +86,27 @@ class CharacterRegistryTest {
     fun `tagging is only needed when the file is new or changed`() {
         assertTrue(registry.needsTagging("/a.jpg", 1L))
 
-        registry.record("/a.jpg", 1L, faceCount = 0, signatures = emptyList(), taggedAtMillis = 10L)
+        registry.record("/a.jpg", 1L, faceCount = 0, embeddings = emptyList(), taggedAtMillis = 10L)
 
         assertFalse(registry.needsTagging("/a.jpg", 1L))
         assertTrue(registry.needsTagging("/a.jpg", 2L))
     }
 
     @Test
+    fun `every embedded face is queued for the face log exactly once`() {
+        registry.record("/a.jpg", 1L, faceCount = 2, embeddings = listOf(face(0), face(90)), taggedAtMillis = 10L)
+
+        val drained = registry.drainPendingFaces()
+
+        assertEquals(2, drained.size)
+        assertEquals(listOf(0, 1), drained.map(FaceVector::index))
+        assertTrue(drained.all { it.characterId != null })
+        assertTrue(registry.drainPendingFaces().isEmpty())
+    }
+
+    @Test
     fun `renaming keeps the character and clearing the name restores the default`() {
-        registry.record("/a.jpg", 1L, faceCount = 1, signatures = listOf(signature(0f)), taggedAtMillis = 10L)
+        registry.record("/a.jpg", 1L, faceCount = 1, embeddings = listOf(face(0)), taggedAtMillis = 10L)
         val characterId = registry.profiles().single().id
 
         assertTrue(registry.rename(characterId, "  Mina  "))
@@ -91,40 +119,109 @@ class CharacterRegistryTest {
 
     @Test
     fun `a note and a chosen cover survive a snapshot`() {
-        registry.record("/a.jpg", 1L, faceCount = 1, signatures = listOf(signature(0f)), taggedAtMillis = 10L)
-        registry.record("/b.jpg", 2L, faceCount = 1, signatures = listOf(signature(0.01f)), taggedAtMillis = 20L)
+        registry.record("/a.jpg", 1L, faceCount = 1, embeddings = listOf(face(0)), taggedAtMillis = 10L)
+        registry.record("/b.jpg", 2L, faceCount = 1, embeddings = listOf(face(10)), taggedAtMillis = 20L)
         val characterId = registry.profiles().single().id
 
         assertTrue(registry.setNote(characterId, "  Wears the red scarf  "))
         assertTrue(registry.setCover(characterId, "/b.jpg", 2L))
 
-        val restored = CharacterRegistry()
-        restored.restore(registry.snapshot())
+        val restored = CharacterRegistry(rules)
+        assertTrue(restored.restore(registry.snapshot()))
         val profile = restored.profiles().single()
 
         assertEquals("Wears the red scarf", profile.note)
         assertEquals("/b.jpg", profile.coverPath)
         assertEquals(2L, profile.coverModifiedMillis)
-
-        assertTrue(registry.setNote(characterId, "  "))
-        assertNull(registry.profiles().single().note)
-        assertFalse(registry.setNote("missing", "Nobody"))
-        assertFalse(registry.setCover("missing", "/a.jpg", 1L))
+        assertEquals(2, restored.taggedImageCount())
     }
 
     @Test
-    fun `the first image a character appears in becomes its cover`() {
-        registry.record("/a.jpg", 7L, faceCount = 1, signatures = listOf(signature(0f)), taggedAtMillis = 10L)
-        registry.record("/b.jpg", 8L, faceCount = 1, signatures = listOf(signature(0.01f)), taggedAtMillis = 20L)
+    fun `tags from a different embedder are refused instead of compared`() {
+        registry.record("/a.jpg", 1L, faceCount = 1, embeddings = listOf(face(0)), taggedAtMillis = 10L)
+        val snapshot = registry.snapshot()
+        assertEquals(DESCRIPTOR, snapshot.descriptorId)
 
-        val profile = registry.profiles().single()
-        assertEquals("/a.jpg", profile.coverPath)
-        assertEquals(7L, profile.coverModifiedMillis)
+        val other = CharacterRegistry(MatchingRules.forModel("some-other-model"))
+
+        assertFalse(other.restore(snapshot))
+        assertTrue(other.profiles().isEmpty())
+        assertEquals(0, other.taggedImageCount())
+    }
+
+    @Test
+    fun `merging folds one character into another`() {
+        registry.record("/a.jpg", 1L, faceCount = 1, embeddings = listOf(face(0)), taggedAtMillis = 10L)
+        registry.record("/b.jpg", 1L, faceCount = 1, embeddings = listOf(face(90)), taggedAtMillis = 10L)
+        val ordered = registry.profiles().sortedBy(CharacterProfile::ordinal)
+        val first = ordered.first()
+        val second = ordered.last()
+        assertTrue(registry.rename(second.id, "Mina"))
+
+        assertTrue(registry.merge(first.id, second.id))
+
+        val merged = registry.profiles().single()
+        assertEquals(first.id, merged.id)
+        assertEquals("Mina", merged.label)
+        assertEquals(2, merged.imageCount)
+        assertEquals(listOf("/a.jpg", "/b.jpg"), registry.imagesFor(merged.id).map(ImageTags::path))
+        assertFalse(registry.merge(first.id, first.id))
+    }
+
+    @Test
+    fun `unassigning drops one image and moves the cover off it`() {
+        registry.record("/a.jpg", 1L, faceCount = 1, embeddings = listOf(face(0)), taggedAtMillis = 10L)
+        registry.record("/b.jpg", 1L, faceCount = 1, embeddings = listOf(face(10)), taggedAtMillis = 10L)
+        val characterId = registry.profiles().single().id
+
+        assertTrue(registry.unassign(characterId, "/a.jpg"))
+
+        assertEquals(1, registry.profiles().single().imageCount)
+        assertEquals(listOf("/b.jpg"), registry.imagesFor(characterId).map(ImageTags::path))
+        assertEquals("/b.jpg", registry.profiles().single().coverPath)
+        assertFalse(registry.unassign(characterId, "/a.jpg"))
+    }
+
+    @Test
+    fun `rebuilding regroups every face and keeps the names that were given`() {
+        registry.record("/a.jpg", 1L, faceCount = 1, embeddings = listOf(face(0)), taggedAtMillis = 10L)
+        registry.record("/b.jpg", 1L, faceCount = 1, embeddings = listOf(face(8)), taggedAtMillis = 10L)
+        registry.record("/c.jpg", 1L, faceCount = 1, embeddings = listOf(face(90)), taggedAtMillis = 10L)
+        val named = registry.profiles().maxByOrNull(CharacterProfile::imageCount)!!
+        assertTrue(registry.rename(named.id, "Mina"))
+
+        val regrouped = registry.rebuild(
+            listOf(
+                FaceVector("/a.jpg", 1L, 0, face(0), named.id),
+                FaceVector("/b.jpg", 1L, 0, face(8), named.id),
+                FaceVector("/c.jpg", 1L, 0, face(90), null),
+            ),
+        )
+
+        assertEquals(3, regrouped.size)
+        val mina = registry.profiles().single { it.label == "Mina" }
+        assertEquals(listOf("/a.jpg", "/b.jpg"), registry.imagesFor(mina.id).map(ImageTags::path))
+        assertEquals(3, registry.taggedImageCount())
+
+        // No image may be left pointing at a character the rebuild dissolved.
+        val knownIds = registry.profiles().map(CharacterProfile::id).toSet()
+        listOf("/a.jpg", "/b.jpg", "/c.jpg").forEach { path ->
+            assertTrue(registry.tagsFor(path)?.characterIds.orEmpty().all { it in knownIds })
+        }
+    }
+
+    @Test
+    fun `rebuilding ignores faces whose image has since changed`() {
+        registry.record("/a.jpg", 2L, faceCount = 1, embeddings = listOf(face(0)), taggedAtMillis = 10L)
+
+        val regrouped = registry.rebuild(listOf(FaceVector("/a.jpg", 1L, 0, face(0), null)))
+
+        assertTrue(regrouped.isEmpty())
     }
 
     @Test
     fun `removing a character drops it from the images that referenced it`() {
-        registry.record("/a.jpg", 1L, faceCount = 1, signatures = listOf(signature(0f)), taggedAtMillis = 10L)
+        registry.record("/a.jpg", 1L, faceCount = 1, embeddings = listOf(face(0)), taggedAtMillis = 10L)
         val characterId = registry.profiles().single().id
 
         assertTrue(registry.remove(characterId))
@@ -135,26 +232,9 @@ class CharacterRegistryTest {
     }
 
     @Test
-    fun `a snapshot restores characters tags and the next character number`() {
-        registry.record("/a.jpg", 1L, faceCount = 2, signatures = listOf(signature(0f)), taggedAtMillis = 10L)
-        registry.record("/b.jpg", 2L, faceCount = 1, signatures = listOf(signature(5f)), taggedAtMillis = 20L)
-        val expected = registry.profiles()
-
-        val restored = CharacterRegistry()
-        restored.restore(registry.snapshot())
-
-        assertEquals(expected, restored.profiles())
-        assertEquals(registry.tagsFor("/a.jpg"), restored.tagsFor("/a.jpg"))
-        assertEquals(2, restored.taggedImageCount())
-
-        // A new face must not reuse an ordinal that is already taken.
-        restored.record("/c.jpg", 3L, faceCount = 1, signatures = listOf(signature(10f)), taggedAtMillis = 30L)
-        assertEquals(listOf(1, 2, 3), restored.profiles().map(CharacterProfile::ordinal).sorted())
-    }
-
-    @Test
     fun `restore drops references to characters that are gone`() {
         val snapshot = CharacterTagSnapshot(
+            descriptorId = DESCRIPTOR,
             characters = emptyList(),
             images = listOf(
                 ImageTags(
@@ -167,25 +247,34 @@ class CharacterRegistryTest {
             ),
         )
 
-        registry.restore(snapshot)
+        assertTrue(registry.restore(snapshot))
 
         assertEquals(emptyList<String>(), registry.tagsFor("/a.jpg")?.characterIds)
     }
 
     @Test
     fun `the oldest images are dropped once the cap is reached`() {
-        val small = CharacterRegistry(maxImages = 2)
-        small.record("/a.jpg", 1L, faceCount = 0, signatures = emptyList(), taggedAtMillis = 10L)
-        small.record("/b.jpg", 1L, faceCount = 0, signatures = emptyList(), taggedAtMillis = 20L)
-        small.record("/c.jpg", 1L, faceCount = 0, signatures = emptyList(), taggedAtMillis = 30L)
+        val small = CharacterRegistry(rules, maxImages = 2)
+        small.record("/a.jpg", 1L, faceCount = 0, embeddings = emptyList(), taggedAtMillis = 10L)
+        small.record("/b.jpg", 1L, faceCount = 0, embeddings = emptyList(), taggedAtMillis = 20L)
+        small.record("/c.jpg", 1L, faceCount = 0, embeddings = emptyList(), taggedAtMillis = 30L)
 
         assertEquals(2, small.taggedImageCount())
         assertNull(small.tagsFor("/a.jpg"))
         assertTrue(small.needsTagging("/a.jpg", 1L))
     }
 
-    /** Signatures that sit [offset] apart, so the test controls whether they cluster together. */
-    private fun signature(offset: Float) = FloatArray(FaceGeometry.SIGNATURE_SIZE) { index ->
-        if (index == 0) offset else 0f
+    /**
+     * A unit vector at [degrees], so cosine similarity between two faces is the cosine of the angle
+     * between them: 0 and 18 degrees are plainly the same person, 90 plainly is not, and 55 lands in
+     * the deliberate gap between the two thresholds.
+     */
+    private fun face(degrees: Int): FloatArray {
+        val radians = degrees * PI / 180.0
+        return floatArrayOf(cos(radians).toFloat(), sin(radians).toFloat(), 0f, 0f)
+    }
+
+    private companion object {
+        const val DESCRIPTOR = "test-model"
     }
 }

@@ -16,6 +16,7 @@ import kotlinx.coroutines.launch
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.media.MediaCatalog
 import srv.scrtvwr.ui.sort.DirectorySortOrder
+import srv.scrtvwr.ui.sort.fileComparator
 import java.io.File
 
 class MediaViewerViewModel(
@@ -25,6 +26,9 @@ class MediaViewerViewModel(
     private val preferences = ScrtvwrPreferences(application)
     private val traversalRoot = runCatching { Environment.getExternalStorageDirectory() }.getOrNull()
     private var loadJob: Job? = null
+
+    /** Set while the viewer is showing a collection - a character's album - instead of a directory. */
+    private var collectionPaths: List<String>? = null
     private val _uiState = MutableStateFlow(
         MediaViewerUiState(
             slideShowStayMillis = preferences.getSlideShowStayMillis(),
@@ -37,7 +41,70 @@ class MediaViewerViewModel(
     )
     val uiState = _uiState.asStateFlow()
 
+    /**
+     * Shows an explicit list of images as if they were one directory. Used for a character's album,
+     * where the pictures of one person are scattered across many folders.
+     */
+    fun loadCollection(paths: List<String>, selectedPath: String?, force: Boolean = false) {
+        if (!force && collectionPaths == paths && _uiState.value.selectedPath == selectedPath) return
+        collectionPaths = paths
+        loadJob?.cancel()
+        _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+        loadJob = viewModelScope.launch(Dispatchers.IO) {
+            runCatching { loadCollectionMedia(paths, selectedPath, force) }
+                .onFailure { error ->
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    _uiState.update {
+                        it.copy(isLoading = false, errorMessage = error.message ?: "Unable to load media.")
+                    }
+                }
+        }
+    }
+
+    private fun loadCollectionMedia(paths: List<String>, selectedPath: String?, force: Boolean) {
+        val sortOrder = preferences.getDirectorySortOrder()
+        val items = paths
+            .filterNot { it.contains("::") }
+            .map(::File)
+            .filter(File::isFile)
+            .sortedWith(sortOrder.fileComparator(directoriesFirst = false))
+            .mapNotNull(MediaCatalog::toItem)
+        var initialPage = items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
+
+        val sourceKey = "collection|${paths.size}|${paths.firstOrNull().orEmpty()}|${selectedPath.orEmpty()}"
+        if (!force && savedStateHandle.get<String>(STATE_SOURCE) == sourceKey) {
+            initialPage = savedStateHandle.get<Int>(STATE_SELECTED_PAGE)
+                ?.coerceIn(0, (items.size - 1).coerceAtLeast(0))
+                ?: initialPage
+        } else {
+            savedStateHandle[STATE_SOURCE] = sourceKey
+            savedStateHandle[STATE_SELECTED_PAGE] = initialPage
+        }
+
+        _uiState.update {
+            MediaViewerUiState(
+                // No source directory: an album spans folders, so there is nothing to step out to
+                // and nothing to hand back to the directory screen.
+                sourceDirectoryPath = null,
+                selectedPath = items.getOrNull(initialPage)?.path ?: selectedPath,
+                items = items,
+                isCollection = true,
+                initialPage = initialPage,
+                selectedPage = initialPage,
+                slideShowStayMillis = preferences.getSlideShowStayMillis(),
+                slideShowDirection = preferences.getSlideShowDirection(),
+                holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
+                imagePreloadDistance = preferences.getImagePreloadDistance(),
+                edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
+                sortOrder = sortOrder,
+                bookmarked = preferences.isMediaBookmarked(items.getOrNull(initialPage)?.path),
+                isLoading = false,
+            )
+        }
+    }
+
     fun load(directoryPath: String?, selectedPath: String?, force: Boolean = false) {
+        collectionPaths = null
         val currentState = _uiState.value
         if (!force && currentState.sourceDirectoryPath == directoryPath && currentState.selectedPath == selectedPath) {
             return
@@ -174,7 +241,12 @@ class MediaViewerViewModel(
         preferences.saveDirectorySortOrder(sortOrder)
         _uiState.update { it.copy(sortOrder = sortOrder) }
         val state = _uiState.value
-        load(state.sourceDirectoryPath, null, force = true)
+        val paths = collectionPaths
+        if (paths != null) {
+            loadCollection(paths, state.selectedPath, force = true)
+        } else {
+            load(state.sourceDirectoryPath, null, force = true)
+        }
     }
 
     fun toggleFillFrame() {
@@ -251,6 +323,8 @@ data class MediaViewerUiState(
     val sourceDirectoryPath: String? = null,
     val selectedPath: String? = null,
     val items: List<MediaViewerItem> = emptyList(),
+    /** True when the items came from a character's album rather than a folder or archive. */
+    val isCollection: Boolean = false,
     val previousSource: MediaViewerSource? = null,
     val nextSource: MediaViewerSource? = null,
     val initialPage: Int = 0,

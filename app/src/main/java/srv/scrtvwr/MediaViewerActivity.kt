@@ -134,12 +134,14 @@ class MediaViewerActivity : ComponentActivity() {
 
         val directoryPath = intent.getStringExtra(EXTRA_DIRECTORY_PATH)
         val mediaPath = intent.getStringExtra(EXTRA_MEDIA_PATH)
+        val collectionPaths = intent.getStringArrayListExtra(EXTRA_MEDIA_PATHS)
 
         setContent {
             SCRTVWRTheme {
                 MediaViewerRoute(
                     directoryPath = directoryPath,
                     selectedPath = mediaPath,
+                    collectionPaths = collectionPaths,
                     onBack = ::finish,
                     onDirectoryChanged = { path ->
                         setResult(
@@ -155,6 +157,9 @@ class MediaViewerActivity : ComponentActivity() {
     companion object {
         const val EXTRA_DIRECTORY_PATH = "srv.scrtvwr.extra.DIRECTORY_PATH"
         const val EXTRA_MEDIA_PATH = "srv.scrtvwr.extra.MEDIA_PATH"
+
+        /** An explicit list of images to page through, used for a character's album. */
+        const val EXTRA_MEDIA_PATHS = "srv.scrtvwr.extra.MEDIA_PATHS"
         const val RESULT_DIRECTORY_PATH = "srv.scrtvwr.result.MEDIA_DIRECTORY_PATH"
     }
 }
@@ -163,12 +168,17 @@ class MediaViewerActivity : ComponentActivity() {
 private fun MediaViewerRoute(
     directoryPath: String?,
     selectedPath: String?,
+    collectionPaths: List<String>? = null,
     onBack: () -> Unit,
     onDirectoryChanged: (String) -> Unit,
     viewModel: MediaViewerViewModel = viewModel(),
 ) {
-    LaunchedEffect(directoryPath, selectedPath) {
-        viewModel.load(directoryPath, selectedPath)
+    LaunchedEffect(directoryPath, selectedPath, collectionPaths) {
+        if (!collectionPaths.isNullOrEmpty()) {
+            viewModel.loadCollection(collectionPaths, selectedPath)
+        } else {
+            viewModel.load(directoryPath, selectedPath)
+        }
     }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
