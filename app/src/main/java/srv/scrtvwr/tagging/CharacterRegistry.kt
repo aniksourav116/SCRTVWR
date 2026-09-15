@@ -1,5 +1,7 @@
 package srv.scrtvwr.tagging
 
+import timber.log.Timber
+
 /**
  * Keeps the characters and the per-image tags in memory, and decides which character a new face
  * belongs to.
@@ -63,22 +65,37 @@ class CharacterRegistry(
         forget(path)
         val characterIds = mutableListOf<String>()
         embeddings.forEachIndexed { faceIndex, embedding ->
-            val identity = assign(embedding)
-            identity?.let { matched ->
-                matched.absorb(embedding, rules)
+            val assignment = assign(embedding)
+            assignment?.let { (matched, similarity, isNew) ->
+                // Only a confident match earns a place among the exemplars. A face that merely
+                // scraped past the join threshold would otherwise widen the character it joined,
+                // which attracts more marginal faces - the way one bad merge becomes ten.
+                if (isNew || similarity >= rules.mergeSimilarity) matched.absorb(embedding, rules)
                 matched.sampleCount++
                 if (matched.coverPath == null) {
                     matched.coverPath = path
                     matched.coverModifiedMillis = modifiedMillis
                 }
                 if (matched.id !in characterIds) characterIds += matched.id
-            }
+                Timber.d(
+                    "Face %d of %s -> %s (similarity %.3f, %s)",
+                    faceIndex,
+                    path.substringAfterLast('/'),
+                    matched.id,
+                    similarity,
+                    if (isNew) "new character" else "joined",
+                )
+            } ?: Timber.d(
+                "Face %d of %s -> nobody (best similarity below the join bar)",
+                faceIndex,
+                path.substringAfterLast('/'),
+            )
             pendingFaces += FaceVector(
                 path = path,
                 modifiedMillis = modifiedMillis,
                 index = faceIndex,
                 embedding = embedding,
-                characterId = identity?.id,
+                characterId = assignment?.identity?.id,
             )
         }
         characterIds.forEach { id -> imageCounts[id] = (imageCounts[id] ?: 0) + 1 }
@@ -338,12 +355,17 @@ class CharacterRegistry(
         return compatible
     }
 
-    private fun assign(embedding: FloatArray): Identity? {
+    /** Which character a face belongs to, and how sure the match was. */
+    private data class Assignment(val identity: Identity, val similarity: Float, val isNew: Boolean)
+
+    private fun assign(embedding: FloatArray): Assignment? {
         val order = identities.values.toList()
         val match = FaceClustering.bestMatch(embedding, order.map { it.exemplars }, rules)
         return when {
-            match.similarity >= rules.joinSimilarity && match.cluster >= 0 -> order[match.cluster]
-            match.similarity < rules.newIdentitySimilarity -> newIdentity().also { identities[it.id] = it }
+            match.similarity >= rules.joinSimilarity && match.cluster >= 0 ->
+                Assignment(order[match.cluster], match.similarity, isNew = false)
+            match.similarity < rules.newIdentitySimilarity ->
+                Assignment(newIdentity().also { identities[it.id] = it }, match.similarity, isNew = true)
             else -> null
         }
     }

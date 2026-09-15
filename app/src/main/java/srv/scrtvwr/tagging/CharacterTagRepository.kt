@@ -1,6 +1,8 @@
 package srv.scrtvwr.tagging
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.media.ExifInterface
 import android.net.Uri
 import android.os.Environment
@@ -107,6 +109,7 @@ object CharacterTagRepository {
         preferences = scrtvwrPreferences
         _enabled.value = scrtvwrPreferences.getFaceTaggingEnabled()
         _paused.value = scrtvwrPreferences.getTaggingPaused()
+        FaceCropDebug.initialize(applicationContext)
         val tagStore = CharacterTagStore(File(applicationContext.filesDir, TAG_DIRECTORY_NAME))
         store = tagStore
 
@@ -395,18 +398,33 @@ object CharacterTagRepository {
 
     private suspend fun detect(path: String): FaceDetectionResult? {
         val tagger = tagger ?: return null
-        val bitmap = MediaPreviewLoader.decodeForAnalysis(path, ANALYSIS_DIMENSION).bitmap ?: return null
+        val decoded = MediaPreviewLoader.decodeForAnalysis(path, ANALYSIS_DIMENSION).bitmap ?: return null
+        // ML Kit reports landmarks in the orientation it was told to read the image in, so the
+        // picture has to be turned upright before detection rather than after. Detecting on a
+        // sideways bitmap and then cropping from it lands the crop somewhere else entirely - which
+        // produces confident matches between people who look nothing alike, because what is being
+        // compared is background rather than faces.
+        val upright = decoded.turnedUpright(rotationDegrees(path))
         return try {
-            tagger.detect(bitmap, rotationDegrees(path))
+            tagger.detect(upright, rotationDegrees = 0)
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (error: Exception) {
             Timber.w(error, "Face detection failed for %s", path)
             null
         } finally {
-            // decodeForAnalysis bypasses the preview caches, so nothing else can be holding this bitmap.
-            bitmap.recycle()
+            // decodeForAnalysis bypasses the preview caches, so nothing else can be holding these.
+            if (upright !== decoded) upright.recycle()
+            decoded.recycle()
         }
+    }
+
+    private fun Bitmap.turnedUpright(degrees: Int): Bitmap {
+        if (degrees == 0) return this
+        val matrix = Matrix().apply { postRotate(degrees.toFloat()) }
+        return runCatching {
+            Bitmap.createBitmap(this, 0, 0, width, height, matrix, true)
+        }.getOrDefault(this)
     }
 
     /** BitmapFactory ignores EXIF, so a portrait photo arrives sideways unless the rotation is passed on. */

@@ -54,7 +54,19 @@ class GeometricFaceEmbedder : FaceEmbedder {
 
 /** The real thing: an aligned crop through a face recognition model. See [FaceEmbeddingModel]. */
 class ModelFaceEmbedder(private val model: FaceEmbeddingModel) : FaceEmbedder {
-    override val descriptorId: String = "tflite-${model.inputSize}-${model.embeddingSize}-${model.fingerprint}"
+    companion object {
+        /** 2: the alignment template was corrected to the reference ArcFace five-point positions. */
+        const val PIPELINE_VERSION = 2
+    }
+
+    /**
+     * [PIPELINE_VERSION] is part of the identity of the vector space, not decoration: how a face is
+     * cropped and scaled decides what the vectors mean just as much as which model produced them.
+     * Bumping it retires every stored vector, which is what has to happen when the preprocessing
+     * changes - otherwise old and new vectors get compared as though they were the same thing.
+     */
+    override val descriptorId: String =
+        "tflite-v$PIPELINE_VERSION-${model.inputSize}-${model.embeddingSize}-${model.fingerprint}"
 
     override fun embed(bitmap: Bitmap, face: Face): FloatArray? {
         val leftEye = face.point(FaceLandmark.LEFT_EYE)
@@ -68,6 +80,7 @@ class ModelFaceEmbedder(private val model: FaceEmbeddingModel) : FaceEmbedder {
             Timber.d("Face skipped: could not align (eyes %s / %s)", leftEye, rightEye)
             return null
         }
+        FaceCropDebug.dump(aligned)
         return try {
             val sharpness = FaceQuality.sharpness(aligned)
             if (sharpness < FaceQuality.MIN_LAPLACIAN_VARIANCE) {
