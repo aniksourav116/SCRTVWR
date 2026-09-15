@@ -5,10 +5,12 @@ import android.content.res.AssetFileDescriptor
 import android.graphics.Bitmap
 import org.tensorflow.lite.Interpreter
 import timber.log.Timber
+import java.io.File
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.channels.FileChannel
+import java.util.zip.CRC32
 import kotlin.math.sqrt
 
 /**
@@ -28,6 +30,8 @@ class FaceEmbeddingModel private constructor(
     private val interpreter: Interpreter,
     val inputSize: Int,
     val embeddingSize: Int,
+    /** Identifies this exact file, so swapping in a different model of the same shape is noticed. */
+    val fingerprint: String,
 ) {
     private val inputBuffer: ByteBuffer = ByteBuffer
         .allocateDirect(inputSize * inputSize * CHANNELS * Float.SIZE_BYTES)
@@ -80,22 +84,50 @@ class FaceEmbeddingModel private constructor(
         private const val MEAN = 127.5f
         private const val STD = 128f
 
-        /** Returns null when the asset is absent or unreadable, which is a supported state. */
+        /**
+         * Loads a model the user installed in preference to one bundled in assets, and returns null
+         * when there is neither - which is a supported state, not an error.
+         */
         fun load(context: Context): FaceEmbeddingModel? = runCatching {
-            val interpreter = Interpreter(
-                context.assets.readModel(ASSET_NAME),
-                Interpreter.Options().setNumThreads(INFERENCE_THREADS),
-            )
+            val buffer = installedModel(context) ?: context.assets.readModel(ASSET_NAME)
+            val interpreter = Interpreter(buffer, Interpreter.Options().setNumThreads(INFERENCE_THREADS))
             val inputShape = interpreter.getInputTensor(0).shape()
             val outputShape = interpreter.getOutputTensor(0).shape()
             val inputSize = inputShape.getOrNull(1) ?: error("Model has no input height")
             val embeddingSize = outputShape.lastOrNull() ?: error("Model has no embedding size")
             require(inputSize > 0 && embeddingSize > 0) { "Unusable model shapes" }
-            Timber.i("Face model loaded: input %d, embedding %d", inputSize, embeddingSize)
-            FaceEmbeddingModel(interpreter, inputSize, embeddingSize)
+            val fingerprint = buffer.fingerprint()
+            Timber.i(
+                "Face model loaded: input %d, embedding %d, fingerprint %s",
+                inputSize,
+                embeddingSize,
+                fingerprint,
+            )
+            FaceEmbeddingModel(interpreter, inputSize, embeddingSize, fingerprint)
         }.onFailure { error ->
-            Timber.w("Face recognition model unavailable (%s); falling back to landmark geometry: %s", ASSET_NAME, error.message)
+            Timber.w(
+                "Face recognition model unavailable (%s); falling back to landmark geometry: %s",
+                ASSET_NAME,
+                error.message,
+            )
         }.getOrNull()
+
+        private fun installedModel(context: Context): ByteBuffer? {
+            val file = FaceModelInstaller.installedModel(context).takeIf(File::isFile) ?: return null
+            return FileInputStream(file).use { stream ->
+                stream.channel.map(FileChannel.MapMode.READ_ONLY, 0, file.length())
+            }
+        }
+
+        /**
+         * Two different models can share an input and output shape, and their vectors would then look
+         * comparable while meaning entirely different things. A checksum of the file keeps them apart.
+         */
+        private fun ByteBuffer.fingerprint(): String {
+            val checksum = CRC32()
+            checksum.update(duplicate())
+            return "${capacity()}-${checksum.value.toString(16)}"
+        }
 
         private fun android.content.res.AssetManager.readModel(name: String) =
             openFd(name).use { descriptor -> descriptor.mapModel() }

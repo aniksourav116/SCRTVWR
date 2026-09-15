@@ -53,7 +53,7 @@ class GeometricFaceEmbedder : FaceEmbedder {
 
 /** The real thing: an aligned crop through a face recognition model. See [FaceEmbeddingModel]. */
 class ModelFaceEmbedder(private val model: FaceEmbeddingModel) : FaceEmbedder {
-    override val descriptorId: String = "mobilefacenet-${model.inputSize}-${model.embeddingSize}"
+    override val descriptorId: String = "tflite-${model.inputSize}-${model.embeddingSize}-${model.fingerprint}"
 
     override fun embed(bitmap: Bitmap, face: Face): FloatArray? {
         val leftEye = face.point(FaceLandmark.LEFT_EYE) ?: return null

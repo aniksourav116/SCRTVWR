@@ -326,14 +326,16 @@ class CharacterRegistry(
         return true
     }
 
-    /** Swaps the matching rules, for example when a recognition model appears. Wipes incomparable state. */
-    fun useRules(newRules: MatchingRules) {
-        if (newRules.descriptorId == rules.descriptorId) {
-            rules = newRules
-            return
-        }
+    /**
+     * Swaps the matching rules, for example when a recognition model is installed. Returns false when
+     * the new rules describe a different vector space, in which case everything held here is dropped:
+     * old vectors cannot be compared with new ones, so keeping them would produce nonsense groups.
+     */
+    fun useRules(newRules: MatchingRules): Boolean {
+        val compatible = newRules.descriptorId == rules.descriptorId
         rules = newRules
-        clear()
+        if (!compatible) clear()
+        return compatible
     }
 
     private fun assign(embedding: FloatArray): Identity? {

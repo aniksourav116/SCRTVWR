@@ -1,5 +1,8 @@
 import com.google.firebase.appdistribution.gradle.firebaseAppDistribution
 import com.google.firebase.crashlytics.buildtools.gradle.CrashlyticsExtension
+import java.io.File
+import java.net.URI
+import java.security.MessageDigest
 import java.util.Properties
 
 plugins {
@@ -85,6 +88,8 @@ android {
     androidResources {
         // The face model is memory-mapped straight out of the APK, which only works uncompressed.
         noCompress += "tflite"
+        // The notes on sourcing a model belong next to where it goes, not inside the shipped app.
+        ignoreAssetsPatterns += "README.md"
     }
 }
 
@@ -97,6 +102,101 @@ firebaseAppDistribution {
     providers.gradleProperty("firebaseTesterGroups").orNull?.let { groups = it }
     System.getenv("FIREBASE_SERVICE_ACCOUNT")?.let { serviceCredentialsFile = it }
 }
+
+// Optional: bake a face recognition model into the APK at build time.
+//
+// No model is downloaded unless a source is configured, because which model ships in the app is a
+// licensing decision. Set it in gradle.properties:
+//
+//     faceModelUrl=https://example.com/mobilefacenet.tflite
+//     faceModelSha256=<sha-256 of that file>
+//
+// or as SCRTVWR_FACE_MODEL_URL / SCRTVWR_FACE_MODEL_SHA256 in the environment. The checksum is
+// optional but strongly advised: it is what stops the build silently picking up a changed file.
+val faceModelUrl: String? = providers.gradleProperty("faceModelUrl").orNull
+    ?: System.getenv("SCRTVWR_FACE_MODEL_URL")
+val faceModelSha256: String? = providers.gradleProperty("faceModelSha256").orNull
+    ?: System.getenv("SCRTVWR_FACE_MODEL_SHA256")
+val faceModelFile = file("src/main/assets/mobilefacenet.tflite")
+
+val downloadFaceModel = tasks.register("downloadFaceModel") {
+    // Everything the action needs is captured as a plain local here. Reaching back into the script
+    // from inside doLast is what the configuration cache refuses to serialise.
+    val url = faceModelUrl
+    val expected = faceModelSha256?.trim()
+    val target = faceModelFile
+
+    description = "Downloads the face recognition model into assets so it ships inside the APK."
+    group = "build setup"
+    onlyIf { url != null }
+    outputs.file(target)
+
+    doLast {
+        if (url == null) return@doLast
+
+        val alreadyCorrect = target.isFile && (
+            expected.isNullOrBlank() ||
+                run {
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    target.inputStream().use { stream ->
+                        val buffer = ByteArray(1 shl 16)
+                        while (true) {
+                            val read = stream.read(buffer)
+                            if (read <= 0) break
+                            digest.update(buffer, 0, read)
+                        }
+                    }
+                    digest.digest()
+                        .joinToString(separator = "") { value: Byte -> "%02x".format(value) }
+                        .equals(expected, ignoreCase = true)
+                }
+            )
+        if (alreadyCorrect) {
+            logger.lifecycle("Face model already present at ${target.path}")
+            return@doLast
+        }
+
+        target.parentFile.mkdirs()
+        val temporary = File.createTempFile("face-model-", ".tmp", target.parentFile)
+        try {
+            logger.lifecycle("Downloading face model from $url")
+            val connection = URI(url).toURL().openConnection().apply {
+                connectTimeout = 30_000
+                readTimeout = 60_000
+            }
+            connection.inputStream.use { input ->
+                temporary.outputStream().use { output -> input.copyTo(output) }
+            }
+
+            if (!expected.isNullOrBlank()) {
+                val actual = run {
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    temporary.inputStream().use { stream ->
+                        val buffer = ByteArray(1 shl 16)
+                        while (true) {
+                            val read = stream.read(buffer)
+                            if (read <= 0) break
+                            digest.update(buffer, 0, read)
+                        }
+                    }
+                    digest.digest().joinToString(separator = "") { value: Byte -> "%02x".format(value) }
+                }
+                check(actual.equals(expected, ignoreCase = true)) {
+                    "Downloaded face model does not match faceModelSha256 (got $actual); refusing to use it"
+                }
+            }
+
+            check(temporary.renameTo(target) || (target.delete() && temporary.renameTo(target))) {
+                "Unable to move the face model into ${target.path}"
+            }
+            logger.lifecycle("Face model packed: ${target.length()} bytes")
+        } finally {
+            temporary.delete()
+        }
+    }
+}
+
+tasks.named("preBuild") { dependsOn(downloadFaceModel) }
 
 dependencies {
     implementation(platform(libs.androidx.compose.bom))

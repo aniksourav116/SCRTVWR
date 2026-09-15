@@ -1,6 +1,7 @@
 package srv.scrtvwr.ui.dashboard.screens.viewmodels
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
@@ -11,10 +12,19 @@ import kotlinx.coroutines.launch
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.tagging.CharacterProfile
 import srv.scrtvwr.tagging.CharacterTagRepository
+import srv.scrtvwr.tagging.FaceModelInstaller
 import srv.scrtvwr.tagging.ImageTags
 import srv.scrtvwr.tagging.StorageScanConsent
 import srv.scrtvwr.tagging.TagScanProgress
 import srv.scrtvwr.tagging.TaggingState
+
+/** The outcome of installing a face model, shown once and then dismissed. */
+data class ModelMessage(
+    val installed: Boolean,
+    val inputSize: Int = 0,
+    val embeddingSize: Int = 0,
+    val reason: String = "",
+)
 
 /** Backs the People tab: the characters tagging has found, and the controls for the tagging itself. */
 class PeopleViewModel(application: Application) : AndroidViewModel(application) {
@@ -88,6 +98,23 @@ class PeopleViewModel(application: Application) : AndroidViewModel(application) 
 
     fun rebuildGroups() {
         viewModelScope.launch { CharacterTagRepository.rebuildGroups() }
+    }
+
+    /** Installs a model the user picked from storage; the result is reported back on screen. */
+    fun installModel(uri: Uri) {
+        viewModelScope.launch {
+            val message = when (val result = CharacterTagRepository.installModel(uri)) {
+                is FaceModelInstaller.InstallResult.Installed ->
+                    ModelMessage(installed = true, inputSize = result.inputSize, embeddingSize = result.embeddingSize)
+                is FaceModelInstaller.InstallResult.Rejected ->
+                    ModelMessage(installed = false, reason = result.reason)
+            }
+            _uiState.update { it.copy(modelMessage = message) }
+        }
+    }
+
+    fun clearModelMessage() {
+        _uiState.update { it.copy(modelMessage = null) }
     }
 
     fun openCharacter(profile: CharacterProfile) {
@@ -172,6 +199,7 @@ data class PeopleUiState(
     val lastStorageScanMillis: Long = 0L,
     val usingRecognitionModel: Boolean = true,
     val rebuilding: Boolean = false,
+    val modelMessage: ModelMessage? = null,
 ) {
     val taggingState: TaggingState
         get() = when {

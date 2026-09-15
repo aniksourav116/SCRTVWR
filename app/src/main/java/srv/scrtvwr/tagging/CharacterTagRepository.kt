@@ -2,6 +2,7 @@ package srv.scrtvwr.tagging
 
 import android.content.Context
 import android.media.ExifInterface
+import android.net.Uri
 import android.os.Environment
 import android.os.SystemClock
 import kotlinx.coroutines.CancellationException
@@ -58,6 +59,10 @@ object CharacterTagRepository {
 
     private var store: CharacterTagStore? = null
     private var preferences: ScrtvwrPreferences? = null
+    private var appContext: Context? = null
+
+    /** Set while the embedder is being replaced, so no image is tagged into a half-swapped state. */
+    @Volatile private var swappingModel = false
     private var tagger: FaceTagger? = null
     private var embeddingModel: FaceEmbeddingModel? = null
     private var scanJob: Job? = null
@@ -97,6 +102,7 @@ object CharacterTagRepository {
     fun initialize(context: Context) {
         if (store != null) return
         val applicationContext = context.applicationContext
+        appContext = applicationContext
         val scrtvwrPreferences = ScrtvwrPreferences(applicationContext)
         preferences = scrtvwrPreferences
         _enabled.value = scrtvwrPreferences.getFaceTaggingEnabled()
@@ -105,17 +111,10 @@ object CharacterTagRepository {
         store = tagStore
 
         scope.launch {
-            val model = withContext(Dispatchers.IO) { FaceEmbeddingModel.load(applicationContext) }
-            embeddingModel = model
-            val embedder = model?.let(::ModelFaceEmbedder) ?: GeometricFaceEmbedder()
-            tagger = FaceTagger(embedder)
-            _usingRecognitionModel.value = model != null
+            applyEmbedder(applicationContext)
 
             val snapshot = withContext(Dispatchers.IO) { tagStore.read() }
-            val restored = mutex.withLock {
-                registry.useRules(MatchingRules.forEmbedder(embedder))
-                registry.restore(snapshot)
-            }
+            val restored = mutex.withLock { registry.restore(snapshot) }
             if (!restored) {
                 // Tags came from a different embedder: their vectors mean nothing here, so the
                 // images are tagged again rather than compared across incompatible spaces.
@@ -131,6 +130,40 @@ object CharacterTagRepository {
                 persist()
             }
         }
+    }
+
+    /**
+     * Installs a recognition model the user picked. Tags built by the previous embedder are dropped,
+     * because vectors from two different models describe different spaces and cannot be compared.
+     */
+    suspend fun installModel(uri: Uri): FaceModelInstaller.InstallResult {
+        val context = appContext
+            ?: return FaceModelInstaller.InstallResult.Rejected("Tagging is not ready yet")
+        val result = withContext(Dispatchers.IO) { FaceModelInstaller.install(context, uri) }
+        if (result is FaceModelInstaller.InstallResult.Installed) {
+            cancelStorageScan()
+            swappingModel = true
+            try {
+                val kept = applyEmbedder(context)
+                if (!kept) withContext(NonCancellable + Dispatchers.IO) { store?.clear() }
+            } finally {
+                swappingModel = false
+            }
+            publish(force = true)
+        }
+        return result
+    }
+
+    /** Loads whichever model is available and rebuilds the tagger and matching rules around it. */
+    private suspend fun applyEmbedder(context: Context): Boolean {
+        val model = withContext(Dispatchers.IO) { FaceEmbeddingModel.load(context) }
+        embeddingModel?.close()
+        embeddingModel = model
+        val embedder = model?.let(::ModelFaceEmbedder) ?: GeometricFaceEmbedder()
+        tagger?.close()
+        tagger = FaceTagger(embedder)
+        _usingRecognitionModel.value = model != null
+        return mutex.withLock { registry.useRules(MatchingRules.forEmbedder(embedder)) }
     }
 
     fun isEnabled(): Boolean = _enabled.value
@@ -182,7 +215,7 @@ object CharacterTagRepository {
      * switched off, the image cannot be decoded, or detection failed.
      */
     suspend fun tag(path: String, modifiedMillis: Long): ImageTags? {
-        if (store == null || !isEnabled()) return null
+        if (store == null || !isEnabled() || swappingModel) return null
         ready.await()
         // Parking here rather than returning keeps a paused scan exactly where it stopped.
         if (_paused.value) _paused.first { !it }

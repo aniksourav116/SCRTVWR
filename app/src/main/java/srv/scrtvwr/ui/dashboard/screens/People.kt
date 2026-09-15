@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.ImageSearch
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Merge
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -67,6 +68,7 @@ import srv.scrtvwr.tagging.ImageTags
 import srv.scrtvwr.tagging.TagScanProgress
 import srv.scrtvwr.tagging.TaggingState
 import srv.scrtvwr.ui.components.BaseScaffold
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.ModelMessage
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.PeopleUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.PeopleViewModel
 import srv.scrtvwr.ui.tagging.CharacterCover
@@ -89,7 +91,15 @@ fun People(
     val mediaLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
     ) { }
+    // A .tflite has no registered MIME type, so the picker cannot filter on one.
+    val modelPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri -> uri?.let(viewModel::installModel) }
     val selected = uiState.selectedCharacter
+
+    uiState.modelMessage?.let { message ->
+        ModelMessageDialog(message = message, onDismiss = viewModel::clearModelMessage)
+    }
 
     BackHandler(enabled = isVisible && selected != null) { viewModel.closeCharacter() }
 
@@ -101,6 +111,7 @@ fun People(
             onStartStorageScan = viewModel::startStorageScan,
             onStopStorageScan = viewModel::stopStorageScan,
             onRebuildGroups = viewModel::rebuildGroups,
+            onPickModel = { modelPicker.launch(arrayOf("*/*")) },
             modifier = modifier,
         )
     } else {
@@ -137,6 +148,7 @@ fun PeopleScreen(
     onStartStorageScan: () -> Unit,
     onStopStorageScan: () -> Unit,
     onRebuildGroups: () -> Unit,
+    onPickModel: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     BaseScaffold(
@@ -177,6 +189,7 @@ fun PeopleScreen(
                 onStartStorageScan = onStartStorageScan,
                 onStopStorageScan = onStopStorageScan,
                 onRebuildGroups = onRebuildGroups,
+                onPickModel = onPickModel,
             )
 
             if (uiState.characters.isEmpty()) {
@@ -248,6 +261,7 @@ private fun TaggingStatusCard(
     onStartStorageScan: () -> Unit,
     onStopStorageScan: () -> Unit,
     onRebuildGroups: () -> Unit,
+    onPickModel: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -338,7 +352,10 @@ private fun TaggingStatusCard(
             }
 
             if (state != TaggingState.Off) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     TextButton(
                         onClick = { if (progress.isRunning) onStopStorageScan() else onStartStorageScan() },
                     ) {
@@ -365,10 +382,44 @@ private fun TaggingStatusCard(
                             modifier = Modifier.padding(start = 8.dp),
                         )
                     }
+                    TextButton(onClick = onPickModel) {
+                        Icon(
+                            imageVector = Icons.Default.Memory,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = stringResource(
+                                if (usingRecognitionModel) R.string.replace_model else R.string.install_model,
+                            ),
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+/** Reports what happened to a model the user picked, whether it was taken or refused. */
+@Composable
+private fun ModelMessageDialog(message: ModelMessage, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.model_dialog_title)) },
+        text = {
+            Text(
+                if (message.installed) {
+                    stringResource(R.string.model_installed, message.inputSize, message.embeddingSize)
+                } else {
+                    stringResource(R.string.model_rejected, message.reason)
+                },
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
+        },
+    )
 }
 
 /** What tapping a photo on a character's page does. */
