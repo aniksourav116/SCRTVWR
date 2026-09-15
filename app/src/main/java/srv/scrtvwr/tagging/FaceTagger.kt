@@ -10,6 +10,7 @@ import com.google.mlkit.vision.face.FaceDetector
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import com.google.mlkit.vision.face.FaceLandmark
 import kotlinx.coroutines.suspendCancellableCoroutine
+import timber.log.Timber
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -56,11 +57,25 @@ class ModelFaceEmbedder(private val model: FaceEmbeddingModel) : FaceEmbedder {
     override val descriptorId: String = "tflite-${model.inputSize}-${model.embeddingSize}-${model.fingerprint}"
 
     override fun embed(bitmap: Bitmap, face: Face): FloatArray? {
-        val leftEye = face.point(FaceLandmark.LEFT_EYE) ?: return null
-        val rightEye = face.point(FaceLandmark.RIGHT_EYE) ?: return null
-        val aligned = FaceAligner.align(bitmap, leftEye, rightEye, model.inputSize) ?: return null
+        val leftEye = face.point(FaceLandmark.LEFT_EYE)
+        val rightEye = face.point(FaceLandmark.RIGHT_EYE)
+        if (leftEye == null || rightEye == null) {
+            Timber.d("Face skipped: no eye landmarks")
+            return null
+        }
+        val aligned = FaceAligner.align(bitmap, leftEye, rightEye, model.inputSize)
+        if (aligned == null) {
+            Timber.d("Face skipped: could not align (eyes %s / %s)", leftEye, rightEye)
+            return null
+        }
         return try {
-            if (FaceQuality.isTooBlurred(aligned)) null else model.embed(aligned)
+            val sharpness = FaceQuality.sharpness(aligned)
+            if (sharpness < FaceQuality.MIN_LAPLACIAN_VARIANCE) {
+                Timber.d("Face skipped: too blurred (sharpness %.1f)", sharpness)
+                null
+            } else {
+                model.embed(aligned).also { if (it == null) Timber.d("Face skipped: the model returned nothing") }
+            }
         } finally {
             aligned.recycle()
         }
@@ -87,12 +102,39 @@ class FaceTagger(val embedder: FaceEmbedder = GeometricFaceEmbedder()) {
         if (bitmap.isRecycled || bitmap.width <= 0 || bitmap.height <= 0) return FaceDetectionResult.Empty
         val faces = detector.process(InputImage.fromBitmap(bitmap, rotationDegrees)).await()
         if (faces.isEmpty()) return FaceDetectionResult.Empty
-        return FaceDetectionResult(
-            faceCount = faces.size,
-            embeddings = faces
-                .filter { face -> face.isBigEnoughToIdentify() && face.isFacingCameraEnough() }
-                .mapNotNull { face -> embedder.embed(bitmap, face) },
+
+        val usable = faces.filter { face ->
+            when {
+                !face.isBigEnoughToIdentify() -> {
+                    Timber.d(
+                        "Face skipped: %dx%d px, smaller than the %d px identity floor",
+                        face.boundingBox.width(),
+                        face.boundingBox.height(),
+                        MIN_IDENTITY_FACE_PIXELS,
+                    )
+                    false
+                }
+                !face.isFacingCameraEnough() -> {
+                    Timber.d(
+                        "Face skipped: turned too far (yaw %.0f, roll %.0f)",
+                        face.headEulerAngleY,
+                        face.headEulerAngleZ,
+                    )
+                    false
+                }
+                else -> true
+            }
+        }
+        val embeddings = usable.mapNotNull { face -> embedder.embed(bitmap, face) }
+        Timber.d(
+            "Faces: %d detected, %d past the gates, %d embedded (image %dx%d)",
+            faces.size,
+            usable.size,
+            embeddings.size,
+            bitmap.width,
+            bitmap.height,
         )
+        return FaceDetectionResult(faceCount = faces.size, embeddings = embeddings)
     }
 
     fun close() {
@@ -127,11 +169,12 @@ class FaceTagger(val embedder: FaceEmbedder = GeometricFaceEmbedder()) {
         const val MIN_FACE_SIZE = 0.06f
 
         /**
-         * Measured on the analysis bitmap, which the repository decodes at 1024 pixels. Below this a
-         * face is mostly interpolation by the time it reaches the model, and its vector says more
-         * about the blur than about the person.
+         * Measured on the analysis bitmap. The model resamples every face to its own input size, so
+         * this is about how much real detail exists rather than about matching that size: a little
+         * under half of it still carries a usable identity, while the avatar-sized faces in chat
+         * screenshots - routinely ten pixels across - carry none and would poison the clusters.
          */
-        const val MIN_IDENTITY_FACE_PIXELS = 96
+        const val MIN_IDENTITY_FACE_PIXELS = 48
     }
 }
 

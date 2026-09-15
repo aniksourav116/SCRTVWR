@@ -446,11 +446,12 @@ object CharacterTagRepository {
     private const val TAG_DIRECTORY_NAME = "character_tags"
 
     /**
-     * Faces have to survive being decoded before they can be recognised: at 1024 pixels a face that
-     * fills a tenth of the frame still arrives near the 112-pixel crop the model wants, where at 640
-     * it would be mostly interpolation.
+     * Faces have to survive being decoded before they can be recognised. Decoding larger keeps more
+     * of them above the identity floor - a face filling a twentieth of the frame lands at about 77
+     * pixels here against 51 at 1024 - at the cost of roughly twice the pixels to decode and detect.
+     * Images smaller than this are never scaled up; there is no detail to invent.
      */
-    private const val ANALYSIS_DIMENSION = 1024
+    private const val ANALYSIS_DIMENSION = 1536
     private const val MAX_SCAN_IMAGES = 100_000
     private const val SAVE_DEBOUNCE_MILLIS = 2_000L
     private const val PUBLISH_INTERVAL_MILLIS = 300L

@@ -30,14 +30,20 @@ class FaceEmbeddingModel private constructor(
     private val interpreter: Interpreter,
     val inputSize: Int,
     val embeddingSize: Int,
+    /**
+     * How many faces the graph expects per run. Some exports - including the common MobileFaceNet one
+     * built for comparing a pair of faces - bake a batch larger than one into the input tensor, and
+     * TensorFlow Lite rejects a buffer that does not fill it exactly.
+     */
+    private val batchSize: Int,
     /** Identifies this exact file, so swapping in a different model of the same shape is noticed. */
     val fingerprint: String,
 ) {
     private val inputBuffer: ByteBuffer = ByteBuffer
-        .allocateDirect(inputSize * inputSize * CHANNELS * Float.SIZE_BYTES)
+        .allocateDirect(batchSize * inputSize * inputSize * CHANNELS * Float.SIZE_BYTES)
         .order(ByteOrder.nativeOrder())
     private val pixels = IntArray(inputSize * inputSize)
-    private val output = Array(1) { FloatArray(embeddingSize) }
+    private val output = Array(batchSize) { FloatArray(embeddingSize) }
     private val lock = Any()
 
     /** Runs one aligned face crop through the model and returns a unit-length embedding. */
@@ -60,10 +66,14 @@ class FaceEmbeddingModel private constructor(
     private fun writeInput(bitmap: Bitmap) {
         inputBuffer.rewind()
         bitmap.getPixels(pixels, 0, inputSize, 0, 0, inputSize, inputSize)
-        pixels.forEach { pixel ->
-            inputBuffer.putFloat((((pixel shr 16) and 0xFF) - MEAN) / STD)
-            inputBuffer.putFloat((((pixel shr 8) and 0xFF) - MEAN) / STD)
-            inputBuffer.putFloat(((pixel and 0xFF) - MEAN) / STD)
+        // The face goes into every slot of the batch. Only the first result is read; the rest cost a
+        // little compute and keep the buffer the exact size the graph demands.
+        repeat(batchSize) {
+            pixels.forEach { pixel ->
+                inputBuffer.putFloat((((pixel shr 16) and 0xFF) - MEAN) / STD)
+                inputBuffer.putFloat((((pixel shr 8) and 0xFF) - MEAN) / STD)
+                inputBuffer.putFloat(((pixel and 0xFF) - MEAN) / STD)
+            }
         }
         inputBuffer.rewind()
     }
@@ -95,15 +105,17 @@ class FaceEmbeddingModel private constructor(
             val outputShape = interpreter.getOutputTensor(0).shape()
             val inputSize = inputShape.getOrNull(1) ?: error("Model has no input height")
             val embeddingSize = outputShape.lastOrNull() ?: error("Model has no embedding size")
+            val batchSize = inputShape.getOrNull(0)?.takeIf { it > 0 } ?: 1
             require(inputSize > 0 && embeddingSize > 0) { "Unusable model shapes" }
             val fingerprint = buffer.fingerprint()
             Timber.i(
-                "Face model loaded: input %d, embedding %d, fingerprint %s",
+                "Face model loaded: batch %d, input %d, embedding %d, fingerprint %s",
+                batchSize,
                 inputSize,
                 embeddingSize,
                 fingerprint,
             )
-            FaceEmbeddingModel(interpreter, inputSize, embeddingSize, fingerprint)
+            FaceEmbeddingModel(interpreter, inputSize, embeddingSize, batchSize, fingerprint)
         }.onFailure { error ->
             Timber.w(
                 "Face recognition model unavailable (%s); falling back to landmark geometry: %s",
