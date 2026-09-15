@@ -111,6 +111,7 @@ dependencies {
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.crashlytics)
     implementation(libs.firebase.messaging)
+    implementation(libs.mlkit.face.detection)
     implementation(libs.timber)
     implementation(libs.junrar)
     implementation(libs.androidx.media3.exoplayer)

@@ -5,6 +5,7 @@ import org.json.JSONArray
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
 import srv.scrtvwr.ui.media.VideoCompletionAction
+import srv.scrtvwr.tagging.StorageScanConsent
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import java.io.File
 
@@ -90,6 +91,29 @@ class ScrtvwrPreferences(context: Context) {
 
     fun saveShowDirectoryFileActions(enabled: Boolean) {
         preferences.edit().putBoolean(KEY_SHOW_DIRECTORY_FILE_ACTIONS, enabled).apply()
+    }
+
+    fun getFaceTaggingEnabled(): Boolean =
+        preferences.getBoolean(KEY_FACE_TAGGING_ENABLED, true)
+
+    fun saveFaceTaggingEnabled(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_FACE_TAGGING_ENABLED, enabled).apply()
+    }
+
+    fun getStorageScanConsent(): StorageScanConsent =
+        preferences.getString(KEY_STORAGE_SCAN_CONSENT, null)
+            ?.let { value -> StorageScanConsent.entries.firstOrNull { it.name == value } }
+            ?: StorageScanConsent.Unknown
+
+    fun saveStorageScanConsent(consent: StorageScanConsent) {
+        preferences.edit().putString(KEY_STORAGE_SCAN_CONSENT, consent.name).apply()
+    }
+
+    fun getLastStorageScanMillis(): Long =
+        preferences.getLong(KEY_LAST_STORAGE_SCAN_MILLIS, 0L)
+
+    fun saveLastStorageScanMillis(millis: Long) {
+        preferences.edit().putLong(KEY_LAST_STORAGE_SCAN_MILLIS, millis).apply()
     }
 
     fun getBookmarkedMedia(): Set<String> =
@@ -212,6 +236,9 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_MEDIA_EDGE_DIALOG_STYLE = "media_edge_dialog_style"
         const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
         const val KEY_SHOW_DIRECTORY_FILE_ACTIONS = "show_directory_file_actions"
+        const val KEY_FACE_TAGGING_ENABLED = "face_tagging_enabled"
+        const val KEY_STORAGE_SCAN_CONSENT = "storage_scan_consent"
+        const val KEY_LAST_STORAGE_SCAN_MILLIS = "last_storage_scan_millis"
         const val KEY_BOOKMARKED_MEDIA = "bookmarked_media"
         const val KEY_MEDIA_HISTORY = "media_history"
         const val KEY_LAST_DIRECTORY = "last_directory"

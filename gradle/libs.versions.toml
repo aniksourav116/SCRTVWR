@@ -15,6 +15,7 @@ googleServices = "4.5.0"
 firebaseBom = "34.19.0"
 firebaseCrashlyticsPlugin = "3.0.8"
 firebaseAppDistributionPlugin = "5.3.0"
+mlkitFaceDetection = "16.1.7"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -43,6 +44,7 @@ firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.r
 firebase-analytics = { group = "com.google.firebase", name = "firebase-analytics" }
 firebase-crashlytics = { group = "com.google.firebase", name = "firebase-crashlytics" }
 firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging" }
+mlkit-face-detection = { group = "com.google.mlkit", name = "face-detection", version.ref = "mlkitFaceDetection" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

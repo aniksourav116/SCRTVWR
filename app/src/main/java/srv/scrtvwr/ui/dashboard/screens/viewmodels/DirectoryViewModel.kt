@@ -20,6 +20,11 @@ import srv.scrtvwr.R
 import srv.scrtvwr.media.MediaCatalog
 import srv.scrtvwr.preferences.LastMediaSession
 import srv.scrtvwr.preferences.ScrtvwrPreferences
+import srv.scrtvwr.tagging.CharacterProfile
+import srv.scrtvwr.tagging.CharacterTagRepository
+import srv.scrtvwr.tagging.ImageTags
+import srv.scrtvwr.tagging.StorageScanConsent
+import srv.scrtvwr.tagging.TagScanProgress
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.sort.fileComparator
 import java.io.File
@@ -65,11 +70,15 @@ class DirectoryViewModel(
     )
     val uiState: StateFlow<DirectoryUiState> = _uiState.asStateFlow()
     private var scanJob: Job? = null
+    private var tagJob: Job? = null
+    /** The listing before the character filter is applied, so the filter can be changed without a rescan. */
+    private var unfilteredListing: DirectoryListing? = null
     private val scrollPositions = mutableMapOf<String, DirectoryScrollPosition>()
 
     init {
         saveLastDirectory(initialDirectory)
         scanDirectory()
+        observeTagging()
     }
 
     fun updateSearchQuery(query: String) {
@@ -268,17 +277,105 @@ class DirectoryViewModel(
                     mediaFilter = request.mediaFilter,
                 )
             }
-            _uiState.update { current ->
-                if (current.currentDirectory.absolutePath != request.currentDirectory.absolutePath ||
-                    current.searchQuery != request.searchQuery || current.sortOrder != request.sortOrder ||
-                    current.mediaFilter != request.mediaFilter
-                ) current else current.copy(
-                    directoryListing = listing,
-                    isLoading = false,
-                    errorMessage = listing.errorMessage,
-                )
+            val current = _uiState.value
+            val isStale = current.currentDirectory.absolutePath != request.currentDirectory.absolutePath ||
+                current.searchQuery != request.searchQuery || current.sortOrder != request.sortOrder ||
+                current.mediaFilter != request.mediaFilter
+            if (isStale) return@launch
+            unfilteredListing = listing
+            _uiState.update { it.copy(isLoading = false, errorMessage = listing.errorMessage) }
+            applyCharacterTags(listing)
+            startTagging(listing.entries)
+        }
+    }
+
+    /** Collects tagging state so badges, the character list and scan progress follow the repository. */
+    private fun observeTagging() {
+        viewModelScope.launch {
+            CharacterTagRepository.characters.collect { characters ->
+                _uiState.update { it.copy(characters = characters) }
             }
         }
+        viewModelScope.launch {
+            CharacterTagRepository.scanProgress.collect { progress ->
+                _uiState.update { it.copy(tagScanProgress = progress) }
+            }
+        }
+        viewModelScope.launch {
+            CharacterTagRepository.revision.collect {
+                unfilteredListing?.let { listing -> applyCharacterTags(listing) }
+            }
+        }
+        viewModelScope.launch {
+            // The prompt only makes sense once tagging has actually found a face to show for it.
+            CharacterTagRepository.facesFound.collect { found ->
+                val prompt = found && CharacterTagRepository.isEnabled() &&
+                    CharacterTagRepository.storageScanConsent() == StorageScanConsent.Unknown
+                _uiState.update { it.copy(showStorageScanPrompt = prompt) }
+            }
+        }
+    }
+
+    /** Reads the tags for the current listing and applies the character filter on top of it. */
+    private suspend fun applyCharacterTags(listing: DirectoryListing) {
+        val filter = _uiState.value.characterFilter
+        val tags = CharacterTagRepository.tagsFor(
+            listing.entries.filterNot(DirectoryEntry::isDirectory).map(DirectoryEntry::path),
+        )
+        val entries = if (filter == null) {
+            listing.entries
+        } else {
+            listing.entries.filter { entry ->
+                entry.isDirectory || tags[entry.path]?.characterIds?.contains(filter) == true
+            }
+        }
+        _uiState.update { it.copy(directoryListing = listing.copy(entries = entries), imageTags = tags) }
+    }
+
+    /** Lazy tagging: only the images the user has actually opened a folder on. */
+    private fun startTagging(entries: List<DirectoryEntry>) {
+        tagJob?.cancel()
+        tagJob = CharacterTagRepository.tagDirectory(
+            entries
+                .filter { it.mediaType == DirectoryMediaType.Image }
+                .map { entry -> entry.path to entry.lastModifiedMillis },
+        )
+    }
+
+    fun setCharacterFilter(characterId: String?) {
+        _uiState.update { it.copy(characterFilter = characterId) }
+        viewModelScope.launch {
+            unfilteredListing?.let { listing -> applyCharacterTags(listing) }
+        }
+    }
+
+    fun renameCharacter(characterId: String, label: String?) {
+        viewModelScope.launch { CharacterTagRepository.rename(characterId, label) }
+    }
+
+    fun removeCharacter(characterId: String) {
+        viewModelScope.launch {
+            CharacterTagRepository.removeCharacter(characterId)
+            if (_uiState.value.characterFilter == characterId) setCharacterFilter(null)
+        }
+    }
+
+    /** Answer to the "tag every image in storage" prompt. Declining keeps per-folder tagging running. */
+    fun onStorageScanConsent(granted: Boolean) {
+        CharacterTagRepository.setStorageScanConsent(
+            if (granted) StorageScanConsent.Granted else StorageScanConsent.Declined,
+        )
+        _uiState.update { it.copy(showStorageScanPrompt = false) }
+        if (granted) CharacterTagRepository.startStorageScan()
+    }
+
+    fun stopStorageScan() {
+        CharacterTagRepository.cancelStorageScan()
+    }
+
+    override fun onCleared() {
+        tagJob?.cancel()
+        super.onCleared()
     }
 
     private companion object {
@@ -302,6 +399,11 @@ data class DirectoryUiState(
     val lastMediaSession: LastMediaSession? = null,
     val showHiddenFiles: Boolean = false,
     val showDirectoryFileActions: Boolean = false,
+    val characters: List<CharacterProfile> = emptyList(),
+    val imageTags: Map<String, ImageTags> = emptyMap(),
+    val characterFilter: String? = null,
+    val tagScanProgress: TagScanProgress = TagScanProgress(),
+    val showStorageScanPrompt: Boolean = false,
     val isLoading: Boolean = false,
     val isFileOperationRunning: Boolean = false,
     val pendingFileOperation: PendingDirectoryFileOperation? = null,
@@ -313,6 +415,9 @@ data class DirectoryUiState(
 
     val canReadCurrentDirectory: Boolean
         get() = directoryListing.canRead
+
+    val activeCharacter: CharacterProfile?
+        get() = characters.firstOrNull { it.id == characterFilter }
 }
 
 data class DirectoryListing(

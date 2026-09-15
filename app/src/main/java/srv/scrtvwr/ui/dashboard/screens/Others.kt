@@ -4,13 +4,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Slideshow
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.ImageSearch
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Icon
@@ -39,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.OthersUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.OthersViewModel
 import srv.scrtvwr.ui.components.SimpleDropdown
+import srv.scrtvwr.util.time.TimeUtil
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
@@ -60,6 +65,10 @@ fun Others(
         onImagePreloadDistanceChange = viewModel::setImagePreloadDistance,
         onVideoPreloadDistanceChange = viewModel::setVideoPreloadDistance,
         onMediaEdgeDialogStyleChange = viewModel::setMediaEdgeDialogStyle,
+        onFaceTaggingEnabledChange = viewModel::setFaceTaggingEnabled,
+        onStartStorageScan = viewModel::startStorageScan,
+        onStopStorageScan = viewModel::stopStorageScan,
+        onClearCharacterTags = viewModel::clearCharacterTags,
         modifier = modifier,
     )
 }
@@ -75,6 +84,10 @@ fun OthersScreen(
     onImagePreloadDistanceChange: (Int) -> Unit,
     onVideoPreloadDistanceChange: (Int) -> Unit,
     onMediaEdgeDialogStyleChange: (MediaEdgeDialogStyle) -> Unit,
+    onFaceTaggingEnabledChange: (Boolean) -> Unit = {},
+    onStartStorageScan: () -> Unit = {},
+    onStopStorageScan: () -> Unit = {},
+    onClearCharacterTags: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var slideShowStayMillisText by rememberSaveable { mutableStateOf(uiState.slideShowStayMillis.toString()) }
@@ -248,6 +261,72 @@ fun OthersScreen(
                                 MediaEdgeDialogStyle.Center -> centerDialogLabel
                             }
                         },
+                    )
+                },
+            )
+        }
+        item {
+            ListItem(
+                modifier = Modifier.fillMaxWidth(),
+                headlineContent = { Text(stringResource(R.string.face_tagging)) },
+                supportingContent = { Text(stringResource(R.string.face_tagging_summary)) },
+                leadingContent = { Icon(Icons.Default.Face, contentDescription = null) },
+                trailingContent = {
+                    Switch(
+                        checked = uiState.faceTaggingEnabled,
+                        onCheckedChange = onFaceTaggingEnabledChange,
+                    )
+                },
+            )
+        }
+        item {
+            val isScanning = uiState.tagScanProgress.isRunning
+            val lastScan = if (uiState.lastStorageScanMillis > 0L) {
+                TimeUtil.formatDisplayDate(uiState.lastStorageScanMillis)
+            } else {
+                stringResource(R.string.never)
+            }
+            ListItem(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = uiState.faceTaggingEnabled) {
+                        if (isScanning) onStopStorageScan() else onStartStorageScan()
+                    },
+                headlineContent = {
+                    Text(
+                        stringResource(
+                            if (isScanning) R.string.stop_tagging else R.string.scan_storage_for_characters,
+                        ),
+                    )
+                },
+                supportingContent = {
+                    Text(
+                        if (isScanning) {
+                            stringResource(
+                                R.string.tagging_progress,
+                                uiState.tagScanProgress.processed,
+                                uiState.tagScanProgress.total,
+                            )
+                        } else {
+                            stringResource(R.string.scan_storage_summary, uiState.taggedImageCount, lastScan)
+                        },
+                    )
+                },
+                leadingContent = { Icon(Icons.Default.ImageSearch, contentDescription = null) },
+            )
+        }
+        item {
+            ListItem(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onClearCharacterTags),
+                headlineContent = { Text(stringResource(R.string.clear_character_tags)) },
+                supportingContent = { Text(stringResource(R.string.clear_character_tags_summary)) },
+                leadingContent = { Icon(Icons.Default.DeleteSweep, contentDescription = null) },
+                trailingContent = {
+                    Text(
+                        text = stringResource(R.string.character_count, uiState.characterCount),
+                        style = MaterialTheme.typography.labelLarge,
                     )
                 },
             )

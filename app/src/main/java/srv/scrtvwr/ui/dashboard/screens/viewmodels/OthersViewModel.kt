@@ -2,10 +2,15 @@ package srv.scrtvwr.ui.dashboard.screens.viewmodels
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import srv.scrtvwr.preferences.ScrtvwrPreferences
+import srv.scrtvwr.tagging.CharacterTagRepository
+import srv.scrtvwr.tagging.StorageScanConsent
+import srv.scrtvwr.tagging.TagScanProgress
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
 
@@ -21,9 +26,53 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
             mediaEdgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
             showHiddenFiles = preferences.getShowHiddenFiles(),
             showDirectoryFileActions = preferences.getShowDirectoryFileActions(),
+            faceTaggingEnabled = preferences.getFaceTaggingEnabled(),
+            lastStorageScanMillis = preferences.getLastStorageScanMillis(),
         ),
     )
     val uiState = _uiState.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            CharacterTagRepository.taggedImageCount.collect { count ->
+                _uiState.update { it.copy(taggedImageCount = count) }
+            }
+        }
+        viewModelScope.launch {
+            CharacterTagRepository.characters.collect { characters ->
+                _uiState.update { it.copy(characterCount = characters.size) }
+            }
+        }
+        viewModelScope.launch {
+            CharacterTagRepository.scanProgress.collect { progress ->
+                _uiState.update {
+                    it.copy(
+                        tagScanProgress = progress,
+                        lastStorageScanMillis = preferences.getLastStorageScanMillis(),
+                    )
+                }
+            }
+        }
+    }
+
+    fun setFaceTaggingEnabled(enabled: Boolean) {
+        CharacterTagRepository.setEnabled(enabled)
+        _uiState.update { it.copy(faceTaggingEnabled = enabled) }
+    }
+
+    /** Starting the pass from settings is itself the consent, so it is recorded as granted. */
+    fun startStorageScan() {
+        CharacterTagRepository.setStorageScanConsent(StorageScanConsent.Granted)
+        CharacterTagRepository.startStorageScan()
+    }
+
+    fun stopStorageScan() {
+        CharacterTagRepository.cancelStorageScan()
+    }
+
+    fun clearCharacterTags() {
+        viewModelScope.launch { CharacterTagRepository.clearAll() }
+    }
 
     fun setShowHiddenFiles(enabled: Boolean) {
         preferences.saveShowHiddenFiles(enabled)
@@ -78,4 +127,9 @@ data class OthersUiState(
     val imagePreloadDistance: Int = 5,
     val videoPreloadDistance: Int = 0,
     val mediaEdgeDialogStyle: MediaEdgeDialogStyle = MediaEdgeDialogStyle.Bottom,
+    val faceTaggingEnabled: Boolean = true,
+    val taggedImageCount: Int = 0,
+    val characterCount: Int = 0,
+    val lastStorageScanMillis: Long = 0L,
+    val tagScanProgress: TagScanProgress = TagScanProgress(),
 )

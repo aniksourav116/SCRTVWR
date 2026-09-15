@@ -189,4 +189,35 @@
     <string name="notification_channel_general_id" translatable="false">scrtvwr_general</string>
     <string name="notification_channel_general_name">General</string>
     <string name="notification_channel_general_description">Announcements and updates about SCRTVWR.</string>
+    <!-- Character tagging -->
+    <string name="face_tagging">Face tagging</string>
+    <string name="face_tagging_summary">Look for faces in images with ML Kit and tag each one with the characters it shows. Everything runs on this device.</string>
+    <string name="characters">Characters</string>
+    <string name="character_tags">Character tags</string>
+    <string name="character_number">Character %1$d</string>
+    <string name="character_image_count">%1$d images</string>
+    <string name="character_count">%1$d characters</string>
+    <string name="character_face_count">%1$d faces seen</string>
+    <string name="no_characters_yet">No characters yet. Open a folder with photos in it and tagging starts there.</string>
+    <string name="rename_character">Rename character</string>
+    <string name="character_name">Name</string>
+    <string name="save">Save</string>
+    <string name="remove_character">Remove character</string>
+    <string name="show_only_character">Show only this character</string>
+    <string name="clear_character_filter">Clear character filter</string>
+    <string name="character_filter_active">Showing %1$s</string>
+    <string name="faces_detected">%1$d faces</string>
+    <string name="tag_storage_title">Tag every image in storage?</string>
+    <string name="tag_storage_message">Tagging found faces in this folder. SCRTVWR can go through every image on this device and tag the characters it finds. Detection runs on device with ML Kit and nothing leaves your phone, but a full pass takes a while and uses battery.</string>
+    <string name="tag_storage_confirm">Tag all images</string>
+    <string name="not_now">Not now</string>
+    <string name="tagging_images">Tagging images</string>
+    <string name="tagging_progress">%1$d of %2$d</string>
+    <string name="tagging_counting_images">Looking for images…</string>
+    <string name="scan_storage_for_characters">Tag all images in storage</string>
+    <string name="scan_storage_summary">%1$d images tagged so far. Last full pass: %2$s</string>
+    <string name="stop_tagging">Stop tagging</string>
+    <string name="clear_character_tags">Clear character tags</string>
+    <string name="clear_character_tags_summary">Forget every character and every image tag.</string>
+    <string name="never">Never</string>
 </resources>

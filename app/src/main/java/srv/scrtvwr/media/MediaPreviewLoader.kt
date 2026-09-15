@@ -90,6 +90,20 @@ object MediaPreviewLoader {
             }
         }
 
+    /**
+     * Decodes an image for analysis rather than display: it neither reads nor writes the preview
+     * caches, so tagging a whole device cannot evict the thumbnails the grid is showing.
+     */
+    suspend fun decodeForAnalysis(path: String, maxDimension: Int): PreviewResult =
+        withContext(Dispatchers.IO) {
+            coroutineContext.ensureActive()
+            if (path.contains("::")) {
+                loadArchiveImage(path.substringBefore("::"), path.substringAfter("::"), maxDimension)
+            } else {
+                decodeFile(path, maxDimension)
+            }
+        }
+
     private suspend fun loadCached(
         key: String,
         maxDimension: Int,

@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
@@ -126,6 +127,11 @@ import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewMode
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.PendingDirectoryFileOperation
 import srv.scrtvwr.ui.components.BaseScaffold
 import srv.scrtvwr.ui.sort.DirectorySortOrder
+import srv.scrtvwr.tagging.ImageTags
+import srv.scrtvwr.ui.tagging.CharacterTagBadge
+import srv.scrtvwr.ui.tagging.CharactersDialog
+import srv.scrtvwr.ui.tagging.StorageScanConsentDialog
+import srv.scrtvwr.ui.tagging.TaggingProgressPanel
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import kotlinx.coroutines.launch
 import java.io.File
@@ -222,6 +228,11 @@ fun Directory(
         onPasteFileOperation = viewModel::pastePendingFileOperation,
         onCancelFileOperation = viewModel::cancelFileOperation,
         onClearFileOperationStatus = viewModel::clearFileOperationStatus,
+        onCharacterFilterChange = viewModel::setCharacterFilter,
+        onRenameCharacter = viewModel::renameCharacter,
+        onRemoveCharacter = viewModel::removeCharacter,
+        onStorageScanConsent = viewModel::onStorageScanConsent,
+        onStopStorageScan = viewModel::stopStorageScan,
         modifier = modifier,
     )
 }
@@ -248,13 +259,26 @@ fun DirectoryScreen(
     onPasteFileOperation: () -> Unit,
     onCancelFileOperation: () -> Unit,
     onClearFileOperationStatus: () -> Unit,
+    onCharacterFilterChange: (String?) -> Unit = {},
+    onRenameCharacter: (String, String?) -> Unit = { _, _ -> },
+    onRemoveCharacter: (String) -> Unit = {},
+    onStorageScanConsent: (Boolean) -> Unit = {},
+    onStopStorageScan: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var moreMenuExpanded by remember { mutableStateOf(false) }
     var sortMenuExpanded by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
+    var charactersVisible by remember { mutableStateOf(false) }
     var entryPendingDeletion by remember { mutableStateOf<DirectoryEntry?>(null) }
     val directoryName = uiState.currentDirectory.name.ifBlank { uiState.currentDirectory.absolutePath }
+    val context = LocalContext.current
+    // Characters keep a generated name until they are renamed, and that name is a string resource.
+    val characterNames = remember(uiState.characters) {
+        uiState.characters.associate { profile ->
+            profile.id to (profile.label ?: context.getString(R.string.character_number, profile.ordinal))
+        }
+    }
 
     BaseScaffold(
         title = directoryName,
@@ -316,6 +340,7 @@ fun DirectoryScreen(
                     onRefresh = onRefresh,
                     onResumeMedia = onResumeMedia,
                     onOpenRecentDirectory = onOpenRecentDirectory,
+                    onShowCharacters = { charactersVisible = true },
                 )
             }
         },
@@ -347,6 +372,29 @@ fun DirectoryScreen(
             }
         }
 
+        uiState.activeCharacter?.let { character ->
+            FilterChip(
+                selected = true,
+                onClick = { onCharacterFilterChange(null) },
+                label = {
+                    Text(
+                        stringResource(
+                            R.string.character_filter_active,
+                            characterNames[character.id].orEmpty(),
+                        ),
+                    )
+                },
+                leadingIcon = { Icon(Icons.Default.Face, contentDescription = null) },
+                trailingIcon = {
+                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.clear_character_filter))
+                },
+            )
+        }
+
+        if (uiState.tagScanProgress.isRunning) {
+            TaggingProgressPanel(progress = uiState.tagScanProgress, onStop = onStopStorageScan)
+        }
+
         if (uiState.showDirectoryFileActions) {
             DirectoryFileOperationPanel(
                 pendingOperation = uiState.pendingFileOperation,
@@ -365,6 +413,7 @@ fun DirectoryScreen(
         } else when (uiState.viewMode) {
             DirectoryViewMode.List -> DirectoryList(
                 uiState = uiState,
+                characterNames = characterNames,
                 onScrollPositionRequested = onScrollPositionRequested,
                 onSaveScrollPosition = onSaveScrollPosition,
                 onOpenDirectory = onOpenDirectory,
@@ -379,6 +428,7 @@ fun DirectoryScreen(
 
             DirectoryViewMode.Grid -> DirectoryGrid(
                 uiState = uiState,
+                characterNames = characterNames,
                 onScrollPositionRequested = onScrollPositionRequested,
                 onSaveScrollPosition = onSaveScrollPosition,
                 onOpenDirectory = onOpenDirectory,
@@ -401,6 +451,23 @@ fun DirectoryScreen(
                 onDeleteEntry(entry)
                 entryPendingDeletion = null
             },
+        )
+    }
+
+    if (charactersVisible) {
+        CharactersDialog(
+            characters = uiState.characters,
+            onRename = onRenameCharacter,
+            onRemove = onRemoveCharacter,
+            onFilter = onCharacterFilterChange,
+            onDismiss = { charactersVisible = false },
+        )
+    }
+
+    if (uiState.showStorageScanPrompt) {
+        StorageScanConsentDialog(
+            onConfirm = { onStorageScanConsent(true) },
+            onDecline = { onStorageScanConsent(false) },
         )
     }
 }
@@ -441,6 +508,7 @@ private fun DirectoryOptionsMenu(
     onRefresh: () -> Unit,
     onResumeMedia: () -> Unit,
     onOpenRecentDirectory: (String) -> Unit,
+    onShowCharacters: () -> Unit = {},
 ) {
     DropdownMenu(
         expanded = expanded,
@@ -451,6 +519,14 @@ private fun DirectoryOptionsMenu(
             leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
             onClick = {
                 onRefresh()
+                onDismissRequest()
+            },
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.characters)) },
+            leadingIcon = { Icon(Icons.Default.Face, contentDescription = null) },
+            onClick = {
+                onShowCharacters()
                 onDismissRequest()
             },
         )
@@ -732,6 +808,7 @@ private fun DirectoryEntryActionMenu(
 @Composable
 private fun DirectoryList(
     uiState: DirectoryUiState,
+    characterNames: Map<String, String>,
     onScrollPositionRequested: (String) -> DirectoryScrollPosition?,
     onSaveScrollPosition: (String, DirectoryScrollPosition) -> Unit,
     onOpenDirectory: (DirectoryEntry) -> Unit,
@@ -797,7 +874,15 @@ private fun DirectoryList(
                 DirectoryListRow(
                     title = entry.name,
                     subtitle = entry.supportingText(),
-                    thumbnail = { EntryThumbnail(entry, size = 48, style = style) },
+                    thumbnail = {
+                        EntryThumbnail(
+                            entry = entry,
+                            size = 48,
+                            style = style,
+                            tags = uiState.imageTags[entry.path],
+                            characterNames = characterNames,
+                        )
+                    },
                     style = style,
                     onClick = {
                         when {
@@ -888,6 +973,7 @@ private fun DirectoryListRow(
 @Composable
 private fun DirectoryGrid(
     uiState: DirectoryUiState,
+    characterNames: Map<String, String>,
     onScrollPositionRequested: (String) -> DirectoryScrollPosition?,
     onSaveScrollPosition: (String, DirectoryScrollPosition) -> Unit,
     onOpenDirectory: (DirectoryEntry) -> Unit,
@@ -975,6 +1061,8 @@ private fun DirectoryGrid(
                             size = 128,
                             style = style,
                             showFolderBadge = entry.isDirectory,
+                            tags = uiState.imageTags[entry.path],
+                            characterNames = characterNames,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(1f),
@@ -1118,6 +1206,8 @@ private fun EntryThumbnail(
     size: Int,
     style: EntryVisualStyle,
     showFolderBadge: Boolean = false,
+    tags: ImageTags? = null,
+    characterNames: Map<String, String> = emptyMap(),
     modifier: Modifier = Modifier.size(size.dp),
 ) {
     val preview by produceState<PreviewResult?>(
@@ -1163,6 +1253,7 @@ private fun EntryThumbnail(
             if (showFolderBadge) {
                 FolderPreviewBadge(style)
             }
+            CharacterTagBadge(tags = tags, characterNames = characterNames)
         } else {
             Icon(
                 imageVector = if (entry.isDirectory) {
