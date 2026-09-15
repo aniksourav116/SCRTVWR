@@ -220,4 +220,10 @@
     <string name="clear_character_tags">Clear character tags</string>
     <string name="clear_character_tags_summary">Forget every character and every image tag.</string>
     <string name="never">Never</string>
+    <string name="clear_character_tags_confirm_title">Clear character tags?</string>
+    <string name="clear_character_tags_confirm_message">%1$d characters and the tags on %2$d images will be forgotten.</string>
+    <string name="clear_character_tags_final_title">Delete every tag?</string>
+    <string name="clear_character_tags_final_message">This cannot be undone. Any name you gave a character is lost, and tagging has to go through your images again from scratch.</string>
+    <string name="continue_action">Continue</string>
+    <string name="delete_everything">Delete everything</string>
 </resources>

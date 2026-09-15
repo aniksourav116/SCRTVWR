@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.ImageSearch
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -24,6 +25,7 @@ import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
@@ -90,6 +92,8 @@ fun OthersScreen(
     onClearCharacterTags: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    // Clearing every tag throws away work that can take a long time to rebuild, so it is confirmed twice.
+    var clearTagsStep by rememberSaveable { mutableStateOf(0) }
     var slideShowStayMillisText by rememberSaveable { mutableStateOf(uiState.slideShowStayMillis.toString()) }
     var imagePreloadDistanceText by rememberSaveable { mutableStateOf(uiState.imagePreloadDistance.toString()) }
     var videoPreloadDistanceText by rememberSaveable { mutableStateOf(uiState.videoPreloadDistance.toString()) }
@@ -319,7 +323,7 @@ fun OthersScreen(
             ListItem(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(onClick = onClearCharacterTags),
+                    .clickable { clearTagsStep = 1 },
                 headlineContent = { Text(stringResource(R.string.clear_character_tags)) },
                 supportingContent = { Text(stringResource(R.string.clear_character_tags_summary)) },
                 leadingContent = { Icon(Icons.Default.DeleteSweep, contentDescription = null) },
@@ -349,6 +353,56 @@ fun OthersScreen(
                 )
             }
         }
+    }
+
+    when (clearTagsStep) {
+        1 -> AlertDialog(
+            onDismissRequest = { clearTagsStep = 0 },
+            title = { Text(stringResource(R.string.clear_character_tags_confirm_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.clear_character_tags_confirm_message,
+                        uiState.characterCount,
+                        uiState.taggedImageCount,
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { clearTagsStep = 2 }) {
+                    Text(stringResource(R.string.continue_action))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { clearTagsStep = 0 }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+
+        2 -> AlertDialog(
+            onDismissRequest = { clearTagsStep = 0 },
+            title = { Text(stringResource(R.string.clear_character_tags_final_title)) },
+            text = { Text(stringResource(R.string.clear_character_tags_final_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onClearCharacterTags()
+                        clearTagsStep = 0
+                    },
+                ) {
+                    Text(
+                        text = stringResource(R.string.delete_everything),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { clearTagsStep = 0 }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
     }
 }
 
