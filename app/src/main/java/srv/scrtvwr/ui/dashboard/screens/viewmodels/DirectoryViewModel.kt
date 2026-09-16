@@ -23,10 +23,14 @@ import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.tagging.CharacterProfile
 import srv.scrtvwr.tagging.CharacterTagRepository
 import srv.scrtvwr.tagging.ImageTags
+import srv.scrtvwr.tagging.StorageScanChoice
 import srv.scrtvwr.tagging.StorageScanConsent
 import srv.scrtvwr.tagging.TagScanProgress
+import srv.scrtvwr.tagging.TagScanScope
+import srv.scrtvwr.tagging.TagScopeMode
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.sort.fileComparator
+import srv.scrtvwr.ui.tagging.FolderTagAction
 import java.io.File
 
 class DirectoryViewModel(
@@ -312,10 +316,17 @@ class DirectoryViewModel(
             }
         }
         viewModelScope.launch {
-            // The prompt only makes sense once tagging has actually found a face to show for it.
+            CharacterTagRepository.scanScope.collect { scope ->
+                _uiState.update { it.copy(tagScanScope = scope) }
+            }
+        }
+        viewModelScope.launch {
+            // The prompt only makes sense once tagging has actually found a face to show for it,
+            // and only for someone who has not already said which folders tagging may read.
             CharacterTagRepository.facesFound.collect { found ->
                 val prompt = found && CharacterTagRepository.isEnabled() &&
-                    CharacterTagRepository.storageScanConsent() == StorageScanConsent.Unknown
+                    CharacterTagRepository.storageScanConsent() == StorageScanConsent.Unknown &&
+                    CharacterTagRepository.scanScope.value.mode == TagScopeMode.AllStorage
                 _uiState.update { it.copy(showStorageScanPrompt = prompt) }
             }
         }
@@ -365,13 +376,44 @@ class DirectoryViewModel(
         }
     }
 
-    /** Answer to the "tag every image in storage" prompt. Declining keeps per-folder tagging running. */
-    fun onStorageScanConsent(granted: Boolean) {
+    /**
+     * Answer to the "tag every image in storage" prompt. Either answer that starts a pass counts as
+     * consent, so the prompt is not asked again; declining keeps per-folder tagging running.
+     */
+    fun onStorageScanChoice(choice: StorageScanChoice) {
         CharacterTagRepository.setStorageScanConsent(
-            if (granted) StorageScanConsent.Granted else StorageScanConsent.Declined,
+            if (choice == StorageScanChoice.NotNow) StorageScanConsent.Declined else StorageScanConsent.Granted,
         )
         _uiState.update { it.copy(showStorageScanPrompt = false) }
-        if (granted) CharacterTagRepository.startStorageScan()
+        when (choice) {
+            StorageScanChoice.AllStorage -> CharacterTagRepository.startStorageScan()
+            StorageScanChoice.ThisFolder -> {
+                // Holding tagging to this folder is the point of the answer, so it becomes the scope.
+                CharacterTagRepository.limitToFolder(_uiState.value.currentDirectory.absolutePath)
+                CharacterTagRepository.startStorageScan()
+            }
+            StorageScanChoice.NotNow -> Unit
+        }
+    }
+
+    /** Applies what the user said about the folder they are looking at. */
+    fun applyFolderTagging(action: FolderTagAction, includeSubfolders: Boolean) {
+        val path = _uiState.value.currentDirectory.absolutePath
+        when (action) {
+            // A one-off pass says nothing about the future, so the standing rules are left alone.
+            FolderTagAction.TagNow -> {
+                CharacterTagRepository.setStorageScanConsent(StorageScanConsent.Granted)
+                CharacterTagRepository.startFolderScan(path, includeSubfolders)
+                return
+            }
+            FolderTagAction.AlwaysTag ->
+                CharacterTagRepository.setFolderRule(path, includeSubfolders, included = true)
+            FolderTagAction.NeverTag ->
+                CharacterTagRepository.setFolderRule(path, includeSubfolders, included = false)
+            FolderTagAction.UseDefault -> CharacterTagRepository.clearFolderRule(path)
+        }
+        // A folder just let in has images waiting that lazy tagging already walked past.
+        refresh()
     }
 
     fun stopStorageScan() {
@@ -412,6 +454,7 @@ data class DirectoryUiState(
     val imageTags: Map<String, ImageTags> = emptyMap(),
     val characterFilter: String? = null,
     val tagScanProgress: TagScanProgress = TagScanProgress(),
+    val tagScanScope: TagScanScope = TagScanScope(),
     val taggingPaused: Boolean = false,
     val showStorageScanPrompt: Boolean = false,
     val isLoading: Boolean = false,

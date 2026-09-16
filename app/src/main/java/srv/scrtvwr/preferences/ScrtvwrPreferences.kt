@@ -6,6 +6,9 @@ import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
 import srv.scrtvwr.ui.media.VideoCompletionAction
 import srv.scrtvwr.tagging.StorageScanConsent
+import srv.scrtvwr.tagging.TagFolderRule
+import srv.scrtvwr.tagging.TagScanScope
+import srv.scrtvwr.tagging.TagScopeMode
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import java.io.File
 
@@ -116,6 +119,21 @@ class ScrtvwrPreferences(context: Context) {
         preferences.edit().putString(KEY_STORAGE_SCAN_CONSENT, consent.name).apply()
     }
 
+    fun getTagScanScope(): TagScanScope =
+        TagScanScope(
+            mode = preferences.getString(KEY_TAG_SCOPE_MODE, null)
+                ?.let { value -> TagScopeMode.entries.firstOrNull { it.name == value } }
+                ?: TagScopeMode.AllStorage,
+            rules = preferences.getString(KEY_TAG_SCOPE_RULES, null)?.let(::decodeFolderRules).orEmpty(),
+        )
+
+    fun saveTagScanScope(scope: TagScanScope) {
+        preferences.edit()
+            .putString(KEY_TAG_SCOPE_MODE, scope.mode.name)
+            .putString(KEY_TAG_SCOPE_RULES, encodeFolderRules(scope.rules))
+            .apply()
+    }
+
     fun getLastStorageScanMillis(): Long =
         preferences.getLong(KEY_LAST_STORAGE_SCAN_MILLIS, 0L)
 
@@ -211,6 +229,33 @@ class ScrtvwrPreferences(context: Context) {
             .apply()
     }
 
+    private fun encodeFolderRules(rules: List<TagFolderRule>): String {
+        val json = JSONArray()
+        rules.forEach { rule ->
+            json.put(
+                JSONArray()
+                    .put(rule.path)
+                    .put(rule.includeSubfolders)
+                    .put(rule.included),
+            )
+        }
+        return json.toString()
+    }
+
+    private fun decodeFolderRules(value: String): List<TagFolderRule> =
+        runCatching {
+            val json = JSONArray(value)
+            List(json.length()) { index ->
+                json.optJSONArray(index)?.let { rule ->
+                    TagFolderRule(
+                        path = rule.optString(0),
+                        includeSubfolders = rule.optBoolean(1, true),
+                        included = rule.optBoolean(2, true),
+                    )
+                }
+            }.filterNotNull().filter { it.path.isNotBlank() }
+        }.getOrDefault(emptyList())
+
     private fun encodeMediaHistory(values: List<LastMediaSession>): String {
         val json = JSONArray()
         values.forEach { session ->
@@ -247,6 +292,8 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_TAGGING_PAUSED = "tagging_paused"
         const val KEY_STORAGE_SCAN_CONSENT = "storage_scan_consent"
         const val KEY_LAST_STORAGE_SCAN_MILLIS = "last_storage_scan_millis"
+        const val KEY_TAG_SCOPE_MODE = "tag_scope_mode"
+        const val KEY_TAG_SCOPE_RULES = "tag_scope_rules"
         const val KEY_BOOKMARKED_MEDIA = "bookmarked_media"
         const val KEY_MEDIA_HISTORY = "media_history"
         const val KEY_LAST_DIRECTORY = "last_directory"

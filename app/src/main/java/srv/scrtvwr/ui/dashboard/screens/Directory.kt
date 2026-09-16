@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderSpecial
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayCircle
@@ -128,8 +129,11 @@ import srv.scrtvwr.ui.dashboard.screens.viewmodels.PendingDirectoryFileOperation
 import srv.scrtvwr.ui.components.BaseScaffold
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.tagging.ImageTags
+import srv.scrtvwr.tagging.StorageScanChoice
 import srv.scrtvwr.ui.tagging.CharacterTagBadge
 import srv.scrtvwr.ui.tagging.CharactersDialog
+import srv.scrtvwr.ui.tagging.FolderTagAction
+import srv.scrtvwr.ui.tagging.FolderTaggingDialog
 import srv.scrtvwr.ui.tagging.StorageScanConsentDialog
 import srv.scrtvwr.ui.tagging.TaggingProgressPanel
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
@@ -231,7 +235,8 @@ fun Directory(
         onCharacterFilterChange = viewModel::setCharacterFilter,
         onRenameCharacter = viewModel::renameCharacter,
         onRemoveCharacter = viewModel::removeCharacter,
-        onStorageScanConsent = viewModel::onStorageScanConsent,
+        onStorageScanChoice = viewModel::onStorageScanChoice,
+        onFolderTaggingChange = viewModel::applyFolderTagging,
         onStopStorageScan = viewModel::stopStorageScan,
         onTaggingPausedChange = viewModel::setTaggingPaused,
         modifier = modifier,
@@ -263,7 +268,8 @@ fun DirectoryScreen(
     onCharacterFilterChange: (String?) -> Unit = {},
     onRenameCharacter: (String, String?) -> Unit = { _, _ -> },
     onRemoveCharacter: (String) -> Unit = {},
-    onStorageScanConsent: (Boolean) -> Unit = {},
+    onStorageScanChoice: (StorageScanChoice) -> Unit = {},
+    onFolderTaggingChange: (FolderTagAction, Boolean) -> Unit = { _, _ -> },
     onStopStorageScan: () -> Unit = {},
     onTaggingPausedChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -272,6 +278,7 @@ fun DirectoryScreen(
     var sortMenuExpanded by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
     var charactersVisible by remember { mutableStateOf(false) }
+    var folderTaggingVisible by remember { mutableStateOf(false) }
     var entryPendingDeletion by remember { mutableStateOf<DirectoryEntry?>(null) }
     val directoryName = uiState.currentDirectory.name.ifBlank { uiState.currentDirectory.absolutePath }
     val context = LocalContext.current
@@ -343,6 +350,7 @@ fun DirectoryScreen(
                     onResumeMedia = onResumeMedia,
                     onOpenRecentDirectory = onOpenRecentDirectory,
                     onShowCharacters = { charactersVisible = true },
+                    onShowFolderTagging = { folderTaggingVisible = true },
                 )
             }
         },
@@ -471,10 +479,22 @@ fun DirectoryScreen(
         )
     }
 
+    if (folderTaggingVisible) {
+        FolderTaggingDialog(
+            folderName = directoryName,
+            rule = uiState.tagScanScope.ruleAt(uiState.currentDirectory.absolutePath),
+            onApply = { action, includeSubfolders ->
+                onFolderTaggingChange(action, includeSubfolders)
+                folderTaggingVisible = false
+            },
+            onDismiss = { folderTaggingVisible = false },
+        )
+    }
+
     if (uiState.showStorageScanPrompt) {
         StorageScanConsentDialog(
-            onConfirm = { onStorageScanConsent(true) },
-            onDecline = { onStorageScanConsent(false) },
+            folderName = directoryName,
+            onChoice = onStorageScanChoice,
         )
     }
 }
@@ -516,6 +536,7 @@ private fun DirectoryOptionsMenu(
     onResumeMedia: () -> Unit,
     onOpenRecentDirectory: (String) -> Unit,
     onShowCharacters: () -> Unit = {},
+    onShowFolderTagging: () -> Unit = {},
 ) {
     DropdownMenu(
         expanded = expanded,
@@ -534,6 +555,14 @@ private fun DirectoryOptionsMenu(
             leadingIcon = { Icon(Icons.Default.Face, contentDescription = null) },
             onClick = {
                 onShowCharacters()
+                onDismissRequest()
+            },
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.tag_this_folder)) },
+            leadingIcon = { Icon(Icons.Default.FolderSpecial, contentDescription = null) },
+            onClick = {
+                onShowFolderTagging()
                 onDismissRequest()
             },
         )

@@ -40,8 +40,12 @@ import java.io.File
  * Runs face detection and recognition over images and keeps the resulting character tags.
  *
  * Two ways in: [tagDirectory] tags what the user is currently browsing, and [startStorageScan] walks
- * every image in shared storage once the user has agreed to it. Both funnel through [tag], which skips
- * images that are already tagged and unchanged, so the two can overlap without repeating work.
+ * the folders the user opened up to tagging. Both funnel through [tag], which skips images that are
+ * already tagged and unchanged, so the two can overlap without repeating work.
+ *
+ * Neither goes anywhere the [scanScope] does not allow: that scope is the standing answer to "which
+ * folders may be tagged", and the only thing that overrules it is [startFolderScan], where naming a
+ * folder is itself the permission to read it.
  *
  * Identity comes from a recognition model when one is installed (see [FaceEmbeddingModel]); without
  * it the app falls back to landmark geometry, which can only group obviously similar faces.
@@ -101,6 +105,10 @@ object CharacterTagRepository {
     private val _rebuilding = MutableStateFlow(false)
     val rebuilding: StateFlow<Boolean> = _rebuilding.asStateFlow()
 
+    /** The folders tagging is allowed into. Everything that reads an image checks this first. */
+    private val _scanScope = MutableStateFlow(TagScanScope())
+    val scanScope: StateFlow<TagScanScope> = _scanScope.asStateFlow()
+
     fun initialize(context: Context) {
         if (store != null) return
         val applicationContext = context.applicationContext
@@ -109,6 +117,7 @@ object CharacterTagRepository {
         preferences = scrtvwrPreferences
         _enabled.value = scrtvwrPreferences.getFaceTaggingEnabled()
         _paused.value = scrtvwrPreferences.getTaggingPaused()
+        _scanScope.value = scrtvwrPreferences.getTagScanScope()
         FaceCropDebug.initialize(applicationContext)
         val tagStore = CharacterTagStore(File(applicationContext.filesDir, TAG_DIRECTORY_NAME))
         store = tagStore
@@ -200,6 +209,33 @@ object CharacterTagRepository {
 
     fun lastStorageScanMillis(): Long = preferences?.getLastStorageScanMillis() ?: 0L
 
+    fun setScanScope(folders: TagScanScope) {
+        preferences?.saveTagScanScope(folders)
+        _scanScope.value = folders
+    }
+
+    fun setScopeMode(mode: TagScopeMode) {
+        setScanScope(_scanScope.value.copy(mode = mode))
+    }
+
+    /** Says what happens in one folder, replacing whatever was said about it before. */
+    fun setFolderRule(path: String, includeSubfolders: Boolean, included: Boolean) {
+        setScanScope(_scanScope.value.withRule(TagFolderRule(path, includeSubfolders, included)))
+    }
+
+    /** Drops the rule for one folder, so it falls back to whatever the mode says. */
+    fun clearFolderRule(path: String) {
+        setScanScope(_scanScope.value.withoutRule(path))
+    }
+
+    /** "Only here": narrows tagging to one folder, keeping the folders already ruled out. */
+    fun limitToFolder(path: String, includeSubfolders: Boolean = true) {
+        setScanScope(
+            TagScanScope(mode = TagScopeMode.SelectedFolders, rules = _scanScope.value.skippedFolders)
+                .withRule(TagFolderRule(path, includeSubfolders, included = true)),
+        )
+    }
+
     suspend fun tagsFor(paths: Collection<String>): Map<String, ImageTags> {
         if (store == null || paths.isEmpty()) return emptyMap()
         ready.await()
@@ -217,8 +253,12 @@ object CharacterTagRepository {
      * Tags one image unless it is already tagged at this [modifiedMillis]. Returns null when tagging is
      * switched off, the image cannot be decoded, or detection failed.
      */
-    suspend fun tag(path: String, modifiedMillis: Long): ImageTags? {
+    suspend fun tag(path: String, modifiedMillis: Long): ImageTags? = tag(path, modifiedMillis, _scanScope.value)
+
+    private suspend fun tag(path: String, modifiedMillis: Long, folders: TagScanScope): ImageTags? {
         if (store == null || !isEnabled() || swappingModel) return null
+        // Out of scope means the image is never read, not even to answer with what is already known.
+        if (!folders.allowsFile(path)) return null
         ready.await()
         // Parking here rather than returning keeps a paused scan exactly where it stopped.
         if (_paused.value) _paused.first { !it }
@@ -244,20 +284,41 @@ object CharacterTagRepository {
 
     /** Tags the images the user is currently browsing. Cancel the returned job when they move on. */
     fun tagDirectory(images: List<Pair<String, Long>>): Job? {
-        if (store == null || !isEnabled() || images.isEmpty()) return null
+        val folders = _scanScope.value
+        val allowed = images.filter { (path, _) -> folders.allowsFile(path) }
+        if (store == null || !isEnabled() || allowed.isEmpty()) return null
         return scope.launch {
-            images.forEach { (path, modifiedMillis) ->
+            allowed.forEach { (path, modifiedMillis) ->
                 currentCoroutineContext().ensureActive()
-                tag(path, modifiedMillis)
+                tag(path, modifiedMillis, folders)
             }
             publish(force = true)
         }
     }
 
-    /** Walks every image in shared storage. Only start this once the user has agreed to it. */
+    /**
+     * Walks every image the [scanScope] allows. Only start this once the user has agreed to it.
+     * Returns false when there is nowhere to look, which is what an empty folder list means.
+     */
     fun startStorageScan(): Boolean {
+        val folders = _scanScope.value
+        if (folders.isEmpty) return false
+        return startScan(folders, label = null, isFullPass = true)
+    }
+
+    /**
+     * Tags one folder now. This is the one pass the standing scope does not gate - asking for a
+     * folder by name is the permission to read it - though folders ruled out below it stay out.
+     */
+    fun startFolderScan(path: String, includeSubfolders: Boolean = true): Boolean {
+        val folders = TagScanScope(mode = TagScopeMode.SelectedFolders, rules = _scanScope.value.skippedFolders)
+            .withRule(TagFolderRule(path, includeSubfolders, included = true))
+        return startScan(folders, label = File(path).name.ifBlank { path }, isFullPass = false)
+    }
+
+    private fun startScan(folders: TagScanScope, label: String?, isFullPass: Boolean): Boolean {
         if (store == null || !isEnabled() || scanJob?.isActive == true) return false
-        scanJob = scope.launch { runStorageScan() }
+        scanJob = scope.launch { runScan(folders, label, isFullPass) }
         return true
     }
 
@@ -352,18 +413,18 @@ object CharacterTagRepository {
         publish(force = true)
     }
 
-    private suspend fun runStorageScan() {
-        _scanProgress.value = TagScanProgress(isRunning = true)
+    private suspend fun runScan(folders: TagScanScope, label: String?, isFullPass: Boolean) {
+        _scanProgress.value = TagScanProgress(isRunning = true, scopeLabel = label)
         var completed = false
         try {
-            val images = withContext(Dispatchers.IO) { collectStorageImages() }
+            val images = withContext(Dispatchers.IO) { collectScanImages(folders) }
             _scanProgress.update { it.copy(total = images.size) }
             images.forEachIndexed { index, image ->
                 currentCoroutineContext().ensureActive()
                 _scanProgress.update { it.copy(processed = index, currentName = image.name) }
-                tag(image.absolutePath, image.lastModified())
+                tag(image.absolutePath, image.lastModified(), folders)
             }
-            preferences?.saveLastStorageScanMillis(System.currentTimeMillis())
+            if (isFullPass) preferences?.saveLastStorageScanMillis(System.currentTimeMillis())
             _scanProgress.update { it.copy(processed = it.total, currentName = null) }
             completed = true
         } catch (cancellation: CancellationException) {
@@ -377,24 +438,41 @@ object CharacterTagRepository {
                 persist()
             }
         }
-        // A full pass is exactly when regrouping pays off: every face is known, so nobody stays
-        // split up just because their worst photo happened to be tagged first.
-        if (completed) rebuildGroups()
+        // A full pass is exactly when regrouping pays off: every face in scope is known, so nobody
+        // stays split up just because their worst photo happened to be tagged first. A single folder
+        // is too small a slice to be worth regrouping everyone over.
+        if (completed && isFullPass) rebuildGroups()
     }
 
-    private fun collectStorageImages(): List<File> {
-        val root = Environment.getExternalStorageDirectory() ?: return emptyList()
+    private fun collectScanImages(folders: TagScanScope): List<File> {
         val images = mutableListOf<File>()
-        root.walkTopDown()
-            .onEnter { directory ->
-                !directory.name.startsWith(".") && directory.name !in SKIPPED_DIRECTORY_NAMES
-            }
-            .forEach { file ->
+        folders.scanRoots(Environment.getExternalStorageDirectory())
+            .filter(File::isDirectory)
+            .forEach { root ->
                 if (images.size >= MAX_SCAN_IMAGES) return images
-                if (file.isFile && file.extension.lowercase() in IMAGE_EXTENSIONS) images += file
+                collectImages(root, folders, images)
             }
         return images
     }
+
+    private fun collectImages(root: File, folders: TagScanScope, images: MutableList<File>) {
+        root.walkTopDown()
+            .onEnter { directory ->
+                folders.allowsDescent(directory.absolutePath) && directory.isWorthWalking(folders)
+            }
+            .forEach { file ->
+                if (images.size >= MAX_SCAN_IMAGES) return
+                if (file.isFile && file.extension.lowercase() in IMAGE_EXTENSIONS &&
+                    folders.allowsFile(file.absolutePath)
+                ) {
+                    images += file
+                }
+            }
+    }
+
+    /** Hidden folders and caches stay out of a walk unless the user chose something inside them. */
+    private fun File.isWorthWalking(folders: TagScanScope): Boolean =
+        (!name.startsWith(".") && name !in SKIPPED_DIRECTORY_NAMES) || folders.reachesInto(absolutePath)
 
     private suspend fun detect(path: String): FaceDetectionResult? {
         val tagger = tagger ?: return null

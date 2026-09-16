@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.FolderSpecial
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.ImageSearch
 import androidx.compose.material.icons.filled.MoreVert
@@ -46,7 +47,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.OthersUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.OthersViewModel
+import srv.scrtvwr.tagging.TagFolderRule
+import srv.scrtvwr.tagging.TagScopeMode
 import srv.scrtvwr.ui.components.SimpleDropdown
+import srv.scrtvwr.ui.tagging.TagScopeDialog
 import srv.scrtvwr.util.time.TimeUtil
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
@@ -73,6 +77,9 @@ fun Others(
         onTaggingPausedChange = viewModel::setTaggingPaused,
         onStartStorageScan = viewModel::startStorageScan,
         onStopStorageScan = viewModel::stopStorageScan,
+        onScopeModeChange = viewModel::setScopeMode,
+        onFolderRuleChange = viewModel::setFolderRule,
+        onFolderRuleRemove = viewModel::removeFolderRule,
         onClearCharacterTags = viewModel::clearCharacterTags,
         modifier = modifier,
     )
@@ -93,9 +100,13 @@ fun OthersScreen(
     onTaggingPausedChange: (Boolean) -> Unit = {},
     onStartStorageScan: () -> Unit = {},
     onStopStorageScan: () -> Unit = {},
+    onScopeModeChange: (TagScopeMode) -> Unit = {},
+    onFolderRuleChange: (TagFolderRule) -> Unit = {},
+    onFolderRuleRemove: (String) -> Unit = {},
     onClearCharacterTags: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    var editingTagFolders by rememberSaveable { mutableStateOf(false) }
     // Clearing every tag throws away work that can take a long time to rebuild, so it is confirmed twice.
     var clearTagsStep by rememberSaveable { mutableStateOf(0) }
     var slideShowStayMillisText by rememberSaveable { mutableStateOf(uiState.slideShowStayMillis.toString()) }
@@ -325,22 +336,55 @@ fun OthersScreen(
             }
         }
         item {
+            val scope = uiState.tagScanScope
+            ListItem(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { editingTagFolders = true },
+                headlineContent = { Text(stringResource(R.string.tagging_folders)) },
+                supportingContent = {
+                    Text(
+                        when {
+                            scope.isEmpty -> stringResource(R.string.tagging_folders_none_summary)
+                            scope.mode == TagScopeMode.SelectedFolders -> stringResource(
+                                R.string.tagging_folders_selected_summary,
+                                scope.includedFolders.size,
+                            )
+                            scope.skippedFolders.isNotEmpty() -> stringResource(
+                                R.string.tagging_folders_all_except_summary,
+                                scope.skippedFolders.size,
+                            )
+                            else -> stringResource(R.string.tagging_folders_all_summary)
+                        },
+                    )
+                },
+                leadingContent = { Icon(Icons.Default.FolderSpecial, contentDescription = null) },
+            )
+        }
+        item {
             val isScanning = uiState.tagScanProgress.isRunning
             val lastScan = if (uiState.lastStorageScanMillis > 0L) {
                 TimeUtil.formatDisplayDate(uiState.lastStorageScanMillis)
             } else {
                 stringResource(R.string.never)
             }
+            // Nowhere in scope means there is nothing for a pass to walk through.
+            val canScan = uiState.faceTaggingEnabled && !uiState.tagScanScope.isEmpty
             ListItem(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(enabled = uiState.faceTaggingEnabled) {
+                    .clickable(enabled = canScan) {
                         if (isScanning) onStopStorageScan() else onStartStorageScan()
                     },
                 headlineContent = {
                     Text(
                         stringResource(
-                            if (isScanning) R.string.stop_tagging else R.string.scan_storage_for_characters,
+                            when {
+                                isScanning -> R.string.stop_tagging
+                                uiState.tagScanScope.mode == TagScopeMode.SelectedFolders ->
+                                    R.string.scan_chosen_folders
+                                else -> R.string.scan_storage_for_characters
+                            },
                         ),
                     )
                 },
@@ -394,6 +438,16 @@ fun OthersScreen(
                 )
             }
         }
+    }
+
+    if (editingTagFolders) {
+        TagScopeDialog(
+            scope = uiState.tagScanScope,
+            onModeChange = onScopeModeChange,
+            onRuleChange = onFolderRuleChange,
+            onRuleRemove = onFolderRuleRemove,
+            onDismiss = { editingTagFolders = false },
+        )
     }
 
     when (clearTagsStep) {

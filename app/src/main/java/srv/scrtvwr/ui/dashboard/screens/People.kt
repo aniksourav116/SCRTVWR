@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.FolderSpecial
 import androidx.compose.material.icons.filled.ImageSearch
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Merge
@@ -65,13 +66,17 @@ import srv.scrtvwr.MediaViewerActivity
 import srv.scrtvwr.R
 import srv.scrtvwr.tagging.CharacterProfile
 import srv.scrtvwr.tagging.ImageTags
+import srv.scrtvwr.tagging.TagFolderRule
 import srv.scrtvwr.tagging.TagScanProgress
+import srv.scrtvwr.tagging.TagScanScope
+import srv.scrtvwr.tagging.TagScopeMode
 import srv.scrtvwr.tagging.TaggingState
 import srv.scrtvwr.ui.components.BaseScaffold
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.ModelMessage
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.PeopleUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.PeopleViewModel
 import srv.scrtvwr.ui.tagging.CharacterCover
+import srv.scrtvwr.ui.tagging.TagScopeDialog
 import srv.scrtvwr.ui.tagging.TaggedImageThumbnail
 import srv.scrtvwr.ui.tagging.displayLabel
 
@@ -112,6 +117,9 @@ fun People(
             onStopStorageScan = viewModel::stopStorageScan,
             onRebuildGroups = viewModel::rebuildGroups,
             onPickModel = { modelPicker.launch(arrayOf("*/*")) },
+            onScopeModeChange = viewModel::setScopeMode,
+            onFolderRuleChange = viewModel::setFolderRule,
+            onFolderRuleRemove = viewModel::removeFolderRule,
             modifier = modifier,
         )
     } else {
@@ -149,8 +157,12 @@ fun PeopleScreen(
     onStopStorageScan: () -> Unit,
     onRebuildGroups: () -> Unit,
     onPickModel: () -> Unit = {},
+    onScopeModeChange: (TagScopeMode) -> Unit = {},
+    onFolderRuleChange: (TagFolderRule) -> Unit = {},
+    onFolderRuleRemove: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    var editingTagFolders by rememberSaveable { mutableStateOf(false) }
     BaseScaffold(
         title = stringResource(R.string.people),
         subtitle = stringResource(
@@ -182,6 +194,7 @@ fun PeopleScreen(
             TaggingStatusCard(
                 state = uiState.taggingState,
                 progress = uiState.scanProgress,
+                scope = uiState.tagScanScope,
                 usingRecognitionModel = uiState.usingRecognitionModel,
                 rebuilding = uiState.rebuilding,
                 canRebuild = uiState.characters.isNotEmpty(),
@@ -190,6 +203,7 @@ fun PeopleScreen(
                 onStopStorageScan = onStopStorageScan,
                 onRebuildGroups = onRebuildGroups,
                 onPickModel = onPickModel,
+                onEditFolders = { editingTagFolders = true },
             )
 
             if (uiState.characters.isEmpty()) {
@@ -216,6 +230,16 @@ fun PeopleScreen(
                 }
             }
         }
+    }
+
+    if (editingTagFolders) {
+        TagScopeDialog(
+            scope = uiState.tagScanScope,
+            onModeChange = onScopeModeChange,
+            onRuleChange = onFolderRuleChange,
+            onRuleRemove = onFolderRuleRemove,
+            onDismiss = { editingTagFolders = false },
+        )
     }
 }
 
@@ -254,6 +278,7 @@ private fun PersonCard(profile: CharacterProfile, onClick: () -> Unit) {
 private fun TaggingStatusCard(
     state: TaggingState,
     progress: TagScanProgress,
+    scope: TagScanScope,
     usingRecognitionModel: Boolean,
     rebuilding: Boolean,
     canRebuild: Boolean,
@@ -262,6 +287,7 @@ private fun TaggingStatusCard(
     onStopStorageScan: () -> Unit,
     onRebuildGroups: () -> Unit,
     onPickModel: () -> Unit,
+    onEditFolders: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -358,6 +384,8 @@ private fun TaggingStatusCard(
                 ) {
                     TextButton(
                         onClick = { if (progress.isRunning) onStopStorageScan() else onStartStorageScan() },
+                        // Nowhere in scope means there is nothing for a pass to walk through.
+                        enabled = progress.isRunning || !scope.isEmpty,
                     ) {
                         Icon(
                             imageVector = Icons.Default.ImageSearch,
@@ -366,8 +394,23 @@ private fun TaggingStatusCard(
                         )
                         Text(
                             text = stringResource(
-                                if (progress.isRunning) R.string.stop_tagging else R.string.scan_storage_for_characters,
+                                when {
+                                    progress.isRunning -> R.string.stop_tagging
+                                    scope.mode == TagScopeMode.SelectedFolders -> R.string.scan_chosen_folders
+                                    else -> R.string.scan_storage_for_characters
+                                },
                             ),
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                    TextButton(onClick = onEditFolders) {
+                        Icon(
+                            imageVector = Icons.Default.FolderSpecial,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = stringResource(R.string.tagging_folders),
                             modifier = Modifier.padding(start = 8.dp),
                         )
                     }

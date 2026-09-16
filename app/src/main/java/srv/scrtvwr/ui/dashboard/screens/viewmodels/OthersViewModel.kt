@@ -10,7 +10,10 @@ import kotlinx.coroutines.launch
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.tagging.CharacterTagRepository
 import srv.scrtvwr.tagging.StorageScanConsent
+import srv.scrtvwr.tagging.TagFolderRule
 import srv.scrtvwr.tagging.TagScanProgress
+import srv.scrtvwr.tagging.TagScanScope
+import srv.scrtvwr.tagging.TagScopeMode
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
 
@@ -58,6 +61,23 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         }
+        viewModelScope.launch {
+            CharacterTagRepository.scanScope.collect { scope ->
+                _uiState.update { it.copy(tagScanScope = scope) }
+            }
+        }
+    }
+
+    fun setScopeMode(mode: TagScopeMode) {
+        CharacterTagRepository.setScopeMode(mode)
+    }
+
+    fun setFolderRule(rule: TagFolderRule) {
+        CharacterTagRepository.setFolderRule(rule.path, rule.includeSubfolders, rule.included)
+    }
+
+    fun removeFolderRule(path: String) {
+        CharacterTagRepository.clearFolderRule(path)
     }
 
     fun setFaceTaggingEnabled(enabled: Boolean) {
@@ -142,4 +162,5 @@ data class OthersUiState(
     val characterCount: Int = 0,
     val lastStorageScanMillis: Long = 0L,
     val tagScanProgress: TagScanProgress = TagScanProgress(),
+    val tagScanScope: TagScanScope = TagScanScope(),
 )

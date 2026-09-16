@@ -36,23 +36,37 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import srv.scrtvwr.R
 import srv.scrtvwr.tagging.CharacterProfile
+import srv.scrtvwr.tagging.StorageScanChoice
 import srv.scrtvwr.tagging.TagScanProgress
 
-/** Asks before the first whole-device pass. Declining leaves lazy per-folder tagging running. */
+/**
+ * Asks before the first whole-device pass, with the narrower answer offered alongside it: tagging
+ * can be held to the folder that turned up the faces instead of being let loose on everything.
+ * Declining leaves lazy per-folder tagging running.
+ */
 @Composable
 fun StorageScanConsentDialog(
-    onConfirm: () -> Unit,
-    onDecline: () -> Unit,
+    folderName: String,
+    onChoice: (StorageScanChoice) -> Unit,
 ) {
     AlertDialog(
-        onDismissRequest = onDecline,
+        onDismissRequest = { onChoice(StorageScanChoice.NotNow) },
         title = { Text(stringResource(R.string.tag_storage_title)) },
-        text = { Text(stringResource(R.string.tag_storage_message)) },
+        text = { Text(stringResource(R.string.tag_storage_message, folderName)) },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text(stringResource(R.string.tag_storage_confirm)) }
+            TextButton(onClick = { onChoice(StorageScanChoice.AllStorage) }) {
+                Text(stringResource(R.string.tag_storage_confirm))
+            }
         },
         dismissButton = {
-            TextButton(onClick = onDecline) { Text(stringResource(R.string.not_now)) }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { onChoice(StorageScanChoice.ThisFolder) }) {
+                    Text(stringResource(R.string.tag_storage_this_folder))
+                }
+                TextButton(onClick = { onChoice(StorageScanChoice.NotNow) }) {
+                    Text(stringResource(R.string.not_now))
+                }
+            }
         },
     )
 }
@@ -208,9 +222,13 @@ fun TaggingProgressPanel(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = stringResource(
-                            if (paused) R.string.tagging_status_paused else R.string.tagging_images,
-                        ),
+                        text = when {
+                            paused -> stringResource(R.string.tagging_status_paused)
+                            // A pass over one folder says which, so it is not mistaken for the big one.
+                            progress.scopeLabel != null ->
+                                stringResource(R.string.tagging_folder, progress.scopeLabel)
+                            else -> stringResource(R.string.tagging_images)
+                        },
                         style = MaterialTheme.typography.titleSmall,
                     )
                     Text(

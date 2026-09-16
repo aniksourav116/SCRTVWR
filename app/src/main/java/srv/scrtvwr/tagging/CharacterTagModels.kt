@@ -106,6 +106,8 @@ data class TagScanProgress(
     val processed: Int = 0,
     val total: Int = 0,
     val currentName: String? = null,
+    /** The folder a one-off pass was asked for, so progress can say what it is working through. */
+    val scopeLabel: String? = null,
 ) {
     val fraction: Float
         get() = if (total <= 0) 0f else (processed.toFloat() / total).coerceIn(0f, 1f)
@@ -116,4 +118,11 @@ enum class StorageScanConsent {
     Unknown,
     Granted,
     Declined,
+}
+
+/** The answers to that prompt: everything, only the folder being browsed, or nothing for now. */
+enum class StorageScanChoice {
+    AllStorage,
+    ThisFolder,
+    NotNow,
 }
