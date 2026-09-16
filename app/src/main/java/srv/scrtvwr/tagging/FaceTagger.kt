@@ -15,18 +15,25 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * What one image yielded: how many faces were in it, and an identity vector for each face that was
- * good enough to identify. A face can be counted but skipped for identity - too small, too turned,
- * too blurred - which keeps poor detections from inventing or polluting characters.
+ * What one image yielded: how many faces were in it, and the faces that were good enough to identify.
+ * A face can be counted but skipped for identity - too small, too turned, too blurred - which keeps
+ * poor detections from inventing or polluting characters.
  */
 data class FaceDetectionResult(
     val faceCount: Int,
-    val embeddings: List<FloatArray>,
+    val faces: List<DetectedFace>,
 ) {
     companion object {
-        val Empty = FaceDetectionResult(faceCount = 0, embeddings = emptyList())
+        val Empty = FaceDetectionResult(faceCount = 0, faces = emptyList())
     }
 }
+
+/**
+ * One identified face: the vector it is recognised by, and where it sits in the frame. The box is
+ * what lets a character's cover be cropped to them rather than to the middle of whatever photo they
+ * were found in.
+ */
+class DetectedFace(val embedding: FloatArray, val bounds: FaceBounds)
 
 /**
  * Turns one detected face into a comparable vector, or null when the face is unusable.
@@ -138,16 +145,20 @@ class FaceTagger(val embedder: FaceEmbedder = GeometricFaceEmbedder()) {
                 else -> true
             }
         }
-        val embeddings = usable.mapNotNull { face -> embedder.embed(bitmap, face) }
+        val identified = usable.mapNotNull { face ->
+            embedder.embed(bitmap, face)?.let { embedding ->
+                DetectedFace(embedding, face.boundingBox.asFractionsOf(bitmap.width, bitmap.height))
+            }
+        }
         Timber.d(
             "Faces: %d detected, %d past the gates, %d embedded (image %dx%d)",
             faces.size,
             usable.size,
-            embeddings.size,
+            identified.size,
             bitmap.width,
             bitmap.height,
         )
-        return FaceDetectionResult(faceCount = faces.size, embeddings = embeddings)
+        return FaceDetectionResult(faceCount = faces.size, faces = identified)
     }
 
     fun close() {
@@ -165,6 +176,18 @@ class FaceTagger(val embedder: FaceEmbedder = GeometricFaceEmbedder()) {
         FaceGeometry.isPoseUsable(headEulerAngleY, headEulerAngleZ)
 
     private fun Rect.shortestSide(): Int = minOf(width(), height())
+
+    /**
+     * ML Kit reports pixels on the bitmap it was handed, which is one particular decode of the image.
+     * Tags keep fractions instead, so the box still lands on the face in the far smaller decode a
+     * cover is drawn from.
+     */
+    private fun Rect.asFractionsOf(imageWidth: Int, imageHeight: Int): FaceBounds = FaceBounds(
+        left = (left.toFloat() / imageWidth).coerceIn(0f, 1f),
+        top = (top.toFloat() / imageHeight).coerceIn(0f, 1f),
+        right = (right.toFloat() / imageWidth).coerceIn(0f, 1f),
+        bottom = (bottom.toFloat() / imageHeight).coerceIn(0f, 1f),
+    )
 
     private suspend fun <T> Task<T>.await(): T = suspendCancellableCoroutine { continuation ->
         addOnCompleteListener { task ->

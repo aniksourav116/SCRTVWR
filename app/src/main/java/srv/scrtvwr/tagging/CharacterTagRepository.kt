@@ -1,9 +1,6 @@
 package srv.scrtvwr.tagging
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Matrix
-import android.media.ExifInterface
 import android.net.Uri
 import android.os.Environment
 import android.os.SystemClock
@@ -31,6 +28,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import srv.scrtvwr.media.ImageOrientation
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import timber.log.Timber
@@ -272,7 +270,7 @@ object CharacterTagRepository {
                 path = path,
                 modifiedMillis = modifiedMillis,
                 faceCount = detection.faceCount,
-                embeddings = detection.embeddings,
+                faces = detection.faces,
                 taggedAtMillis = System.currentTimeMillis(),
             )
         }
@@ -482,7 +480,7 @@ object CharacterTagRepository {
         // sideways bitmap and then cropping from it lands the crop somewhere else entirely - which
         // produces confident matches between people who look nothing alike, because what is being
         // compared is background rather than faces.
-        val upright = decoded.turnedUpright(rotationDegrees(path))
+        val upright = ImageOrientation.turnedUpright(decoded, ImageOrientation.rotationDegrees(path))
         return try {
             tagger.detect(upright, rotationDegrees = 0)
         } catch (cancellation: CancellationException) {
@@ -495,29 +493,6 @@ object CharacterTagRepository {
             if (upright !== decoded) upright.recycle()
             decoded.recycle()
         }
-    }
-
-    private fun Bitmap.turnedUpright(degrees: Int): Bitmap {
-        if (degrees == 0) return this
-        val matrix = Matrix().apply { postRotate(degrees.toFloat()) }
-        return runCatching {
-            Bitmap.createBitmap(this, 0, 0, width, height, matrix, true)
-        }.getOrDefault(this)
-    }
-
-    /** BitmapFactory ignores EXIF, so a portrait photo arrives sideways unless the rotation is passed on. */
-    private fun rotationDegrees(path: String): Int {
-        if (path.contains("::")) return 0
-        return runCatching {
-            val orientation = ExifInterface(path)
-                .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-            when (orientation) {
-                ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                else -> 0
-            }
-        }.getOrDefault(0)
     }
 
     private suspend fun publish(force: Boolean = false) {

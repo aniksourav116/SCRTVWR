@@ -2,6 +2,8 @@ package srv.scrtvwr.media
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.graphics.RectF
 import android.media.MediaMetadataRetriever
 import android.os.Build
 import android.util.LruCache
@@ -22,6 +24,7 @@ import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.ZipFile
 import kotlin.coroutines.coroutineContext
+import kotlin.math.roundToInt
 
 data class PreviewResult(
     val bitmap: Bitmap? = null,
@@ -45,12 +48,32 @@ object MediaPreviewLoader {
     }
 
     suspend fun loadImage(path: String, modified: Long, maxDimension: Int): PreviewResult =
-        loadCached("image:$path:$modified:$maxDimension", maxDimension) {
-            if (path.contains("::")) {
-                loadArchiveImage(path.substringBefore("::"), path.substringAfter("::"), maxDimension)
-            } else {
-                decodeFile(path, maxDimension)
-            }
+        loadCached("image:$path:$modified:$maxDimension", maxDimension) { decodeImage(path, maxDimension) }
+
+    /**
+     * A square crop around one face, for a character's cover. [face] is the box to build it around, in
+     * fractions of the upright image, which is how tagging records where it found somebody.
+     *
+     * The picture is decoded far larger than the crop is drawn, because a face only fills a fraction
+     * of the frame - but only the crop is cached, so a list of covers costs thumbnails rather than
+     * photographs.
+     */
+    suspend fun loadFaceCrop(path: String, modified: Long, face: RectF, maxDimension: Int): PreviewResult =
+        loadCached("face:$path:$modified:${face.toShortString()}:$maxDimension", maxDimension) {
+            // How much larger than the crop the picture has to be decoded is exactly how small a
+            // part of it the face is, up to a ceiling on what is worth holding in memory at once.
+            val coverage = minOf(face.width(), face.height()).coerceAtLeast(MIN_FACE_COVERAGE)
+            val sourceDimension = (maxDimension / coverage).roundToInt().coerceAtMost(MAX_FACE_SOURCE_DIMENSION)
+            val decoded = decodeImage(path, sourceDimension)
+            val source = decoded.bitmap ?: return@loadCached decoded
+            val upright = ImageOrientation.turnedUpright(source, ImageOrientation.rotationDegrees(path))
+            val cropped = runCatching { upright.faceCrop(face, maxDimension) }.getOrNull()
+            // Nothing else can be holding the decode: it went nowhere near the caches, which only
+            // ever see the crop. The crop itself can be one of them, though, when there was nothing
+            // to turn and nothing to cut away.
+            if (upright !== source && upright !== cropped) upright.recycle()
+            if (source !== cropped) source.recycle()
+            cropped?.let { PreviewResult(bitmap = it) } ?: PreviewResult(error = "Unable to crop this image")
         }
 
     suspend fun loadVideoFrame(path: String, modified: Long, maxDimension: Int): PreviewResult =
@@ -97,11 +120,7 @@ object MediaPreviewLoader {
     suspend fun decodeForAnalysis(path: String, maxDimension: Int): PreviewResult =
         withContext(Dispatchers.IO) {
             coroutineContext.ensureActive()
-            if (path.contains("::")) {
-                loadArchiveImage(path.substringBefore("::"), path.substringAfter("::"), maxDimension)
-            } else {
-                decodeFile(path, maxDimension)
-            }
+            decodeImage(path, maxDimension)
         }
 
     private suspend fun loadCached(
@@ -181,6 +200,28 @@ object MediaPreviewLoader {
             retainedBytes += file.length()
             if (retainedBytes > MAX_DISK_CACHE_BYTES) file.delete()
         }
+    }
+
+    private fun decodeImage(path: String, maxDimension: Int): PreviewResult =
+        if (path.contains("::")) {
+            loadArchiveImage(path.substringBefore("::"), path.substringAfter("::"), maxDimension)
+        } else {
+            decodeFile(path, maxDimension)
+        }
+
+    /**
+     * A square around the face with room for the head, kept inside the image and never enlarged past
+     * what was decoded. The padding is what makes it read as a portrait: the detected box alone stops
+     * at the eyebrows and the chin, which looks like a fragment of somebody rather than a face.
+     */
+    private fun Bitmap.faceCrop(face: RectF, maxDimension: Int): Bitmap {
+        val widest = maxOf(face.width() * width, face.height() * height)
+        val side = (widest * FACE_CROP_SCALE).roundToInt().coerceIn(1, minOf(width, height))
+        val left = (face.centerX() * width - side / 2f).roundToInt().coerceIn(0, width - side)
+        val top = (face.centerY() * height - side / 2f).roundToInt().coerceIn(0, height - side)
+        val scale = maxDimension.toFloat() / side
+        val matrix = Matrix().apply { if (scale < 1f) postScale(scale, scale) }
+        return Bitmap.createBitmap(this, left, top, side, side, matrix, true)
     }
 
     private fun decodeFile(path: String, maxDimension: Int): PreviewResult =
@@ -280,4 +321,14 @@ object MediaPreviewLoader {
     }
 
     private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif")
+
+    /** How much wider than the face itself the crop is taken, to leave room for hair and shoulders. */
+    private const val FACE_CROP_SCALE = 1.7f
+
+    /**
+     * A floor on how small a face is taken to be when working out how large to decode. Without it a
+     * face lost in a crowd would ask for a decode of the whole picture at poster size.
+     */
+    private const val MIN_FACE_COVERAGE = 0.05f
+    private const val MAX_FACE_SOURCE_DIMENSION = 1536
 }

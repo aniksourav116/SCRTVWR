@@ -13,6 +13,29 @@ data class CharacterProfile(
     val imageCount: Int,
     val coverPath: String? = null,
     val coverModifiedMillis: Long = 0L,
+    /** Where this character's face sits in the cover, so the avatar can be their face rather than the whole photo. */
+    val coverBounds: FaceBounds? = null,
+)
+
+/**
+ * Where a face sits in its image, in fractions of the image rather than pixels, so the same box still
+ * means the same thing on a decode of any size - the large one tagging read, and the small one a
+ * cover is drawn from. Measured on the upright image, which is the orientation faces are detected in.
+ */
+data class FaceBounds(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+) {
+    val isUsable: Boolean
+        get() = right > left && bottom > top
+}
+
+/** One identified face in an image: where it is, and which character it was assigned to. */
+data class TaggedFace(
+    val bounds: FaceBounds,
+    val characterId: String? = null,
 )
 
 /** Everything tagging knows about one image. [modifiedMillis] invalidates the entry when it changes. */
@@ -22,9 +45,18 @@ data class ImageTags(
     val faceCount: Int,
     val characterIds: List<String>,
     val taggedAtMillis: Long,
+    /**
+     * The faces that were identified here, in the order they were embedded - the same order the face
+     * log indexes them by, so a rebuild can hand each box its new character.
+     */
+    val faces: List<TaggedFace> = emptyList(),
 ) {
     val hasFaces: Boolean
         get() = faceCount > 0
+
+    /** Where [characterId] was found in this image, for cropping a cover to them. */
+    fun boundsFor(characterId: String): FaceBounds? =
+        faces.firstOrNull { face -> face.characterId == characterId }?.bounds
 }
 
 /**

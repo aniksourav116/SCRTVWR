@@ -14,8 +14,9 @@ import kotlin.math.roundToInt
  * Persists tagging state under the app's private files directory, in three parts:
  *
  *  - `characters.json` - the characters and their exemplar vectors. Small, rewritten whole.
- *  - `images.jsonl` - one line per tagged image. A whole-device scan makes a lot of these, so they
- *    are line-delimited and neither side of the round trip has to hold the document in memory.
+ *  - `images.jsonl` - one line per tagged image, with the box each identified face occupies. A
+ *    whole-device scan makes a lot of these, so they are line-delimited and neither side of the
+ *    round trip has to hold the document in memory.
  *  - `faces.jsonl` - one line per detected face, with the vector that identifies it. Append-only
  *    while tagging runs, rewritten when the groups are rebuilt.
  *
@@ -161,10 +162,35 @@ class CharacterTagStore(private val directory: File) {
                         characters?.optString(position)?.takeIf(String::isNotEmpty)
                     },
                     taggedAtMillis = json.optLong(KEY_TAGGED_AT),
+                    faces = json.toTaggedFaces(),
                 )
             }
         }
         return images
+    }
+
+    /**
+     * The boxes for one image. Face vectors are indexed by position in this list, so a list with a
+     * damaged entry in it is dropped whole rather than read short and silently shifted.
+     */
+    private fun JSONObject.toTaggedFaces(): List<TaggedFace> {
+        val boxes = optJSONArray(KEY_BOXES) ?: return emptyList()
+        val faces = (0 until boxes.length()).mapNotNull { position ->
+            boxes.optJSONObject(position)?.toTaggedFace()
+        }
+        return if (faces.size == boxes.length()) faces else emptyList()
+    }
+
+    private fun JSONObject.toTaggedFace(): TaggedFace? {
+        val box = optJSONArray(KEY_BOX)?.takeIf { it.length() >= BOX_EDGES } ?: return null
+        val bounds = FaceBounds(
+            left = box.optDouble(0).toFloat(),
+            top = box.optDouble(1).toFloat(),
+            right = box.optDouble(2).toFloat(),
+            bottom = box.optDouble(3).toFloat(),
+        )
+        if (!bounds.isUsable) return null
+        return TaggedFace(bounds = bounds, characterId = optString(KEY_CHARACTER).takeIf(String::isNotEmpty))
     }
 
     private fun CharacterTagSnapshot.toJson(): JSONObject {
@@ -189,12 +215,34 @@ class CharacterTagStore(private val directory: File) {
             .put(KEY_CHARACTERS, array)
     }
 
-    private fun ImageTags.toJson(): JSONObject = JSONObject()
-        .put(KEY_PATH, path)
-        .put(KEY_MODIFIED, modifiedMillis)
-        .put(KEY_FACES, faceCount)
-        .put(KEY_TAGGED_AT, taggedAtMillis)
-        .put(KEY_CHARACTERS, JSONArray().apply { characterIds.forEach(::put) })
+    private fun ImageTags.toJson(): JSONObject {
+        val json = JSONObject()
+            .put(KEY_PATH, path)
+            .put(KEY_MODIFIED, modifiedMillis)
+            .put(KEY_FACES, faceCount)
+            .put(KEY_TAGGED_AT, taggedAtMillis)
+            .put(KEY_CHARACTERS, JSONArray().apply { characterIds.forEach(::put) })
+        // Absent for images tagged before boxes were recorded, which is why they are read back as
+        // optional: those covers simply go uncropped until the image is tagged again.
+        if (faces.isNotEmpty()) {
+            json.put(KEY_BOXES, JSONArray().apply { faces.forEach { face -> put(face.toJson()) } })
+        }
+        return json
+    }
+
+    private fun TaggedFace.toJson(): JSONObject {
+        val box = JSONArray()
+            .put(bounds.left.rounded())
+            .put(bounds.top.rounded())
+            .put(bounds.right.rounded())
+            .put(bounds.bottom.rounded())
+        val json = JSONObject().put(KEY_BOX, box)
+        characterId?.let { json.put(KEY_CHARACTER, it) }
+        return json
+    }
+
+    /** Four decimals is a fraction of a pixel on any image worth cropping, and keeps the lines short. */
+    private fun Float.rounded(): Double = (this * BOX_PRECISION).roundToInt() / BOX_PRECISION.toDouble()
 
     private fun FaceVector.toJson(): JSONObject {
         val json = JSONObject()
@@ -268,7 +316,13 @@ class CharacterTagStore(private val directory: File) {
         const val KEY_INDEX = "index"
         const val KEY_CHARACTER = "character"
         const val KEY_VECTOR = "vector"
+        const val KEY_BOXES = "boxes"
+        const val KEY_BOX = "box"
         const val KEY_SCALE = "scale"
         const val KEY_DATA = "data"
+
+        /** A box is four edges; a row with fewer than that is not one. */
+        const val BOX_EDGES = 4
+        const val BOX_PRECISION = 10_000f
     }
 }

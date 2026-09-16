@@ -1,5 +1,6 @@
 package srv.scrtvwr.ui.tagging
 
+import android.graphics.RectF
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +31,7 @@ import srv.scrtvwr.R
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.PreviewResult
 import srv.scrtvwr.tagging.CharacterProfile
+import srv.scrtvwr.tagging.FaceBounds
 import srv.scrtvwr.tagging.ImageTags
 
 /** Characters keep a default name until the user renames them. */
@@ -118,20 +120,36 @@ fun TaggedImageThumbnail(
     }
 }
 
-/** The first image a character was found in, used as its avatar in the characters list. */
+/**
+ * A character's avatar: their face, cut out of the image they were found in. The whole photo would be
+ * the wrong picture at this size - a group shot squeezed into 48 dp says nothing about who this is -
+ * so it is cropped to where tagging saw them, and shown whole only for covers tagged before boxes
+ * were recorded.
+ */
 @Composable
 fun CharacterCover(
     profile: CharacterProfile,
     modifier: Modifier = Modifier.size(48.dp),
 ) {
     val coverPath = profile.coverPath
+    val coverBounds = profile.coverBounds
     val preview by produceState<PreviewResult?>(
         initialValue = null,
         key1 = coverPath,
         key2 = profile.coverModifiedMillis,
+        key3 = coverBounds,
     ) {
         value = coverPath?.let { path ->
-            MediaPreviewLoader.loadImage(path, profile.coverModifiedMillis, COVER_DIMENSION)
+            if (coverBounds != null && coverBounds.isUsable) {
+                MediaPreviewLoader.loadFaceCrop(
+                    path = path,
+                    modified = profile.coverModifiedMillis,
+                    face = coverBounds.toRectF(),
+                    maxDimension = COVER_DIMENSION,
+                )
+            } else {
+                MediaPreviewLoader.loadImage(path, profile.coverModifiedMillis, COVER_DIMENSION)
+            }
         } ?: PreviewResult()
     }
 
@@ -158,6 +176,8 @@ fun CharacterCover(
         }
     }
 }
+
+private fun FaceBounds.toRectF(): RectF = RectF(left, top, right, bottom)
 
 private const val COVER_DIMENSION = 128
 private const val THUMBNAIL_DIMENSION = 192

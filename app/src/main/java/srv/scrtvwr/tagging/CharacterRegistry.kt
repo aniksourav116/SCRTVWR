@@ -59,18 +59,18 @@ class CharacterRegistry(
         path: String,
         modifiedMillis: Long,
         faceCount: Int,
-        embeddings: List<FloatArray>,
+        faces: List<DetectedFace>,
         taggedAtMillis: Long,
     ): ImageTags {
         forget(path)
         val characterIds = mutableListOf<String>()
-        embeddings.forEachIndexed { faceIndex, embedding ->
-            val assignment = assign(embedding)
+        val tagged = faces.mapIndexed { faceIndex, face ->
+            val assignment = assign(face.embedding)
             assignment?.let { (matched, similarity, isNew) ->
                 // Only a confident match earns a place among the exemplars. A face that merely
                 // scraped past the join threshold would otherwise widen the character it joined,
                 // which attracts more marginal faces - the way one bad merge becomes ten.
-                if (isNew || similarity >= rules.mergeSimilarity) matched.absorb(embedding, rules)
+                if (isNew || similarity >= rules.mergeSimilarity) matched.absorb(face.embedding, rules)
                 matched.sampleCount++
                 if (matched.coverPath == null) {
                     matched.coverPath = path
@@ -94,9 +94,10 @@ class CharacterRegistry(
                 path = path,
                 modifiedMillis = modifiedMillis,
                 index = faceIndex,
-                embedding = embedding,
+                embedding = face.embedding,
                 characterId = assignment?.identity?.id,
             )
+            TaggedFace(bounds = face.bounds, characterId = assignment?.identity?.id)
         }
         characterIds.forEach { id -> imageCounts[id] = (imageCounts[id] ?: 0) + 1 }
 
@@ -106,6 +107,7 @@ class CharacterRegistry(
             faceCount = faceCount,
             characterIds = characterIds,
             taggedAtMillis = taggedAtMillis,
+            faces = tagged,
         )
         images[path] = tags
         trimImages()
@@ -205,7 +207,7 @@ class CharacterRegistry(
             val tags = entry.value
             if (otherId in tags.characterIds) {
                 val ids = (tags.characterIds - otherId).let { if (characterId in it) it else it + characterId }
-                entry.setValue(tags.copy(characterIds = ids))
+                entry.setValue(tags.copy(characterIds = ids, faces = tags.faces.reassigned(otherId, characterId)))
             }
         }
         imageCounts[characterId] = images.values.count { characterId in it.characterIds }
@@ -216,7 +218,10 @@ class CharacterRegistry(
     fun unassign(characterId: String, path: String): Boolean {
         val tags = images[path] ?: return false
         if (characterId !in tags.characterIds) return false
-        images[path] = tags.copy(characterIds = tags.characterIds - characterId)
+        images[path] = tags.copy(
+            characterIds = tags.characterIds - characterId,
+            faces = tags.faces.reassigned(characterId, to = null),
+        )
         val remaining = (imageCounts[characterId] ?: 0) - 1
         if (remaining > 0) imageCounts[characterId] = remaining else imageCounts.remove(characterId)
         identities[characterId]?.let { identity ->
@@ -253,7 +258,12 @@ class CharacterRegistry(
         images.entries.forEach { entry ->
             val tags = entry.value
             if (characterId in tags.characterIds) {
-                entry.setValue(tags.copy(characterIds = tags.characterIds - characterId))
+                entry.setValue(
+                    tags.copy(
+                        characterIds = tags.characterIds - characterId,
+                        faces = tags.faces.reassigned(characterId, to = null),
+                    ),
+                )
             }
         }
         return true
@@ -286,6 +296,9 @@ class CharacterRegistry(
                 imageCount = imageCounts[identity.id] ?: 0,
                 coverPath = identity.coverPath,
                 coverModifiedMillis = identity.coverModifiedMillis,
+                // Derived rather than kept on the character: whichever image ends up being the cover,
+                // the box that matters is the one tagging recorded for this character in it.
+                coverBounds = identity.coverPath?.let { path -> images[path]?.boundsFor(identity.id) },
             )
         }
         .sortedWith(compareByDescending<CharacterProfile> { it.imageCount }.thenBy { it.ordinal })
@@ -337,7 +350,11 @@ class CharacterRegistry(
         }
         snapshot.images.takeLast(maxImages).forEach { tags ->
             val knownIds = tags.characterIds.filter(identities::containsKey)
-            images[tags.path] = if (knownIds.size == tags.characterIds.size) tags else tags.copy(characterIds = knownIds)
+            images[tags.path] = if (knownIds.size == tags.characterIds.size) {
+                tags
+            } else {
+                tags.copy(characterIds = knownIds, faces = tags.faces.assignedOnlyTo(identities.keys))
+            }
             knownIds.forEach { id -> imageCounts[id] = (imageCounts[id] ?: 0) + 1 }
         }
         return true
@@ -407,8 +424,18 @@ class CharacterRegistry(
     private fun reindexImages(faces: List<FaceVector>) {
         val byPath = faces.groupBy(FaceVector::path)
         images.entries.forEach { entry ->
-            val ids = byPath[entry.key]?.mapNotNull(FaceVector::characterId)?.distinct().orEmpty()
-            entry.setValue(entry.value.copy(characterIds = ids))
+            val rows = byPath[entry.key].orEmpty()
+            // Face vectors are indexed in the order the boxes were recorded, so this is also how each
+            // box is told who its face belongs to now.
+            val assigned = rows.associate { row -> row.index to row.characterId }
+            entry.setValue(
+                entry.value.copy(
+                    characterIds = rows.mapNotNull(FaceVector::characterId).distinct(),
+                    faces = entry.value.faces.mapIndexed { index, face ->
+                        face.copy(characterId = assigned[index])
+                    },
+                ),
+            )
         }
         imageCounts.clear()
         images.values.forEach { tags ->
@@ -421,6 +448,15 @@ class CharacterRegistry(
                 identity.coverModifiedMillis = cover?.modifiedMillis ?: 0L
             }
         }
+    }
+
+    /** Moves every face of [from] to [to]: to another character on a merge, or to nobody otherwise. */
+    private fun List<TaggedFace>.reassigned(from: String, to: String?): List<TaggedFace> =
+        map { face -> if (face.characterId == from) face.copy(characterId = to) else face }
+
+    /** Keeps the boxes but drops assignments to characters that are no longer around. */
+    private fun List<TaggedFace>.assignedOnlyTo(known: Set<String>): List<TaggedFace> = map { face ->
+        if (face.characterId == null || face.characterId in known) face else face.copy(characterId = null)
     }
 
     private fun trimImages() {
