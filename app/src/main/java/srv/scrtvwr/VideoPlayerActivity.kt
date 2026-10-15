@@ -118,6 +118,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import srv.scrtvwr.media.DirectoryTraversal
+import srv.scrtvwr.media.remote.RemoteVideoPlayback
 import srv.scrtvwr.ui.components.BookmarkFlash
 import srv.scrtvwr.ui.components.TapeTransportButton
 import srv.scrtvwr.ui.components.VideoSideGestures
@@ -401,7 +402,12 @@ private fun VideoPage(
         MediaItem.fromUri(if (MediaPaths.isRemote(item.path)) Uri.parse(item.path) else Uri.fromFile(File(item.path)))
     }
     val player = remember(item.path) {
-        ExoPlayer.Builder(context).build().apply {
+        val playback = if (MediaPaths.isRemote(item.path)) {
+            RemoteVideoPlayback.player(context)
+        } else {
+            ExoPlayer.Builder(context).build()
+        }
+        playback.apply {
             setMediaItem(mediaItem)
         }
     }
@@ -458,6 +464,7 @@ private fun VideoPage(
 
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) {
+                    prepareRequested = true
                     duration = player.duration.coerceAtLeast(0L)
                     error = null
                     reloadWhenActive = false
@@ -465,6 +472,13 @@ private fun VideoPage(
                 }
                 if (state == Player.STATE_ENDED) {
                     savedPlaybackPosition = 0L
+                    if (MediaPaths.isRemote(item.path)) {
+                        // Free the streaming buffers immediately, while keeping the media item
+                        // available for replay. Looping videos never enter STATE_ENDED.
+                        player.stop()
+                        player.seekTo(0L)
+                        prepareRequested = false
+                    }
                     onEnded()
                 }
             }
@@ -894,6 +908,7 @@ private fun BoxScope.VideoControls(
                     onClick = {
                         if (player.isPlaying) player.pause() else {
                             if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
+                            if (player.playbackState == Player.STATE_IDLE) player.prepare()
                             player.play()
                         }
                     },
