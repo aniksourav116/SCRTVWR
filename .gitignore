@@ -27,6 +27,9 @@ render.experimental.xml
 *.keystore
 keystore.properties
 
+# TLS certificates and keys for tools/auth_http_server.py
+*.pem
+
 # Google Services (e.g. APIs or Firebase)
 # google-services.json is checked in on purpose; the service account key is not.
 firebase-service-account.json
