@@ -60,6 +60,41 @@ class RemoteArchiveCacheTest {
     }
 
     @Test
+    fun filesToEvict_keepsTheArchiveBeingOpenedEvenWhenItExceedsTheBudget() {
+        val current = cacheFile("current", sizeBytes = 120, lastModified = 1)
+        val other = cacheFile("other", sizeBytes = 30, lastModified = 2)
+
+        assertEquals(
+            listOf(other),
+            RemoteArchiveCache.filesToEvict(listOf(other, current), maxBytes = 80, keep = current),
+        )
+    }
+
+    @Test
+    fun file_acceptsMultiGigabyteLengthAndCleansUpWhenTheCallerStops() = runBlocking {
+        val cacheDirectory = temporaryFolder.newFolder("large-cache")
+        RemoteArchiveCache.initialize(cacheDirectory)
+        val declaredLength = 3L * 1024L * 1024L * 1024L
+        TestHttpServer(mapOf("large.cbz" to ByteArray(0)), declaredFileLength = declaredLength).use { server ->
+            val url = server.url("large.cbz")
+            var reportedLength: Long? = null
+            val stoppedByCaller = IOException("Stop after headers")
+
+            val error = runCatching {
+                RemoteArchiveCache.file(url) { progress ->
+                    reportedLength = progress.totalBytes
+                    throw stoppedByCaller
+                }
+            }.exceptionOrNull()
+
+            assertEquals(declaredLength, reportedLength ?: -1L)
+            assertEquals(stoppedByCaller, error)
+            assertNull(RemoteArchiveCache.cachedFile(url))
+            assertTrue(File(cacheDirectory, "remote_archives").list().orEmpty().isEmpty())
+        }
+    }
+
+    @Test
     fun file_downloadsTheArchiveOnceUnderItsHashedName() = runBlocking {
         val cacheDirectory = temporaryFolder.newFolder("cache")
         RemoteArchiveCache.initialize(cacheDirectory)

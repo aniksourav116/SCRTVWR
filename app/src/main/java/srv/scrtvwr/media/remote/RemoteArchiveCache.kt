@@ -27,7 +27,6 @@ data class DownloadProgress(val downloadedBytes: Long, val totalBytes: Long) {
  * is never a path that ends up in history, bookmarks or the viewer.
  */
 object RemoteArchiveCache {
-    private const val MAX_ARCHIVE_BYTES = 512L * 1024L * 1024L
     private const val MAX_CACHE_BYTES = 1024L * 1024L * 1024L
     private const val DIRECTORY_NAME = "remote_archives"
     private const val PARTIAL_SUFFIX = ".part"
@@ -47,7 +46,8 @@ object RemoteArchiveCache {
             downloadLock.withLock {
                 // Leftovers of downloads the process died during.
                 cache.listFiles()?.filter { it.name.endsWith(PARTIAL_SUFFIX) }?.forEach(File::delete)
-                trim(cache)
+                // Trim completed copies after downloads, when the file being opened is known.
+                // Startup trimming could race a cachedFile() reader and delete its archive.
             }
         }
     }
@@ -80,7 +80,7 @@ object RemoteArchiveCache {
         val temporary = File.createTempFile("download-", PARTIAL_SUFFIX, cache)
         try {
             var reportedAtMillis = 0L
-            HttpDirectoryClient.download(archiveUrl, temporary, MAX_ARCHIVE_BYTES) { downloadedBytes, totalBytes ->
+            HttpDirectoryClient.download(archiveUrl, temporary) { downloadedBytes, totalBytes ->
                 val now = System.currentTimeMillis()
                 if (now - reportedAtMillis >= PROGRESS_INTERVAL_MILLIS || downloadedBytes == totalBytes) {
                     reportedAtMillis = now
@@ -92,13 +92,14 @@ object RemoteArchiveCache {
             temporary.delete()
         }
         target.setLastModified(System.currentTimeMillis())
-        trim(cache)
+        // An archive larger than the cache budget must survive until the caller opens it.
+        trim(cache, keep = target)
         return target
     }
 
-    private fun trim(cache: File) {
+    private fun trim(cache: File, keep: File? = null) {
         val files = cache.listFiles()?.filter { it.isFile && !it.name.endsWith(PARTIAL_SUFFIX) } ?: return
-        filesToEvict(files, MAX_CACHE_BYTES).forEach(File::delete)
+        filesToEvict(files, MAX_CACHE_BYTES, keep).forEach(File::delete)
     }
 
     /** Cache file name for [archiveUrl]: the URL's SHA-256 in hex, then its lowercase extension. */
@@ -111,10 +112,11 @@ object RemoteArchiveCache {
         return if (extension.isEmpty()) hash else "$hash.$extension"
     }
 
-    /** The least recently used of [files] to delete so the rest fit in [maxBytes]. */
-    internal fun filesToEvict(files: List<File>, maxBytes: Long): List<File> {
-        var retainedBytes = 0L
+    /** Evict old copies to meet [maxBytes], always retaining the archive being opened in [keep]. */
+    internal fun filesToEvict(files: List<File>, maxBytes: Long, keep: File? = null): List<File> {
+        var retainedBytes = keep?.length() ?: 0L
         return files
+            .filter { it != keep }
             .map { file -> file to file.lastModified() }
             .sortedByDescending { (_, lastModified) -> lastModified }
             .filter { (file, _) ->

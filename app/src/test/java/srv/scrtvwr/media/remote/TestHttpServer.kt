@@ -15,7 +15,11 @@ import kotlin.concurrent.thread
  * path and lists every folder as an HTML page of links. Like Python's server, it ignores Range
  * headers and closes each connection after one response.
  */
-class TestHttpServer(private val files: Map<String, ByteArray>) : Closeable {
+class TestHttpServer(
+    private val files: Map<String, ByteArray>,
+    // Allows tests to exercise large Content-Length values without transferring gigabytes.
+    private val declaredFileLength: Long? = null,
+) : Closeable {
     private val serverSocket = ServerSocket(0, 50, InetAddress.getLoopbackAddress())
     private val fileRequestCount = AtomicInteger()
 
@@ -33,7 +37,13 @@ class TestHttpServer(private val files: Map<String, ByteArray>) : Closeable {
                 } catch (_: IOException) {
                     break
                 }
-                client.use { respond(it) }
+                client.use {
+                    try {
+                        respond(it)
+                    } catch (_: IOException) {
+                        // A client may cancel after receiving headers or part of a file.
+                    }
+                }
             }
         }
     }
@@ -61,9 +71,10 @@ class TestHttpServer(private val files: Map<String, ByteArray>) : Closeable {
             else -> Triple("404 Not Found", "text/plain", ByteArray(0))
         }
         val output = client.getOutputStream()
+        val contentLength = if (file != null) declaredFileLength ?: body.size.toLong() else body.size.toLong()
         val headers = "HTTP/1.0 $status\r\n" +
             "Content-Type: $contentType\r\n" +
-            "Content-Length: ${body.size}\r\n" +
+            "Content-Length: $contentLength\r\n" +
             "Connection: close\r\n\r\n"
         output.write(headers.toByteArray(Charsets.ISO_8859_1))
         if (method != "HEAD") output.write(body)

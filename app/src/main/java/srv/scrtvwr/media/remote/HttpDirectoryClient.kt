@@ -26,8 +26,8 @@ import java.nio.charset.Charset
  * requests, which are only made when a sort order needs them.
  */
 object HttpDirectoryClient {
-    private const val CONNECT_TIMEOUT_MILLIS = 5_000
-    private const val READ_TIMEOUT_MILLIS = 15_000
+    internal const val CONNECT_TIMEOUT_MILLIS = 15_000
+    internal const val READ_TIMEOUT_MILLIS = 60_000
     private const val LISTING_CACHE_MILLIS = 30_000L
     private const val MAX_LISTING_BYTES = 8L * 1024L * 1024L
     private const val MAX_CACHED_LISTINGS = 256
@@ -90,18 +90,10 @@ object HttpDirectoryClient {
                 .awaitAll()
         }
 
-    /** Downloads [url] into memory, refusing bodies larger than [maxBytes]. */
-    @Throws(IOException::class)
-    fun readBytes(url: String, maxBytes: Long): ByteArray =
-        request(url, method = "GET") { connection ->
-            val length = connection.contentLengthLong
-            if (length > maxBytes) throw IOException("File is larger than the ${maxBytes / (1024 * 1024)} MB limit")
-            connection.inputStream.use { it.readLimited(maxBytes) }
-        }
-
     /**
-     * Streams [url] into [target], refusing bodies larger than [maxBytes]. [onProgress] receives the
+     * Streams [url] into [target] without a file-size cap. [onProgress] receives the
      * bytes written so far and the length the server announced, or -1 when it sent none.
+     * Only a fixed-size buffer is kept in memory; available disk space limits the file.
      * Cancelling the calling coroutine closes the connection, so a stalled server cannot keep a
      * cancelled download alive until the read timeout.
      */
@@ -109,7 +101,6 @@ object HttpDirectoryClient {
     suspend fun download(
         url: String,
         target: File,
-        maxBytes: Long,
         onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> },
     ): Unit = withContext(Dispatchers.IO) {
         request<Unit>(url, method = "GET") { connection ->
@@ -123,7 +114,6 @@ object HttpDirectoryClient {
             }
             try {
                 val totalBytes = connection.contentLengthLong
-                if (totalBytes > maxBytes) throw IOException("File is larger than the ${maxBytes / (1024 * 1024)} MB limit")
                 onProgress(0L, totalBytes)
                 var downloadedBytes = 0L
                 connection.inputStream.use { input ->
@@ -134,9 +124,6 @@ object HttpDirectoryClient {
                             val read = input.read(buffer)
                             if (read < 0) break
                             downloadedBytes += read
-                            if (downloadedBytes > maxBytes) {
-                                throw IOException("File is larger than the ${maxBytes / (1024 * 1024)} MB limit")
-                            }
                             output.write(buffer, 0, read)
                             onProgress(downloadedBytes, totalBytes)
                         }

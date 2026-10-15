@@ -6,6 +6,7 @@ import android.media.MediaMetadataRetriever
 import android.os.Build
 import android.util.LruCache
 import com.github.junrar.Archive
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -36,12 +37,12 @@ object MediaPreviewLoader {
     private const val MAX_DISK_CACHE_BYTES = 64L * 1024L * 1024L
     private const val MAX_DISK_CACHE_DIMENSION = 256
     private const val DISK_WRITES_PER_TRIM = 32
-    private const val MAX_REMOTE_IMAGE_BYTES = 64L * 1024L * 1024L
     private val directoryThumbnailSemaphore = Semaphore(2)
     private val remoteImageSemaphore = Semaphore(4)
     private val diskCacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val diskWritesSinceTrim = AtomicInteger()
     @Volatile private var diskCacheDirectory: File? = null
+    @Volatile private var imageDownloadDirectory: File? = null
 
     private val cache = object : LruCache<String, Bitmap>(MAX_CACHE_KIB) {
         override fun sizeOf(key: String, value: Bitmap): Int =
@@ -210,18 +211,25 @@ object MediaPreviewLoader {
             onFailure = { PreviewResult(error = it.readableMessage("Unable to read image")) },
         )
 
-    private fun decodeRemoteImage(url: String, maxDimension: Int): PreviewResult =
-        runCatching {
-            val bytes = HttpDirectoryClient.readBytes(url, MAX_REMOTE_IMAGE_BYTES)
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-            require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Unsupported or damaged image" }
-            val options = BitmapFactory.Options().apply { inSampleSize = bounds.sampleSize(maxDimension) }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: error("Image decoder returned no bitmap")
-        }.fold(
-            onSuccess = { PreviewResult(bitmap = it) },
-            onFailure = { PreviewResult(error = it.readableMessage("Unable to download image")) },
-        )
+    private suspend fun decodeRemoteImage(url: String, maxDimension: Int): PreviewResult {
+        var temporary: File? = null
+        return try {
+            val directory = imageDownloadDirectory ?: throw IOException("Image cache is not ready")
+            if (!directory.isDirectory && !directory.mkdirs()) throw IOException("Unable to create the image cache")
+            val download = File.createTempFile("image-", ".part", directory)
+            temporary = download
+            // Avoid holding the entire compressed file in memory before decoding it.
+            HttpDirectoryClient.download(url, download)
+            coroutineContext.ensureActive()
+            decodeFile(download.path, maxDimension)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: IOException) {
+            PreviewResult(error = error.readableMessage("Unable to download image"))
+        } finally {
+            temporary?.delete()
+        }
+    }
 
     private suspend fun loadArchiveImage(
         archivePath: String,
@@ -318,6 +326,10 @@ object MediaPreviewLoader {
     }
 
     fun initialize(cacheDirectory: File) {
+        // Each process owns its temporary image files. Remove leftovers before any loads start.
+        val downloads = File(cacheDirectory, "remote_images")
+        downloads.listFiles()?.filter { it.name.endsWith(".part") }?.forEach(File::delete)
+        imageDownloadDirectory = downloads
         val directory = File(cacheDirectory, "media_thumbnails")
         diskCacheDirectory = directory
         diskCacheScope.launch {
