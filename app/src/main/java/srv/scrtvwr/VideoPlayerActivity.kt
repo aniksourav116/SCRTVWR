@@ -125,6 +125,7 @@ import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.media.MediaCatalog
 import srv.scrtvwr.media.MediaPaths
 import srv.scrtvwr.media.remote.RemoteDirectoryTree
+import srv.scrtvwr.media.remote.RemoteMediaSources
 import srv.scrtvwr.media.remote.RemotePaths
 import srv.scrtvwr.media.remote.serverFor
 import srv.scrtvwr.preferences.ScrtvwrPreferences
@@ -397,11 +398,11 @@ private fun VideoPage(
     val preferences = remember { ScrtvwrPreferences(context) }
     var savedPlaybackPosition by rememberSaveable(item.path) { mutableLongStateOf(0L) }
     val mediaItem = remember(item.path) {
-        // Server files stream through ExoPlayer's HTTP data source straight from their URL.
+        // Server files stream straight from their URL, signed in to their server if it needs it.
         MediaItem.fromUri(if (MediaPaths.isRemote(item.path)) Uri.parse(item.path) else Uri.fromFile(File(item.path)))
     }
     val player = remember(item.path) {
-        ExoPlayer.Builder(context).build().apply {
+        RemoteMediaSources.player(context, item.path).apply {
             setMediaItem(mediaItem)
         }
     }
