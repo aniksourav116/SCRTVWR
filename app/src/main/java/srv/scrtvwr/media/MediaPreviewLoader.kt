@@ -14,6 +14,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import srv.scrtvwr.media.remote.HttpDirectoryClient
+import srv.scrtvwr.media.remote.RemoteArchiveCache
 import java.io.File
 import java.io.FilterInputStream
 import java.io.IOException
@@ -34,7 +36,9 @@ object MediaPreviewLoader {
     private const val MAX_DISK_CACHE_BYTES = 64L * 1024L * 1024L
     private const val MAX_DISK_CACHE_DIMENSION = 256
     private const val DISK_WRITES_PER_TRIM = 32
+    private const val MAX_REMOTE_IMAGE_BYTES = 64L * 1024L * 1024L
     private val directoryThumbnailSemaphore = Semaphore(2)
+    private val remoteImageSemaphore = Semaphore(4)
     private val diskCacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val diskWritesSinceTrim = AtomicInteger()
     @Volatile private var diskCacheDirectory: File? = null
@@ -44,17 +48,33 @@ object MediaPreviewLoader {
             (value.allocationByteCount / 1024).coerceAtLeast(1)
     }
 
-    suspend fun loadImage(path: String, modified: Long, maxDimension: Int): PreviewResult =
+    /**
+     * Image at [path], which may be an entry of a local or server archive. A server archive that is
+     * not cached yet is downloaded first, unless [downloadArchive] is false; then the result is
+     * empty, so a small thumbnail never costs a whole archive.
+     */
+    suspend fun loadImage(
+        path: String,
+        modified: Long,
+        maxDimension: Int,
+        downloadArchive: Boolean = true,
+    ): PreviewResult =
         loadCached("image:$path:$modified:$maxDimension", maxDimension) {
-            if (path.contains("::")) {
-                loadArchiveImage(path.substringBefore("::"), path.substringAfter("::"), maxDimension)
+            val entryName = MediaPaths.archiveEntryName(path)
+            if (entryName != null) {
+                loadArchiveImage(MediaPaths.archivePath(path), entryName, maxDimension, downloadArchive)
+            } else if (MediaPaths.isRemote(path)) {
+                remoteImageSemaphore.withPermit { decodeRemoteImage(path, maxDimension) }
             } else {
                 decodeFile(path, maxDimension)
             }
         }
 
-    suspend fun loadVideoFrame(path: String, modified: Long, maxDimension: Int): PreviewResult =
-        loadCached("video:$path:$modified:$maxDimension", maxDimension) {
+    suspend fun loadVideoFrame(path: String, modified: Long, maxDimension: Int): PreviewResult {
+        // Servers without Range support (python -m http.server) would have to send most of the
+        // video before a frame decodes, so remote videos keep their placeholder icon.
+        if (MediaPaths.isRemote(path)) return PreviewResult()
+        return loadCached("video:$path:$modified:$maxDimension", maxDimension) {
             runCatching {
                 val retriever = MediaMetadataRetriever()
                 try {
@@ -78,10 +98,17 @@ object MediaPreviewLoader {
                 onFailure = { PreviewResult(error = it.readableMessage("Unable to read video preview")) },
             )
         }
+    }
 
     suspend fun loadDirectoryThumbnail(path: String, modified: Long, maxDimension: Int): PreviewResult =
         loadCached("directory:$path:$modified:$maxDimension", maxDimension) {
             directoryThumbnailSemaphore.withPermit {
+                if (MediaPaths.isRemote(path)) {
+                    val image = runCatching { HttpDirectoryClient.list(path) }.getOrNull()?.firstOrNull { entry ->
+                        !entry.isDirectory && entry.name.substringAfterLast('.', "").lowercase() in IMAGE_EXTENSIONS
+                    } ?: return@withPermit PreviewResult()
+                    return@withPermit remoteImageSemaphore.withPermit { decodeRemoteImage(image.url, maxDimension) }
+                }
                 val image = File(path).listFiles()?.firstOrNull { file ->
                     coroutineContext.ensureActive()
                     file.isFile && file.extension.lowercase() in IMAGE_EXTENSIONS
@@ -183,9 +210,31 @@ object MediaPreviewLoader {
             onFailure = { PreviewResult(error = it.readableMessage("Unable to read image")) },
         )
 
-    private fun loadArchiveImage(archivePath: String, entryName: String, maxDimension: Int): PreviewResult =
+    private fun decodeRemoteImage(url: String, maxDimension: Int): PreviewResult =
         runCatching {
-            val file = File(archivePath)
+            val bytes = HttpDirectoryClient.readBytes(url, MAX_REMOTE_IMAGE_BYTES)
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Unsupported or damaged image" }
+            val options = BitmapFactory.Options().apply { inSampleSize = bounds.sampleSize(maxDimension) }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: error("Image decoder returned no bitmap")
+        }.fold(
+            onSuccess = { PreviewResult(bitmap = it) },
+            onFailure = { PreviewResult(error = it.readableMessage("Unable to download image")) },
+        )
+
+    private suspend fun loadArchiveImage(
+        archivePath: String,
+        entryName: String,
+        maxDimension: Int,
+        downloadArchive: Boolean,
+    ): PreviewResult {
+        val file = try {
+            archiveFile(archivePath, downloadArchive) ?: return PreviewResult()
+        } catch (error: IOException) {
+            return PreviewResult(error = error.readableMessage("Unable to download archive"))
+        }
+        return runCatching {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             openArchiveEntry(file, entryName) { input -> BitmapFactory.decodeStream(input, null, bounds) }
             require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Unsupported or damaged archive image" }
@@ -197,7 +246,19 @@ object MediaPreviewLoader {
             onSuccess = { PreviewResult(bitmap = it) },
             onFailure = { PreviewResult(error = it.readableMessage("Unable to read archive image")) },
         )
+    }
 
+    /**
+     * Readable copy of the archive at [archivePath]: the file itself when local, else the cached
+     * download, fetched now only when [download] is true.
+     */
+    private suspend fun archiveFile(archivePath: String, download: Boolean): File? = when {
+        !MediaPaths.isRemote(archivePath) -> File(archivePath)
+        download -> RemoteArchiveCache.file(archivePath)
+        else -> RemoteArchiveCache.cachedFile(archivePath)
+    }
+
+    /** Opens [entryName] in [file], a local archive or the cached copy of a server archive. */
     private fun <T> openArchiveEntry(file: File, entryName: String, block: (InputStream) -> T): T {
         return when (MediaCatalog.archiveFormat(file.path)) {
             MediaCatalog.ArchiveFormat.Zip -> ZipFile(file).use { zip ->

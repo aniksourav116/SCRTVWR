@@ -8,7 +8,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import srv.scrtvwr.media.remote.DownloadProgress
+import srv.scrtvwr.media.remote.RemoteArchiveCache
+import srv.scrtvwr.media.remote.TestHttpServer
+import srv.scrtvwr.ui.media.MediaViewerSource
 import srv.scrtvwr.ui.sort.DirectorySortOrder
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -148,6 +153,61 @@ class MediaCatalogTest {
 
         assertEquals(expected.absolutePath, result?.path)
         assertEquals("a", result?.name)
+    }
+
+    @Test
+    fun listArchive_readsAServerArchiveButKeepsItsUrlInItemPaths() = runBlocking {
+        RemoteArchiveCache.initialize(temporaryFolder.newFolder("cache"))
+        val archive = zipBytes("Pages/002.png", "Pages/001.jpg", "notes.txt")
+        TestHttpServer(mapOf("Comics/Issue 001.cbz" to archive)).use { server ->
+            val archiveUrl = server.url("Comics/Issue 001.cbz")
+            val progress = mutableListOf<DownloadProgress>()
+
+            val items = MediaCatalog.listArchive(archiveUrl) { progress += it }
+
+            assertEquals(listOf("001.jpg", "002.png"), items.map { it.name })
+            assertEquals(listOf("$archiveUrl::Pages/001.jpg", "$archiveUrl::Pages/002.png"), items.map { it.path })
+            assertEquals(archive.size.toLong(), progress.last().downloadedBytes)
+            // Reopening reads the cached copy instead of downloading the archive again.
+            assertEquals(items, MediaCatalog.listArchive(archiveUrl))
+            assertEquals(1, server.fileRequests)
+        }
+    }
+
+    @Test
+    fun nextAndPreviousArchive_followTheServerListingWithoutDownloading() = runBlocking {
+        val archive = zipBytes("page.jpg")
+        val files = mapOf(
+            "Comics/a.cbz" to archive,
+            "Comics/b.cbr" to ByteArray(1),
+            "Comics/c.zip" to archive,
+            "Comics/cover.jpg" to ByteArray(1),
+            "Comics/d/e.cbz" to archive,
+        )
+        TestHttpServer(files).use { server ->
+            val current = server.url("Comics/b.cbr")
+
+            val next = MediaCatalog.nextArchive(current, DirectorySortOrder.NameAscending)
+            val previous = MediaCatalog.previousArchive(current, DirectorySortOrder.NameAscending)
+
+            assertEquals(MediaViewerSource("c.zip", server.url("Comics/c.zip"), isArchive = true), next)
+            assertEquals(MediaViewerSource("a.cbz", server.url("Comics/a.cbz"), isArchive = true), previous)
+            assertNull(MediaCatalog.nextArchive(server.url("Comics/c.zip"), DirectorySortOrder.NameAscending))
+            assertNull(MediaCatalog.previousArchive(server.url("Comics/a.cbz"), DirectorySortOrder.NameAscending))
+            assertEquals(0, server.fileRequests)
+        }
+    }
+
+    private fun zipBytes(vararg entryNames: String): ByteArray {
+        val bytes = ByteArrayOutputStream()
+        ZipOutputStream(bytes).use { output ->
+            entryNames.forEach { entryName ->
+                output.putNextEntry(ZipEntry(entryName))
+                output.write(byteArrayOf(1))
+                output.closeEntry()
+            }
+        }
+        return bytes.toByteArray()
     }
 
     private fun File.archive(name: String, entryName: String): File =

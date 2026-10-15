@@ -3,17 +3,25 @@ package srv.scrtvwr.media
 import com.github.junrar.Archive
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import srv.scrtvwr.media.remote.DownloadProgress
+import srv.scrtvwr.media.remote.HttpDirectoryClient
+import srv.scrtvwr.media.remote.RemoteArchiveCache
+import srv.scrtvwr.media.remote.RemoteDirectoryTree
+import srv.scrtvwr.media.remote.RemoteEntry
+import srv.scrtvwr.media.remote.RemotePaths
+import srv.scrtvwr.media.remote.remoteEntryComparator
 import srv.scrtvwr.ui.media.MediaViewerSource
 import srv.scrtvwr.ui.media.MediaViewerItem
 import srv.scrtvwr.ui.media.MediaViewerType
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.sort.fileComparator
+import srv.scrtvwr.ui.sort.needsFileMetadata
 import java.io.File
+import java.io.IOException
 import java.util.zip.ZipFile
 
 object MediaCatalog {
     private const val MAX_ARCHIVE_ITEMS = 5_000
-    private const val ARCHIVE_ENTRY_SEPARATOR = "::"
 
     enum class ArchiveFormat {
         Zip,
@@ -23,7 +31,7 @@ object MediaCatalog {
     fun isArchive(path: String): Boolean = archiveFormat(path) != null
 
     fun archiveFormat(path: String): ArchiveFormat? = when (
-        path.substringBefore(ARCHIVE_ENTRY_SEPARATOR).substringAfterLast('.', "").lowercase()
+        MediaPaths.archivePath(path).substringAfterLast('.', "").lowercase()
     ) {
         "zip", "cbz" -> ArchiveFormat.Zip
         "rar", "cbr" -> ArchiveFormat.Rar
@@ -43,12 +51,14 @@ object MediaCatalog {
                 ?.toList()
         }.getOrNull().orEmpty()
 
+    fun mediaType(extension: String): MediaViewerType? = when (extension.lowercase()) {
+        "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif" -> MediaViewerType.Image
+        "mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v" -> MediaViewerType.Video
+        else -> null
+    }
+
     fun toItem(file: File): MediaViewerItem? {
-        val type = when (file.extension.lowercase()) {
-            "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif" -> MediaViewerType.Image
-            "mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v" -> MediaViewerType.Video
-            else -> return null
-        }
+        val type = mediaType(file.extension) ?: return null
         return MediaViewerItem(
             name = file.name.ifBlank { file.absolutePath },
             path = file.absolutePath,
@@ -56,6 +66,91 @@ object MediaCatalog {
             lastModifiedMillis = file.lastModified(),
             sizeBytes = file.length(),
         )
+    }
+
+    /**
+     * Images and videos an HTTP server lists in [directoryUrl], in [sortOrder]. Unlike
+     * [listDirectory], an unreachable server throws so the viewer can say why nothing loaded.
+     */
+    @Throws(IOException::class)
+    suspend fun listRemoteDirectory(directoryUrl: String, sortOrder: DirectorySortOrder): List<MediaViewerItem> =
+        listRemoteEntries(directoryUrl, sortOrder).asSequence()
+            .filterNot(RemoteEntry::isDirectory)
+            .sortedWith(sortOrder.remoteEntryComparator(directoriesFirst = false))
+            .mapNotNull(::toRemoteItem)
+            .toList()
+
+    /** Entries of [directoryUrl], with sizes and times only when [sortOrder] needs them. */
+    @Throws(IOException::class)
+    private suspend fun listRemoteEntries(directoryUrl: String, sortOrder: DirectorySortOrder): List<RemoteEntry> =
+        if (sortOrder.needsFileMetadata) {
+            HttpDirectoryClient.listWithMetadata(directoryUrl)
+        } else {
+            HttpDirectoryClient.list(directoryUrl)
+        }
+
+    fun toRemoteItem(entry: RemoteEntry): MediaViewerItem? {
+        if (entry.isDirectory) return null
+        val type = mediaType(entry.name.substringAfterLast('.', "")) ?: return null
+        return MediaViewerItem(
+            name = entry.name,
+            path = entry.url,
+            type = type,
+            lastModifiedMillis = entry.lastModifiedMillis,
+            sizeBytes = entry.sizeBytes,
+        )
+    }
+
+    /** Viewer item for a single file URL, used when its directory cannot be listed. */
+    fun remoteItem(url: String): MediaViewerItem? =
+        toRemoteItem(RemoteEntry(name = RemotePaths.name(url), url = url, isDirectory = false))
+
+    /** [nextDirectory] for a folder on an HTTP server, never leaving [root]. */
+    suspend fun nextRemoteDirectory(
+        directoryUrl: String,
+        sortOrder: DirectorySortOrder,
+        root: String?,
+    ): MediaViewerSource? = firstRemoteDirectoryWithMedia(
+        from = directoryUrl,
+        candidates = DirectoryTraversal.forward(
+            tree = RemoteDirectoryTree,
+            start = directoryUrl,
+            root = RemotePaths.resolveRoot(directoryUrl, root),
+            sortOrder = sortOrder,
+        ),
+    )
+
+    /** [previousDirectory] for a folder on an HTTP server, never leaving [root]. */
+    suspend fun previousRemoteDirectory(
+        directoryUrl: String,
+        sortOrder: DirectorySortOrder,
+        root: String?,
+    ): MediaViewerSource? = firstRemoteDirectoryWithMedia(
+        from = directoryUrl,
+        candidates = DirectoryTraversal.backward(
+            tree = RemoteDirectoryTree,
+            start = directoryUrl,
+            root = RemotePaths.resolveRoot(directoryUrl, root),
+            sortOrder = sortOrder,
+        ),
+    )
+
+    private suspend fun firstRemoteDirectoryWithMedia(
+        from: String,
+        candidates: Sequence<String>,
+    ): MediaViewerSource? {
+        for (candidate in candidates) {
+            currentCoroutineContext().ensureActive()
+            val hasMedia = try {
+                HttpDirectoryClient.list(candidate).any { toRemoteItem(it) != null }
+            } catch (_: IOException) {
+                false
+            }
+            if (hasMedia) {
+                return MediaViewerSource(DirectoryTraversal.displayName(RemoteDirectoryTree, from, candidate), candidate)
+            }
+        }
+        return null
     }
 
     /**
@@ -103,6 +198,38 @@ object MediaCatalog {
             }
         }
         return null
+    }
+
+    /** [nextArchive] for a local archive path or an archive URL. */
+    suspend fun nextArchive(path: String, sortOrder: DirectorySortOrder): MediaViewerSource? =
+        if (MediaPaths.isRemote(path)) adjacentRemoteArchive(path, sortOrder, step = 1) else nextArchive(File(path), sortOrder)
+
+    /** [previousArchive] for a local archive path or an archive URL. */
+    suspend fun previousArchive(path: String, sortOrder: DirectorySortOrder): MediaViewerSource? =
+        if (MediaPaths.isRemote(path)) adjacentRemoteArchive(path, sortOrder, step = -1) else previousArchive(File(path), sortOrder)
+
+    /**
+     * The archive [step] places away from [archiveUrl] in its server folder. Unlike local archives,
+     * neighbours are not checked for images first, since that would mean downloading each one.
+     */
+    private suspend fun adjacentRemoteArchive(
+        archiveUrl: String,
+        sortOrder: DirectorySortOrder,
+        step: Int,
+    ): MediaViewerSource? {
+        val directoryUrl = RemotePaths.parent(archiveUrl) ?: return null
+        val entries = try {
+            listRemoteEntries(directoryUrl, sortOrder)
+        } catch (_: IOException) {
+            return null
+        }
+        val archives = entries
+            .filter { !it.isDirectory && isArchive(it.name) }
+            .sortedWith(sortOrder.remoteEntryComparator(directoriesFirst = false))
+        val index = archives.indexOfFirst { it.url == archiveUrl }
+        if (index < 0) return null
+        val candidate = archives.getOrNull(index + step) ?: return null
+        return MediaViewerSource(candidate.name, candidate.url, isArchive = true)
     }
 
     suspend fun nextArchive(file: File, sortOrder: DirectorySortOrder): MediaViewerSource? {
@@ -154,9 +281,29 @@ object MediaCatalog {
         return null
     }
 
-    suspend fun listArchive(file: File): List<MediaViewerItem> {
+    /**
+     * Images in a local archive or an archive URL. An archive on a server is downloaded into
+     * [RemoteArchiveCache] first, reporting [onDownloadProgress]; its items still point into the
+     * archive URL rather than the cached copy.
+     */
+    suspend fun listArchive(
+        path: String,
+        onDownloadProgress: (DownloadProgress) -> Unit = {},
+    ): List<MediaViewerItem> =
+        if (MediaPaths.isRemote(path)) {
+            // Server files have no local timestamp; the copy's time only says when it was last read.
+            readArchive(RemoteArchiveCache.file(path, onDownloadProgress), archivePath = path, modifiedMillis = 0L)
+        } else {
+            listArchive(File(path))
+        }
+
+    suspend fun listArchive(file: File): List<MediaViewerItem> =
+        readArchive(file, archivePath = file.absolutePath, modifiedMillis = file.lastModified())
+
+    /** Images in [file], addressed as entries of [archivePath]. */
+    private suspend fun readArchive(file: File, archivePath: String, modifiedMillis: Long): List<MediaViewerItem> {
         val context = currentCoroutineContext()
-        return when (archiveFormat(file.path)) {
+        return when (archiveFormat(archivePath)) {
         ArchiveFormat.Zip -> ZipFile(file).use { zip ->
             zip.entries().asSequence()
                 .filter { !it.isDirectory && it.name.isImageExtension() }
@@ -165,7 +312,7 @@ object MediaCatalog {
                 .map { entry ->
                     MediaViewerItem(
                         name = entry.name.substringAfterLast('/'),
-                        path = "${file.absolutePath}::${entry.name}",
+                        path = MediaPaths.archiveEntryPath(archivePath, entry.name),
                         type = MediaViewerType.Image,
                         lastModifiedMillis = entry.time,
                         sizeBytes = entry.size,
@@ -182,9 +329,9 @@ object MediaCatalog {
                 .map { header ->
                     MediaViewerItem(
                         name = header.fileName.substringAfterLast('\\').substringAfterLast('/'),
-                        path = "${file.absolutePath}::${header.fileName}",
+                        path = MediaPaths.archiveEntryPath(archivePath, header.fileName),
                         type = MediaViewerType.Image,
-                        lastModifiedMillis = header.mTime?.time ?: file.lastModified(),
+                        lastModifiedMillis = header.mTime?.time ?: modifiedMillis,
                         sizeBytes = header.fullUnpackSize,
                     )
                 }

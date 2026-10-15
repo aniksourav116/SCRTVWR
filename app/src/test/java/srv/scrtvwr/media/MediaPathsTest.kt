@@ -1,0 +1,56 @@
+package srv.scrtvwr.media
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class MediaPathsTest {
+    @Test
+    fun archiveEntryPath_keepsTheArchiveUrl() {
+        assertEquals(
+            "http://host:8000/Comics/Issue%20001.cbz::Pages/001.jpg",
+            MediaPaths.archiveEntryPath("http://host:8000/Comics/Issue%20001.cbz", "Pages/001.jpg"),
+        )
+        assertEquals("/Comics/Issue 001.cbr::001.jpg", MediaPaths.archiveEntryPath("/Comics/Issue 001.cbr", "001.jpg"))
+    }
+
+    @Test
+    fun archivePathAndEntryName_splitAtTheFirstSeparator() {
+        val path = "http://host:8000/Comics/Issue%20001.cbr::Pages\\a::b.jpg"
+
+        assertEquals("http://host:8000/Comics/Issue%20001.cbr", MediaPaths.archivePath(path))
+        assertEquals("Pages\\a::b.jpg", MediaPaths.archiveEntryName(path))
+        assertEquals(path, MediaPaths.archiveEntryPath(MediaPaths.archivePath(path), MediaPaths.archiveEntryName(path)!!))
+    }
+
+    @Test
+    fun archivePathAndEntryName_leaveOtherPathsAlone() {
+        assertEquals("http://host:8000/Comics/Issue%20001.cbz", MediaPaths.archivePath("http://host:8000/Comics/Issue%20001.cbz"))
+        assertNull(MediaPaths.archiveEntryName("http://host:8000/Comics/Issue%20001.cbz"))
+        assertNull(MediaPaths.archiveEntryName("http://host:8000/Photos/"))
+        assertNull(MediaPaths.archiveEntryName("/Photos/a.jpg"))
+    }
+
+    @Test
+    fun archiveUrls_resolveTheirServerFolderAndName() {
+        val archiveUrl = "http://host:8000/Comics/Issue%20001.cbz"
+
+        assertTrue(MediaPaths.isRemote(archiveUrl))
+        assertEquals("http://host:8000/Comics/", MediaPaths.parent(archiveUrl))
+        assertEquals("Issue 001.cbz", MediaPaths.name(archiveUrl))
+        assertEquals("cbz", MediaPaths.extension(archiveUrl))
+    }
+
+    @Test
+    fun archiveFormat_readsArchiveUrlsAndTheirEntries() {
+        assertEquals(MediaCatalog.ArchiveFormat.Zip, MediaCatalog.archiveFormat("http://host:8000/Comics/Issue%20001.CBZ"))
+        assertEquals(
+            MediaCatalog.ArchiveFormat.Rar,
+            MediaCatalog.archiveFormat("http://host:8000/Comics/Issue%20002.cbr::Pages/001.jpg"),
+        )
+        assertFalse(MediaCatalog.isArchive("http://host:8000/Comics/"))
+        assertFalse(MediaCatalog.isArchive("http://host:8000/Comics/cover.jpg"))
+    }
+}
