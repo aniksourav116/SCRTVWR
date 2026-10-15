@@ -109,7 +109,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import srv.scrtvwr.media.MediaPaths
 import srv.scrtvwr.media.MediaPreviewLoader
+import srv.scrtvwr.media.remote.DownloadProgress
 import srv.scrtvwr.media.PreviewResult
 import srv.scrtvwr.ui.components.BookmarkFlash
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
@@ -491,7 +493,7 @@ private fun MediaViewerScreen(
                     .fillMaxWidth(),
             ) {
                 if (uiState.isLoading) {
-                    CircularProgressIndicator(Modifier.align(Alignment.Center))
+                    MediaLoadingIndicator(uiState.downloadProgress, Modifier.align(Alignment.Center))
                 } else if (uiState.errorMessage != null && uiState.items.isEmpty()) {
                     Text(
                         text = uiState.errorMessage,
@@ -1031,7 +1033,7 @@ private fun MediaPage(
                 onClick = {
                     context.startActivity(
                         Intent(context, VideoPlayerActivity::class.java).apply {
-                            putExtra(VideoPlayerActivity.EXTRA_DIRECTORY_PATH, java.io.File(item.path).parent)
+                            putExtra(VideoPlayerActivity.EXTRA_DIRECTORY_PATH, MediaPaths.parent(item.path))
                             putExtra(VideoPlayerActivity.EXTRA_VIDEO_PATH, item.path)
                         },
                     )
@@ -1237,7 +1239,17 @@ private fun MediaDetailsDialog(item: MediaViewerItem, onDismiss: () -> Unit) {
                 Text(item.path, style = MaterialTheme.typography.bodySmall)
                 Text(stringResource(R.string.media_type, item.type.name))
                 Text(stringResource(R.string.media_size, formatMediaBytes(item.sizeBytes)))
-                Text(stringResource(R.string.media_modified, java.text.DateFormat.getDateTimeInstance().format(java.util.Date(item.lastModifiedMillis))))
+                Text(
+                    stringResource(
+                        R.string.media_modified,
+                        // HTTP servers only report times when a sort order asked for them.
+                        if (item.lastModifiedMillis > 0L) {
+                            java.text.DateFormat.getDateTimeInstance().format(java.util.Date(item.lastModifiedMillis))
+                        } else {
+                            stringResource(R.string.unknown)
+                        },
+                    ),
+                )
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) } },
@@ -1251,6 +1263,38 @@ private fun formatMediaBytes(bytes: Long): String {
     var unit = 0
     while (value >= 1024 && unit < units.lastIndex) { value /= 1024; unit++ }
     return "%.1f %s".format(value, units[unit])
+}
+
+/** Spinner while media loads; while a server archive downloads, how much of it has arrived. */
+@Composable
+private fun MediaLoadingIndicator(downloadProgress: DownloadProgress?, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        val fraction = downloadProgress?.fraction
+        if (fraction != null) {
+            CircularProgressIndicator(progress = { fraction })
+        } else {
+            CircularProgressIndicator()
+        }
+        if (downloadProgress != null) {
+            Text(
+                text = if (downloadProgress.totalBytes > 0L) {
+                    stringResource(
+                        R.string.downloading_archive_progress,
+                        formatMediaBytes(downloadProgress.downloadedBytes),
+                        formatMediaBytes(downloadProgress.totalBytes),
+                    )
+                } else {
+                    stringResource(R.string.downloading_archive, formatMediaBytes(downloadProgress.downloadedBytes))
+                },
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
 }
 
 @Composable

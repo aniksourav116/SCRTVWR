@@ -112,7 +112,9 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import srv.scrtvwr.media.DirectoryTraversal
@@ -120,7 +122,14 @@ import srv.scrtvwr.ui.components.BookmarkFlash
 import srv.scrtvwr.ui.components.TapeTransportButton
 import srv.scrtvwr.ui.components.VideoSideGestures
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
+import srv.scrtvwr.media.MediaCatalog
+import srv.scrtvwr.media.MediaPaths
+import srv.scrtvwr.media.remote.RemoteDirectoryTree
+import srv.scrtvwr.media.remote.RemotePaths
+import srv.scrtvwr.media.remote.serverFor
 import srv.scrtvwr.preferences.ScrtvwrPreferences
+import srv.scrtvwr.ui.media.MediaViewerItem
+import srv.scrtvwr.ui.media.MediaViewerType
 import srv.scrtvwr.ui.media.VideoCompletionAction
 import srv.scrtvwr.ui.media.loopsCurrentVideo
 import srv.scrtvwr.ui.media.nextVideoIndex
@@ -128,6 +137,7 @@ import srv.scrtvwr.ui.media.wrapsAtDirectoryEnd
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.sort.fileComparator
 import java.io.File
+import java.io.IOException
 import java.util.Locale
 
 class VideoPlayerActivity : ComponentActivity() {
@@ -208,19 +218,29 @@ private fun VideoPagerScreen(
     val videoPreloadDistance = remember { preferences.getVideoPreloadDistance() }
     val traversalRoot = remember { runCatching { Environment.getExternalStorageDirectory() }.getOrNull() }
     var currentDirectoryPath by rememberSaveable(directoryPath, selectedPath) {
-        mutableStateOf(directoryPath ?: selectedPath?.let(::File)?.parent)
+        mutableStateOf(directoryPath ?: selectedPath?.let(MediaPaths::parent))
     }
     var selectedVideoPath by rememberSaveable(directoryPath, selectedPath) {
         mutableStateOf(selectedPath)
     }
     val loadedDirectory by produceState<VideoDirectory?>(initialValue = null, currentDirectoryPath, selectedPath) {
         value = withContext(Dispatchers.IO) {
-            loadVideoDirectory(
-                directoryPath = currentDirectoryPath,
-                selectedPath = selectedPath.takeIf { currentDirectoryPath == directoryPath },
-                sortOrder = sortOrder,
-                traversalRoot = traversalRoot,
-            )
+            val requestedSelection = selectedPath.takeIf { currentDirectoryPath == directoryPath }
+            if (MediaPaths.isRemote(currentDirectoryPath ?: requestedSelection)) {
+                loadRemoteVideoDirectory(
+                    directoryPath = currentDirectoryPath,
+                    selectedPath = requestedSelection,
+                    sortOrder = sortOrder,
+                    preferences = preferences,
+                )
+            } else {
+                loadVideoDirectory(
+                    directoryPath = currentDirectoryPath,
+                    selectedPath = requestedSelection,
+                    sortOrder = sortOrder,
+                    traversalRoot = traversalRoot,
+                )
+            }
         }
     }
     val videos = loadedDirectory?.videos.orEmpty()
@@ -376,7 +396,10 @@ private fun VideoPage(
     val context = LocalContext.current
     val preferences = remember { ScrtvwrPreferences(context) }
     var savedPlaybackPosition by rememberSaveable(item.path) { mutableLongStateOf(0L) }
-    val mediaItem = remember(item.path) { MediaItem.fromUri(Uri.fromFile(File(item.path))) }
+    val mediaItem = remember(item.path) {
+        // Server files stream through ExoPlayer's HTTP data source straight from their URL.
+        MediaItem.fromUri(if (MediaPaths.isRemote(item.path)) Uri.parse(item.path) else Uri.fromFile(File(item.path)))
+    }
     val player = remember(item.path) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(mediaItem)
@@ -1235,6 +1258,66 @@ private fun File.firstMediaDirectory(
         }
         .firstOrNull()
 }
+
+/** [loadVideoDirectory] for a folder on an HTTP server, hopping only within that server. */
+private suspend fun loadRemoteVideoDirectory(
+    directoryPath: String?,
+    selectedPath: String?,
+    sortOrder: DirectorySortOrder,
+    preferences: ScrtvwrPreferences,
+): VideoDirectory {
+    val directory = directoryPath?.takeIf(MediaPaths::isRemote)?.let(RemotePaths::directoryUrl)
+        ?: selectedPath?.let(RemotePaths::parent)
+        ?: return VideoDirectory(videos = emptyList(), previousDirectory = null, nextDirectory = null)
+    val videos = remoteMedia(directory, sortOrder).videos()
+    val fallbackVideos = videos.ifEmpty {
+        selectedPath?.let { listOf(VideoItem(RemotePaths.name(it), it)) }.orEmpty()
+    }
+    val root = RemotePaths.resolveRoot(directory, preferences.getHttpServers().serverFor(directory)?.baseUrl)
+    return VideoDirectory(
+        videos = fallbackVideos,
+        previousDirectory = firstRemoteMediaDirectory(
+            from = directory,
+            candidates = DirectoryTraversal.backward(RemoteDirectoryTree, directory, root, sortOrder),
+            sortOrder = sortOrder,
+        ),
+        nextDirectory = firstRemoteMediaDirectory(
+            from = directory,
+            candidates = DirectoryTraversal.forward(RemoteDirectoryTree, directory, root, sortOrder),
+            sortOrder = sortOrder,
+        ),
+    )
+}
+
+/** Remote counterpart of [firstMediaDirectory]: videos win, otherwise the first image opens the viewer. */
+private suspend fun firstRemoteMediaDirectory(
+    from: String,
+    candidates: Sequence<String>,
+    sortOrder: DirectorySortOrder,
+): VideoDirectoryTarget? {
+    for (candidate in candidates) {
+        currentCoroutineContext().ensureActive()
+        val media = remoteMedia(candidate, sortOrder)
+        val name = DirectoryTraversal.displayName(RemoteDirectoryTree, from, candidate)
+        media.videos().firstOrNull()?.let { video ->
+            return VideoDirectoryTarget(name, candidate, VideoDirectoryType.Video, video.path)
+        }
+        media.firstOrNull { it.type == MediaViewerType.Image }?.let { image ->
+            return VideoDirectoryTarget(name, candidate, VideoDirectoryType.Image, image.path)
+        }
+    }
+    return null
+}
+
+private suspend fun remoteMedia(directoryUrl: String, sortOrder: DirectorySortOrder): List<MediaViewerItem> =
+    try {
+        MediaCatalog.listRemoteDirectory(directoryUrl, sortOrder)
+    } catch (_: IOException) {
+        emptyList()
+    }
+
+private fun List<MediaViewerItem>.videos(): List<VideoItem> =
+    filter { it.type == MediaViewerType.Video }.map { VideoItem(it.name, it.path) }
 
 private fun File.listImages(sortOrder: DirectorySortOrder): List<File> = listFiles()
     ?.asSequence()

@@ -15,6 +15,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.media.MediaCatalog
+import srv.scrtvwr.media.MediaPaths
+import srv.scrtvwr.media.remote.DownloadProgress
+import srv.scrtvwr.media.remote.RemotePaths
+import srv.scrtvwr.media.remote.serverFor
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import java.io.File
 
@@ -44,7 +48,7 @@ class MediaViewerViewModel(
         }
 
         loadJob?.cancel()
-        _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+        _uiState.update { it.copy(isLoading = true, errorMessage = null, downloadProgress = null) }
         loadJob = viewModelScope.launch(Dispatchers.IO) {
             runCatching { loadMedia(directoryPath, selectedPath, force) }
                 .onFailure { error ->
@@ -53,6 +57,7 @@ class MediaViewerViewModel(
                         it.copy(
                             isLoading = false,
                             errorMessage = error.message ?: "Unable to load media.",
+                            downloadProgress = null,
                         )
                     }
                 }
@@ -69,19 +74,32 @@ class MediaViewerViewModel(
 
         val selectedFile = selectedPath?.let(::File)
         val isArchive = selectedPath != null && MediaCatalog.isArchive(selectedPath)
+        val remoteDirectory = directoryPath?.takeIf(MediaPaths::isRemote)?.let(RemotePaths::directoryUrl)
+            ?: selectedPath?.takeIf(MediaPaths::isRemote)?.let(RemotePaths::parent)
 
+        // Archives come first: one on a server is also remote, but is read as an archive.
         if (isArchive) {
-            val archivePath = selectedPath.substringBefore("::")
-            val archiveFile = File(archivePath)
-            items = MediaCatalog.listArchive(archiveFile)
-            sourceDirectoryPath = archiveFile.parentFile?.absolutePath
-            initialPage = if (selectedPath.contains("::")) {
+            val archivePath = MediaPaths.archivePath(selectedPath)
+            items = MediaCatalog.listArchive(archivePath) { progress ->
+                _uiState.update { it.copy(downloadProgress = progress) }
+            }
+            _uiState.update { it.copy(downloadProgress = null) }
+            sourceDirectoryPath = MediaPaths.parent(archivePath)
+            initialPage = if (MediaPaths.archiveEntryName(selectedPath) != null) {
                 items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
             } else {
                 0
             }
-            previousSource = MediaCatalog.previousArchive(archiveFile, sortOrder)
-            nextSource = MediaCatalog.nextArchive(archiveFile, sortOrder)
+            previousSource = MediaCatalog.previousArchive(archivePath, sortOrder)
+            nextSource = MediaCatalog.nextArchive(archivePath, sortOrder)
+        } else if (remoteDirectory != null) {
+            items = MediaCatalog.listRemoteDirectory(remoteDirectory, sortOrder)
+                .ifEmpty { selectedPath?.let(MediaCatalog::remoteItem)?.let(::listOf).orEmpty() }
+            sourceDirectoryPath = remoteDirectory
+            initialPage = items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
+            val serverRoot = preferences.getHttpServers().serverFor(remoteDirectory)?.baseUrl
+            previousSource = MediaCatalog.previousRemoteDirectory(remoteDirectory, sortOrder, serverRoot)
+            nextSource = MediaCatalog.nextRemoteDirectory(remoteDirectory, sortOrder, serverRoot)
         } else {
             val directory = directoryPath?.let(::File)
             val sourceDirectory = when {
@@ -155,7 +173,7 @@ class MediaViewerViewModel(
     fun loadPreviousSource() {
         val previousSource = _uiState.value.previousSource ?: return
         if (previousSource.isArchive) {
-            load(File(previousSource.path).parentFile?.absolutePath, previousSource.path)
+            load(MediaPaths.parent(previousSource.path), previousSource.path)
         } else {
             load(previousSource.path, null)
         }
@@ -164,7 +182,7 @@ class MediaViewerViewModel(
     fun loadNextSource() {
         val nextSource = _uiState.value.nextSource ?: return
         if (nextSource.isArchive) {
-            load(File(nextSource.path).parentFile?.absolutePath, nextSource.path)
+            load(MediaPaths.parent(nextSource.path), nextSource.path)
         } else {
             load(nextSource.path, null)
         }
@@ -268,6 +286,8 @@ data class MediaViewerUiState(
     val edgeDialogStyle: MediaEdgeDialogStyle = MediaEdgeDialogStyle.Bottom,
     val sortOrder: DirectorySortOrder = DirectorySortOrder.NameAscending,
     val isLoading: Boolean = false,
+    /** Set while an archive on a server downloads before it can be opened. */
+    val downloadProgress: DownloadProgress? = null,
     val errorMessage: String? = null,
 ) {
     val pageCount: Int
