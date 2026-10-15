@@ -52,6 +52,7 @@ import srv.scrtvwr.ui.dashboard.screens.viewmodels.HistoryUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HistoryViewModel
 import srv.scrtvwr.R
 import srv.scrtvwr.MediaViewerActivity
+import srv.scrtvwr.media.MediaPaths
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.PreviewResult
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HistoryDirectoryItem
@@ -173,17 +174,21 @@ private fun HistoryThumbnail(
     modifier: Modifier = Modifier.size(56.dp),
 ) {
     val mediaPath = item.mediaPath
-    val sourceFile = mediaPath?.substringBefore("::")?.let(::File)
-    val isVideo = sourceFile?.extension?.lowercase() in VIDEO_EXTENSIONS
+    val sourcePath = mediaPath?.substringBefore("::")
+    // Server files have no local timestamp; their thumbnails are keyed by URL alone.
+    val sourceFile = sourcePath?.takeUnless(MediaPaths::isRemote)?.let(::File)
+    val sourceModified = sourceFile?.lastModified() ?: 0L
+    val isVideo = sourcePath?.let(MediaPaths::extension) in VIDEO_EXTENSIONS
     val preview by produceState<PreviewResult?>(
         initialValue = null,
         key1 = mediaPath,
-        key2 = sourceFile?.lastModified(),
+        key2 = sourceModified,
     ) {
         value = when {
-            mediaPath == null || sourceFile == null -> PreviewResult()
-            isVideo -> MediaPreviewLoader.loadVideoFrame(mediaPath, sourceFile.lastModified(), 112)
-            else -> MediaPreviewLoader.loadImage(mediaPath, sourceFile.lastModified(), 112)
+            mediaPath == null -> PreviewResult()
+            isVideo -> MediaPreviewLoader.loadVideoFrame(mediaPath, sourceModified, 112)
+            // A server archive is only read here once the viewer has downloaded it.
+            else -> MediaPreviewLoader.loadImage(mediaPath, sourceModified, 112, downloadArchive = false)
         }
     }
 

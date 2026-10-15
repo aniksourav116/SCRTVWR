@@ -18,11 +18,21 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import srv.scrtvwr.R
 import srv.scrtvwr.media.MediaCatalog
+import srv.scrtvwr.media.MediaPaths
+import srv.scrtvwr.media.remote.HttpDirectoryClient
+import srv.scrtvwr.media.remote.HttpServer
+import srv.scrtvwr.media.remote.RemoteEntry
+import srv.scrtvwr.media.remote.RemotePaths
+import srv.scrtvwr.media.remote.remoteEntryComparator
+import srv.scrtvwr.media.remote.serverFor
 import srv.scrtvwr.preferences.LastMediaSession
 import srv.scrtvwr.preferences.ScrtvwrPreferences
+import srv.scrtvwr.ui.components.hasLocalNetworkAccess
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.sort.fileComparator
+import srv.scrtvwr.ui.sort.needsFileMetadata
 import java.io.File
+import java.io.IOException
 
 class DirectoryViewModel(
     application: Application,
@@ -32,21 +42,19 @@ class DirectoryViewModel(
     private val defaultRootDirectory = Environment.getExternalStorageDirectory()
     private val preferences = ScrtvwrPreferences(application)
     private val initialDirectory = savedStateHandle.get<String>(STATE_DIRECTORY)
-        ?.let(::File)
-        ?.takeIf { it.exists() && it.isDirectory }
+        ?.takeIf(::isOpenableDirectory)
         ?: preferences.getLastDirectory()
-        ?.let(::File)
-        ?.takeIf { it.exists() && it.isDirectory }
-        ?: defaultRootDirectory
-    private val initialRoot = if (initialDirectory.isSameOrChildOf(defaultRootDirectory)) {
-        defaultRootDirectory
-    } else {
-        initialDirectory
+        ?.takeIf(::isOpenableDirectory)
+        ?: defaultRootDirectory.absolutePath
+    private val initialRoot = when {
+        MediaPaths.isRemote(initialDirectory) -> serverRootFor(initialDirectory)
+        File(initialDirectory).isSameOrChildOf(defaultRootDirectory) -> defaultRootDirectory.absolutePath
+        else -> initialDirectory
     }
     private val _uiState = MutableStateFlow(
         DirectoryUiState(
-            rootDirectory = initialRoot,
-            currentDirectory = initialDirectory,
+            rootPath = initialRoot,
+            currentPath = initialDirectory,
             searchQuery = savedStateHandle[STATE_SEARCH] ?: "",
             viewMode = savedStateHandle.get<String>(STATE_VIEW_MODE)
                 ?.let { value -> DirectoryViewMode.entries.firstOrNull { it.name == value } }
@@ -58,8 +66,8 @@ class DirectoryViewModel(
             showHiddenFiles = preferences.getShowHiddenFiles(),
             showDirectoryFileActions = preferences.getShowDirectoryFileActions(),
             canNavigateUp = initialDirectory.isDifferentDirectory(initialRoot),
-            recentDirectories = preferences.getRecentDirectories().validDirectories(),
-            lastMediaSession = preferences.getLastMediaSession()?.takeIfValid(),
+            recentDirectories = preferences.getRecentDirectories().validDirectories(preferences.getHttpServers()),
+            lastMediaSession = preferences.getLastMediaSession()?.takeIfValid(preferences.getHttpServers()),
             isLoading = true,
         ),
     )
@@ -102,16 +110,24 @@ class DirectoryViewModel(
     }
 
     fun openDirectoryPath(path: String) {
-        val directory = File(path)
-        if (!directory.exists() || !directory.isDirectory) return
+        val directory = if (MediaPaths.isRemote(path)) {
+            // A server that is offline still opens; its listing explains why nothing loaded.
+            RemotePaths.directoryUrl(path)
+        } else {
+            File(path).takeIf { it.exists() && it.isDirectory }?.absolutePath ?: return
+        }
         val state = _uiState.value
-        val root = if (directory.isSameOrChildOf(state.rootDirectory)) state.rootDirectory else directory
-        savedStateHandle[STATE_DIRECTORY] = directory.absolutePath
+        val root = when {
+            directory.isSameOrChildOf(state.rootPath) -> state.rootPath
+            MediaPaths.isRemote(directory) -> serverRootFor(directory)
+            else -> directory
+        }
+        savedStateHandle[STATE_DIRECTORY] = directory
         savedStateHandle[STATE_SEARCH] = ""
         _uiState.update {
             it.copy(
-                rootDirectory = root,
-                currentDirectory = directory,
+                rootPath = root,
+                currentPath = directory,
                 searchQuery = "",
                 canNavigateUp = directory.isDifferentDirectory(root),
                 directoryListing = DirectoryListing(entries = emptyList()),
@@ -125,15 +141,15 @@ class DirectoryViewModel(
 
     fun navigateUp() {
         val state = _uiState.value
-        val parentDirectory = state.currentDirectory.parentFile ?: return
-        if (parentDirectory.isSameOrChildOf(state.rootDirectory)) {
-            savedStateHandle[STATE_DIRECTORY] = parentDirectory.absolutePath
+        val parentDirectory = MediaPaths.parent(state.currentPath) ?: return
+        if (parentDirectory.isSameOrChildOf(state.rootPath)) {
+            savedStateHandle[STATE_DIRECTORY] = parentDirectory
             savedStateHandle[STATE_SEARCH] = ""
             _uiState.update {
                 it.copy(
-                    currentDirectory = parentDirectory,
+                    currentPath = parentDirectory,
                     searchQuery = "",
-                    canNavigateUp = parentDirectory.isDifferentDirectory(state.rootDirectory),
+                    canNavigateUp = parentDirectory.isDifferentDirectory(state.rootPath),
                     directoryListing = DirectoryListing(entries = emptyList()),
                     isLoading = true,
                     errorMessage = null,
@@ -153,16 +169,21 @@ class DirectoryViewModel(
 
     fun scrollPositionFor(directoryPath: String): DirectoryScrollPosition? = scrollPositions[directoryPath]
 
-    fun refresh() {
+    /**
+     * Rereads preferences and the current directory. [reload] also bypasses the short-lived cache
+     * of HTTP server listings, for an explicit refresh rather than a screen resuming.
+     */
+    fun refresh(reload: Boolean = false) {
+        val servers = preferences.getHttpServers()
         _uiState.update {
             it.copy(
                 showHiddenFiles = preferences.getShowHiddenFiles(),
                 showDirectoryFileActions = preferences.getShowDirectoryFileActions(),
-                recentDirectories = preferences.getRecentDirectories().validDirectories(),
-                lastMediaSession = preferences.getLastMediaSession()?.takeIfValid(),
+                recentDirectories = preferences.getRecentDirectories().validDirectories(servers),
+                lastMediaSession = preferences.getLastMediaSession()?.takeIfValid(servers),
             )
         }
-        scanDirectory()
+        scanDirectory(reload = reload)
     }
 
     fun prepareCopy(entry: DirectoryEntry) {
@@ -184,9 +205,9 @@ class DirectoryViewModel(
     fun pastePendingFileOperation() {
         val currentState = _uiState.value
         if (currentState.isFileOperationRunning) return
-        if (!currentState.showDirectoryFileActions) return
+        if (!currentState.fileActionsAvailable) return
         val operation = currentState.pendingFileOperation ?: return
-        val destinationDirectory = currentState.currentDirectory
+        val destinationDirectory = File(currentState.currentPath)
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -210,7 +231,7 @@ class DirectoryViewModel(
 
     fun deleteEntry(entry: DirectoryEntry) {
         val currentState = _uiState.value
-        if (currentState.isFileOperationRunning || !currentState.showDirectoryFileActions) return
+        if (currentState.isFileOperationRunning || !currentState.fileActionsAvailable) return
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -238,7 +259,7 @@ class DirectoryViewModel(
 
     private fun prepareFileOperation(entry: DirectoryEntry, operation: DirectoryFileOperation) {
         _uiState.update { state ->
-            if (state.isFileOperationRunning || !state.showDirectoryFileActions) state else state.copy(
+            if (state.isFileOperationRunning || !state.fileActionsAvailable) state else state.copy(
                 pendingFileOperation = PendingDirectoryFileOperation(
                     operation = operation,
                     name = entry.name,
@@ -250,26 +271,50 @@ class DirectoryViewModel(
         }
     }
 
-    private fun saveLastDirectory(directory: File) {
-        preferences.saveLastDirectory(directory.absolutePath)
+    private fun saveLastDirectory(directory: String) {
+        preferences.saveLastDirectory(directory)
     }
 
-    private fun scanDirectory(delayMillis: Long = 0L) {
+    /** Whether a remembered directory can be reopened: a local folder, or a folder on a saved server. */
+    private fun isOpenableDirectory(path: String): Boolean =
+        if (MediaPaths.isRemote(path)) {
+            preferences.getHttpServers().serverFor(path) != null
+        } else {
+            File(path).let { it.exists() && it.isDirectory }
+        }
+
+    /** Base URL of the saved server holding [url], so navigating up stops at the shared folder. */
+    private fun serverRootFor(url: String): String =
+        preferences.getHttpServers().serverFor(url)?.baseUrl ?: RemotePaths.directoryUrl(url)
+
+    private fun scanDirectory(delayMillis: Long = 0L, reload: Boolean = false) {
         scanJob?.cancel()
         scanJob = viewModelScope.launch {
             if (delayMillis > 0) delay(delayMillis)
             val request = _uiState.value
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             val listing = withContext(Dispatchers.IO) {
-                request.currentDirectory.fileExplorerEntries(
-                    searchQuery = request.searchQuery,
-                    sortOrder = request.sortOrder,
-                    showHiddenFiles = request.showHiddenFiles,
-                    mediaFilter = request.mediaFilter,
-                )
+                if (request.isRemote) {
+                    remoteExplorerEntries(
+                        directoryUrl = request.currentPath,
+                        searchQuery = request.searchQuery,
+                        sortOrder = request.sortOrder,
+                        showHiddenFiles = request.showHiddenFiles,
+                        mediaFilter = request.mediaFilter,
+                        reload = reload,
+                        app = app,
+                    )
+                } else {
+                    File(request.currentPath).fileExplorerEntries(
+                        searchQuery = request.searchQuery,
+                        sortOrder = request.sortOrder,
+                        showHiddenFiles = request.showHiddenFiles,
+                        mediaFilter = request.mediaFilter,
+                    )
+                }
             }
             _uiState.update { current ->
-                if (current.currentDirectory.absolutePath != request.currentDirectory.absolutePath ||
+                if (current.currentPath != request.currentPath ||
                     current.searchQuery != request.searchQuery || current.sortOrder != request.sortOrder ||
                     current.mediaFilter != request.mediaFilter
                 ) current else current.copy(
@@ -290,8 +335,9 @@ class DirectoryViewModel(
 }
 
 data class DirectoryUiState(
-    val rootDirectory: File = Environment.getExternalStorageDirectory(),
-    val currentDirectory: File = rootDirectory,
+    /** Highest directory the browser navigates up to: a local path or an HTTP server's base URL. */
+    val rootPath: String = Environment.getExternalStorageDirectory().absolutePath,
+    val currentPath: String = rootPath,
     val searchQuery: String = "",
     val directoryListing: DirectoryListing = DirectoryListing(entries = emptyList()),
     val viewMode: DirectoryViewMode = DirectoryViewMode.List,
@@ -313,6 +359,16 @@ data class DirectoryUiState(
 
     val canReadCurrentDirectory: Boolean
         get() = directoryListing.canRead
+
+    val currentName: String
+        get() = MediaPaths.name(currentPath)
+
+    val isRemote: Boolean
+        get() = MediaPaths.isRemote(currentPath)
+
+    /** Copy, move, and delete only work on device storage; HTTP servers are browsed read-only. */
+    val fileActionsAvailable: Boolean
+        get() = showDirectoryFileActions && !isRemote
 }
 
 data class DirectoryListing(
@@ -424,6 +480,77 @@ private suspend fun File.fileExplorerEntries(
             errorMessage = error.message ?: "Unable to read this directory.",
         )
     }
+}
+
+/** Entries an HTTP server lists for [directoryUrl], filtered and sorted like local listings. */
+private suspend fun remoteExplorerEntries(
+    directoryUrl: String,
+    searchQuery: String,
+    sortOrder: DirectorySortOrder,
+    showHiddenFiles: Boolean,
+    mediaFilter: DirectoryMediaFilter,
+    reload: Boolean,
+    app: Application,
+): DirectoryListing {
+    val normalizedQuery = searchQuery.trim()
+    val entries = try {
+        if (sortOrder.needsFileMetadata) {
+            HttpDirectoryClient.listWithMetadata(directoryUrl, refresh = reload)
+        } else {
+            HttpDirectoryClient.list(directoryUrl, refresh = reload)
+        }
+    } catch (error: IOException) {
+        return DirectoryListing(
+            entries = emptyList(),
+            canRead = false,
+            errorMessage = if (app.hasLocalNetworkAccess()) {
+                app.getString(R.string.http_listing_failed, error.userMessage(app))
+            } else {
+                app.getString(R.string.http_listing_local_network_blocked)
+            },
+        )
+    }
+
+    return DirectoryListing(
+        entries = entries.asSequence()
+            .filter { showHiddenFiles || !it.isHidden }
+            .filter { entry ->
+                normalizedQuery.isBlank() || entry.name.contains(normalizedQuery, ignoreCase = true)
+            }
+            .filter { entry ->
+                when (mediaFilter) {
+                    DirectoryMediaFilter.All -> true
+                    DirectoryMediaFilter.Folders -> entry.isDirectory
+                    DirectoryMediaFilter.Images -> entry.mediaType() == DirectoryMediaType.Image
+                    DirectoryMediaFilter.Videos -> entry.mediaType() == DirectoryMediaType.Video
+                    DirectoryMediaFilter.Archives -> entry.mediaType() == DirectoryMediaType.Archive
+                }
+            }
+            .sortedWith(sortOrder.remoteEntryComparator(directoriesFirst = true))
+            .map { entry ->
+                DirectoryEntry(
+                    name = entry.name,
+                    path = entry.url,
+                    isDirectory = entry.isDirectory,
+                    sizeBytes = if (entry.isDirectory) 0L else entry.sizeBytes,
+                    lastModifiedMillis = entry.lastModifiedMillis,
+                    mediaType = entry.mediaType(),
+                )
+            }
+            .toList(),
+    )
+}
+
+private fun String.isSameOrChildOf(root: String): Boolean = when {
+    MediaPaths.isRemote(this) && MediaPaths.isRemote(root) -> RemotePaths.isSameOrChildOf(this, root)
+    MediaPaths.isRemote(this) || MediaPaths.isRemote(root) -> false
+    else -> File(this).isSameOrChildOf(File(root))
+}
+
+private fun String.isDifferentDirectory(other: String): Boolean = when {
+    MediaPaths.isRemote(this) && MediaPaths.isRemote(other) -> !RemotePaths.isSameDirectory(this, other)
+    MediaPaths.isRemote(this) || MediaPaths.isRemote(other) -> true
+    else -> File(this).isDifferentDirectory(File(other))
 }
 
 private fun File.isSameOrChildOf(root: File): Boolean {
@@ -585,11 +712,15 @@ private fun Throwable.userMessage(app: Application): String =
         ?: message?.takeIf(String::isNotBlank)
         ?: app.getString(R.string.unknown)
 
-private fun List<String>.validDirectories(): List<String> =
-    filter { File(it).exists() && File(it).isDirectory }
+private fun List<String>.validDirectories(servers: List<HttpServer>): List<String> =
+    filter { path ->
+        if (MediaPaths.isRemote(path)) servers.serverFor(path) != null else File(path).exists() && File(path).isDirectory
+    }
 
-private fun LastMediaSession.takeIfValid(): LastMediaSession? =
+private fun LastMediaSession.takeIfValid(servers: List<HttpServer>): LastMediaSession? =
     takeIf {
+        // Checking a server would mean a request on every resume, so trust sessions on saved servers.
+        if (MediaPaths.isRemote(directoryPath)) return@takeIf servers.serverFor(directoryPath) != null
         File(directoryPath).exists() &&
             File(directoryPath).isDirectory &&
             (mediaPath == null || if (mediaPath.contains("::")) {
@@ -608,9 +739,18 @@ private fun File.canonicalPathOrAbsolute(): String =
 private fun File.mediaType(): DirectoryMediaType {
     if (isDirectory) return DirectoryMediaType.Other
 
-    return when (extension.lowercase()) {
+    return mediaTypeOf(extension, path)
+}
+
+private fun RemoteEntry.mediaType(): DirectoryMediaType {
+    if (isDirectory) return DirectoryMediaType.Other
+
+    return mediaTypeOf(name.substringAfterLast('.', ""), name)
+}
+
+private fun mediaTypeOf(extension: String, path: String): DirectoryMediaType =
+    when (extension.lowercase()) {
         "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif" -> DirectoryMediaType.Image
         "mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v" -> DirectoryMediaType.Video
         else -> if (MediaCatalog.isArchive(path)) DirectoryMediaType.Archive else DirectoryMediaType.Other
     }
-}

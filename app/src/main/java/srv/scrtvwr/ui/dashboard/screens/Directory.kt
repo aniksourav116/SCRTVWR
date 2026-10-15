@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.res.Configuration
 import android.content.Intent
+import android.net.Uri
 import android.text.TextPaint
 import android.text.TextUtils
 import android.webkit.MimeTypeMap
@@ -108,6 +109,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import srv.scrtvwr.media.MediaPaths
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.PreviewResult
 import srv.scrtvwr.MediaViewerActivity
@@ -188,10 +190,10 @@ fun Directory(
             }
             val intent = Intent(context, activityClass).apply {
                     if (entry.mediaType == DirectoryMediaType.Video) {
-                        putExtra(VideoPlayerActivity.EXTRA_DIRECTORY_PATH, uiState.currentDirectory.absolutePath)
+                        putExtra(VideoPlayerActivity.EXTRA_DIRECTORY_PATH, uiState.currentPath)
                         putExtra(VideoPlayerActivity.EXTRA_VIDEO_PATH, entry.path)
                     } else {
-                        putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, uiState.currentDirectory.absolutePath)
+                        putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, uiState.currentPath)
                         putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, entry.path)
                     }
                 }
@@ -215,7 +217,7 @@ fun Directory(
             }
         },
         onNavigateUp = viewModel::navigateUp,
-        onRefresh = viewModel::refresh,
+        onRefresh = { viewModel.refresh(reload = true) },
         onCopyEntry = viewModel::prepareCopy,
         onMoveEntry = viewModel::prepareMove,
         onDeleteEntry = viewModel::deleteEntry,
@@ -254,11 +256,9 @@ fun DirectoryScreen(
     var sortMenuExpanded by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
     var entryPendingDeletion by remember { mutableStateOf<DirectoryEntry?>(null) }
-    val directoryName = uiState.currentDirectory.name.ifBlank { uiState.currentDirectory.absolutePath }
-
     BaseScaffold(
-        title = directoryName,
-        subtitle = uiState.currentDirectory.absolutePath,
+        title = uiState.currentName,
+        subtitle = uiState.currentPath,
         showBackButton = false,
         actions = {
             Box {
@@ -347,7 +347,7 @@ fun DirectoryScreen(
             }
         }
 
-        if (uiState.showDirectoryFileActions) {
+        if (uiState.fileActionsAvailable) {
             DirectoryFileOperationPanel(
                 pendingOperation = uiState.pendingFileOperation,
                 status = uiState.fileOperationStatus,
@@ -371,7 +371,7 @@ fun DirectoryScreen(
                 onOpenMedia = onOpenMedia,
                 onOpenWithOtherApp = onOpenWithOtherApp,
                 onNavigateUp = onNavigateUp,
-                showFileActions = uiState.showDirectoryFileActions,
+                showFileActions = uiState.fileActionsAvailable,
                 onCopyEntry = onCopyEntry,
                 onMoveEntry = onMoveEntry,
                 onRequestDeleteEntry = { entryPendingDeletion = it },
@@ -385,7 +385,7 @@ fun DirectoryScreen(
                 onOpenMedia = onOpenMedia,
                 onOpenWithOtherApp = onOpenWithOtherApp,
                 onNavigateUp = onNavigateUp,
-                showFileActions = uiState.showDirectoryFileActions,
+                showFileActions = uiState.fileActionsAvailable,
                 onCopyEntry = onCopyEntry,
                 onMoveEntry = onMoveEntry,
                 onRequestDeleteEntry = { entryPendingDeletion = it },
@@ -478,7 +478,7 @@ private fun DirectoryOptionsMenu(
                 text = {
                     Column {
                         Text(
-                            text = File(path).name.ifBlank { path },
+                            text = MediaPaths.name(path),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -745,7 +745,7 @@ private fun DirectoryList(
 ) {
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
-    val directoryPath = uiState.currentDirectory.absolutePath
+    val directoryPath = uiState.currentPath
     val itemCount = uiState.entries.size + if (uiState.canNavigateUp) 1 else if (uiState.entries.isEmpty()) 1 else 0
 
     LaunchedEffect(directoryPath) {
@@ -901,7 +901,7 @@ private fun DirectoryGrid(
 ) {
     val gridState = rememberLazyGridState()
     val coroutineScope = rememberCoroutineScope()
-    val directoryPath = uiState.currentDirectory.absolutePath
+    val directoryPath = uiState.currentPath
     val itemCount = uiState.entries.size + if (uiState.canNavigateUp) 1 else if (uiState.entries.isEmpty()) 1 else 0
 
     LaunchedEffect(directoryPath) {
@@ -1167,6 +1167,9 @@ private fun EntryThumbnail(
             Icon(
                 imageVector = if (entry.isDirectory) {
                     Icons.Default.Folder
+                } else if (entry.mediaType == DirectoryMediaType.Video) {
+                    // Videos on HTTP servers have no frame preview.
+                    Icons.Default.PlayCircle
                 } else if (entry.mediaType == DirectoryMediaType.Archive) {
                     Icons.Default.Archive
                 } else {
@@ -1310,6 +1313,8 @@ private fun EmptyDirectoryMessage(uiState: DirectoryUiState) {
 private fun DirectoryEntry.supportingText(): String =
     when {
         isDirectory -> stringResource(R.string.folder)
+        // HTTP listings only report sizes when a sort order asked the server for them.
+        sizeBytes < 0 -> typeText()
         mediaType == DirectoryMediaType.Image -> stringResource(R.string.image_with_size, formatBytes(sizeBytes))
         mediaType == DirectoryMediaType.Video -> stringResource(R.string.video_with_size, formatBytes(sizeBytes))
         mediaType == DirectoryMediaType.Archive -> stringResource(R.string.archive_with_size, formatBytes(sizeBytes))
@@ -1367,15 +1372,19 @@ private val VIDEO_EXTENSIONS = setOf("mp4", "mkv", "webm", "3gp", "mov", "avi", 
 private const val FILE_PROVIDER_AUTHORITY = "srv.scrtvwr.fileprovider"
 
 private fun Context.openWithOtherApp(entry: DirectoryEntry) {
-    val file = File(entry.path)
-    val uri = FileProvider.getUriForFile(this, FILE_PROVIDER_AUTHORITY, file)
     val mimeType = MimeTypeMap.getSingleton()
-        .getMimeTypeFromExtension(file.extension.lowercase())
+        .getMimeTypeFromExtension(MediaPaths.extension(entry.path))
         ?: "*/*"
 
-    val intent = Intent(Intent.ACTION_VIEW)
-        .setDataAndType(uri, mimeType)
-        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    val intent = if (MediaPaths.isRemote(entry.path)) {
+        // Other apps can stream or download a server file from its URL directly.
+        Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(entry.path), mimeType)
+    } else {
+        val uri = FileProvider.getUriForFile(this, FILE_PROVIDER_AUTHORITY, File(entry.path))
+        Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, mimeType)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
 
     try {
         startActivity(Intent.createChooser(intent, entry.name))
@@ -1390,8 +1399,8 @@ fun DirectoryScreenPreview() {
     SCRTVWRTheme {
         DirectoryScreen(
             uiState = DirectoryUiState(
-                rootDirectory = File("/storage/emulated/0"),
-                currentDirectory = File("/storage/emulated/0/Movies"),
+                rootPath = "/storage/emulated/0",
+                currentPath = "/storage/emulated/0/Movies",
                 directoryListing = DirectoryListing(
                     entries = listOf(
                         DirectoryEntry(

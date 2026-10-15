@@ -6,6 +6,10 @@ import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import srv.scrtvwr.media.MediaPaths
+import srv.scrtvwr.media.remote.HttpServer
+import srv.scrtvwr.media.remote.RemotePaths
+import srv.scrtvwr.media.remote.serverFor
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import java.io.File
 
@@ -50,14 +54,17 @@ class HistoryViewModel(
         filter: HistoryFilter = savedStateHandle.get<String>(STATE_FILTER)
             ?.let { value -> HistoryFilter.entries.firstOrNull { it.name == value } }
             ?: HistoryFilter.ALL,
-    ): HistoryUiState = HistoryUiState(
-        selectedFilter = filter,
-        directories = preferences.getMediaHistory().mediaHistoryItems(),
-        favoriteDirectories = preferences.getBookmarkedMedia()
-            .mapNotNull(String::bookmarkSession)
-            .distinctBy { it.directoryPath }
-            .mediaHistoryItems(),
-    )
+    ): HistoryUiState {
+        val servers = preferences.getHttpServers()
+        return HistoryUiState(
+            selectedFilter = filter,
+            directories = preferences.getMediaHistory().mediaHistoryItems(servers),
+            favoriteDirectories = preferences.getBookmarkedMedia()
+                .mapNotNull(String::bookmarkSession)
+                .distinctBy { it.directoryPath }
+                .mediaHistoryItems(servers),
+        )
+    }
 
     private companion object {
         const val STATE_FILTER = "history_filter"
@@ -97,10 +104,21 @@ enum class HistoryFilter(val label: String) {
     FAVORITES("Favorites"),
 }
 
-private fun List<srv.scrtvwr.preferences.LastMediaSession>.mediaHistoryItems(): List<HistoryDirectoryItem> =
+private fun List<srv.scrtvwr.preferences.LastMediaSession>.mediaHistoryItems(
+    servers: List<HttpServer>,
+): List<HistoryDirectoryItem> =
     mapNotNull { session ->
-        val directory = File(session.directoryPath)
         val mediaPath = session.mediaPath ?: return@mapNotNull null
+        if (MediaPaths.isRemote(session.directoryPath)) {
+            // Checking every entry would mean a request per row; keep those on saved servers.
+            if (servers.serverFor(session.directoryPath) == null) return@mapNotNull null
+            return@mapNotNull HistoryDirectoryItem(
+                name = RemotePaths.name(session.directoryPath),
+                path = session.directoryPath,
+                mediaPath = mediaPath,
+            )
+        }
+        val directory = File(session.directoryPath)
         val mediaFile = File(mediaPath.substringBefore("::"))
         if (!directory.exists() || !directory.isDirectory || !mediaFile.isFile) {
             return@mapNotNull null
@@ -118,6 +136,6 @@ private fun List<srv.scrtvwr.preferences.LastMediaSession>.mediaHistoryItems(): 
 
 private fun String.bookmarkSession(): srv.scrtvwr.preferences.LastMediaSession? {
     val source = substringBefore("::")
-    val directory = File(source).parentFile?.absolutePath ?: return null
+    val directory = MediaPaths.parent(source) ?: return null
     return srv.scrtvwr.preferences.LastMediaSession(directory, this)
 }
