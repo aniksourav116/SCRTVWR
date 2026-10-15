@@ -103,6 +103,35 @@
     <string name="storage_used">%1$s of %2$s used</string>
     <string name="storage_available">%1$s available</string>
     <string name="tap_open_directory">Tap to open directory</string>
+    <string name="http_servers">HTTP servers</string>
+    <string name="add_http_server">Add HTTP server</string>
+    <string name="add">Add</string>
+    <string name="remove">Remove</string>
+    <string name="http_server_help">Browse media shared by a computer on the same network. In the folder to share, run:</string>
+    <string name="http_server_command" translatable="false">python -m http.server 8000 --bind 0.0.0.0</string>
+    <string name="http_server_address">Server address</string>
+    <string name="http_server_address_placeholder" translatable="false">192.168.1.20:8000</string>
+    <string name="http_server_address_help">The computer\'s local IP address and the server\'s port.</string>
+    <string name="http_server_name">Name (optional)</string>
+    <string name="http_server_invalid_address">Enter an http:// or https:// address with a host name or IPv4 address.</string>
+    <string name="http_server_already_added">This server has already been added.</string>
+    <string name="http_server_checking">Checking connection…</string>
+    <plurals name="http_server_online">
+        <item quantity="one">Online, %1$d item shared</item>
+        <item quantity="other">Online, %1$d items shared</item>
+    </plurals>
+    <string name="http_server_offline">Unreachable: %1$s</string>
+    <string name="http_server_offline_unknown">Unreachable</string>
+    <string name="remove_http_server">Remove server</string>
+    <string name="remove_http_server_title">Remove server?</string>
+    <string name="remove_http_server_message">Remove \"%1$s\" from storage devices? Files on the server are not affected.</string>
+    <string name="http_listing_failed">Unable to load this folder from the server: %1$s</string>
+    <string name="http_listing_local_network_blocked">Android is blocking SCRTVWR from the local network. Allow local network access from the Storage screen to reach this server.</string>
+    <string name="http_server_local_network_blocked">Can\'t connect: local network access isn\'t allowed</string>
+    <string name="local_network_access_required">Local network access needed</string>
+    <string name="local_network_access_explanation">Android only lets SCRTVWR reach servers on your Wi-Fi, such as a computer running python -m http.server, after you allow access to devices on the local network.</string>
+    <string name="allow_local_network_access">Allow</string>
+    <string name="app_settings">App settings</string>
     <string name="viewer_title">Media viewer</string>
     <string name="toggle_full_view">Toggle full view</string>
     <string name="more_options">More options</string>
@@ -170,6 +199,8 @@
     <string name="next_archive">Next archive</string>
     <string name="move_previous_archive">Move to previous archive</string>
     <string name="move_next_archive">Move to next archive</string>
+    <string name="downloading_archive">Downloading archive… %1$s</string>
+    <string name="downloading_archive_progress">Downloading archive… %1$s of %2$s</string>
     <string name="reached_first_media">Beginning reached</string>
     <string name="reached_last_media">End reached</string>
     <string name="no_previous_source">You are already at the first media item, and there is no previous directory or archive to open.</string>

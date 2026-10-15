@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+        HTTP storage servers (for example `python -m http.server`) run on the local network at
+        addresses the user types in, without TLS, so plain HTTP cannot be limited to known domains.
+    -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

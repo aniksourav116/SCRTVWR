@@ -2,11 +2,13 @@ package srv.scrtvwr.preferences
 
 import android.content.Context
 import org.json.JSONArray
+import org.json.JSONObject
+import srv.scrtvwr.media.MediaPaths
+import srv.scrtvwr.media.remote.HttpServer
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
 import srv.scrtvwr.ui.media.VideoCompletionAction
 import srv.scrtvwr.ui.sort.DirectorySortOrder
-import java.io.File
 
 class ScrtvwrPreferences(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -107,13 +109,24 @@ class ScrtvwrPreferences(context: Context) {
 
     fun removeBookmarkedMediaDirectory(directoryPath: String) {
         val bookmarks = getBookmarkedMedia()
-            .filterNot { path -> File(path.substringBefore("::")).parentFile?.absolutePath == directoryPath }
+            .filterNot { path -> MediaPaths.parent(path.substringBefore("::")) == directoryPath }
             .toSet()
         preferences.edit().putStringSet(KEY_BOOKMARKED_MEDIA, bookmarks).apply()
     }
 
     fun isMediaBookmarked(path: String?): Boolean =
         path != null && path in getBookmarkedMedia()
+
+    fun getHttpServers(): List<HttpServer> =
+        preferences.getString(KEY_HTTP_SERVERS, null)
+            ?.let(::decodeHttpServers)
+            .orEmpty()
+
+    fun saveHttpServers(servers: List<HttpServer>) {
+        preferences.edit()
+            .putString(KEY_HTTP_SERVERS, encodeHttpServers(servers))
+            .apply()
+    }
 
     fun getRecentDirectories(): List<String> =
         getMediaHistory().map(LastMediaSession::directoryPath)
@@ -201,6 +214,33 @@ class ScrtvwrPreferences(context: Context) {
             }.filterNotNull().filter { it.directoryPath.isNotBlank() }
         }.getOrDefault(emptyList())
 
+    private fun encodeHttpServers(servers: List<HttpServer>): String {
+        val json = JSONArray()
+        servers.forEach { server ->
+            json.put(
+                JSONObject()
+                    .put("id", server.id)
+                    .put("name", server.name)
+                    .put("url", server.baseUrl),
+            )
+        }
+        return json.toString()
+    }
+
+    private fun decodeHttpServers(value: String): List<HttpServer> =
+        runCatching {
+            val json = JSONArray(value)
+            List(json.length()) { index ->
+                json.optJSONObject(index)?.let { server ->
+                    HttpServer(
+                        id = server.optString("id"),
+                        name = server.optString("name"),
+                        baseUrl = server.optString("url"),
+                    )
+                }
+            }.filterNotNull().filter { it.id.isNotBlank() && it.baseUrl.isNotBlank() }
+        }.getOrDefault(emptyList())
+
     private companion object {
         const val PREFERENCES_NAME = "scrtvwr_preferences"
         const val KEY_SLIDE_SHOW_STAY_MILLIS = "slide_show_stay_millis"
@@ -218,6 +258,7 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_DIRECTORY_SORT_ORDER = "directory_sort_order"
         const val KEY_LAST_MEDIA_DIRECTORY = "last_media_directory"
         const val KEY_LAST_MEDIA_PATH = "last_media_path"
+        const val KEY_HTTP_SERVERS = "http_servers"
         const val DEFAULT_SLIDE_SHOW_STAY_MILLIS = 3_000L
         const val DEFAULT_IMAGE_PRELOAD_DISTANCE = 5
         const val DEFAULT_VIDEO_PRELOAD_DISTANCE = 0
