@@ -1,19 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
+   Backup and transfer rules for Android 12 and up; backup_rules.xml covers older versions.
    See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+
+   HTTP server passwords stay on the device. After a restore or transfer the servers come back
+   without them, and their cards ask to sign in again.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="sharedpref" path="scrtvwr_http_credentials.xml" />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="sharedpref" path="scrtvwr_http_credentials.xml" />
     </device-transfer>
-    -->
 </data-extraction-rules>

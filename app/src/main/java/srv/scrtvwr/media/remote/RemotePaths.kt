@@ -16,15 +16,25 @@ object RemotePaths {
      * when it cannot be used. Plain addresses default to `http://`.
      */
     fun normalizeServerUrl(input: String): String? {
-        val trimmed = input.trim()
-        if (trimmed.isEmpty()) return null
-        val uri = runCatching { URI(if ("://" in trimmed) trimmed else "http://$trimmed") }.getOrNull() ?: return null
+        val uri = parseAddress(input) ?: return null
         val scheme = uri.scheme?.lowercase()?.takeIf { it == "http" || it == "https" } ?: return null
         val host = uri.host?.lowercase()?.takeIf(String::isNotBlank) ?: return null
         // IPv6 literals would put "::" into every path, which already marks archive entries.
         if (':' in host) return null
         val port = if (uri.port >= 0) ":${uri.port}" else ""
         return directoryUrl("$scheme://$host$port${uri.rawPath.orEmpty()}")
+    }
+
+    /**
+     * Username and password typed into a server address as `user:password@host`, which
+     * [normalizeServerUrl] leaves out of the URL, or null when the address has none.
+     */
+    fun credentials(input: String): HttpCredentials? {
+        val userInfo = parseAddress(input)?.userInfo?.takeIf(String::isNotEmpty) ?: return null
+        return HttpCredentials(
+            username = userInfo.substringBefore(':'),
+            password = userInfo.substringAfter(':', missingDelimiterValue = ""),
+        )
     }
 
     fun directoryUrl(url: String): String = if (url.endsWith("/")) url else "$url/"
@@ -74,4 +84,10 @@ object RemotePaths {
     private fun origin(uri: URI): String = "${uri.scheme}://${uri.rawAuthority}"
 
     private fun parse(url: String): URI? = runCatching { URI(url) }.getOrNull()
+
+    private fun parseAddress(input: String): URI? {
+        val trimmed = input.trim()
+        if (trimmed.isEmpty()) return null
+        return parse(if ("://" in trimmed) trimmed else "http://$trimmed")
+    }
 }

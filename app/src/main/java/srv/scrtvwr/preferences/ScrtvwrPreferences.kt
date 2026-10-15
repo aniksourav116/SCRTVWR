@@ -4,6 +4,7 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 import srv.scrtvwr.media.MediaPaths
+import srv.scrtvwr.media.remote.HttpCredentials
 import srv.scrtvwr.media.remote.HttpServer
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
@@ -12,6 +13,10 @@ import srv.scrtvwr.ui.sort.DirectorySortOrder
 
 class ScrtvwrPreferences(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+
+    // Kept apart from the other settings so backups can leave the passwords out.
+    private val credentialPreferences =
+        context.applicationContext.getSharedPreferences(CREDENTIALS_PREFERENCES_NAME, Context.MODE_PRIVATE)
 
     fun getSlideShowStayMillis(): Long =
         preferences.getLong(KEY_SLIDE_SHOW_STAY_MILLIS, DEFAULT_SLIDE_SHOW_STAY_MILLIS)
@@ -128,6 +133,23 @@ class ScrtvwrPreferences(context: Context) {
             .apply()
     }
 
+    /** Saved sign-in details, keyed by [HttpServer.id]. */
+    fun getHttpCredentials(): Map<String, HttpCredentials> =
+        credentialPreferences.all.mapNotNull { (serverId, value) ->
+            (value as? String)?.let(::decodeHttpCredentials)?.let { serverId to it }
+        }.toMap()
+
+    /** Saves [credentials] for [serverId], or forgets them when null. */
+    fun saveHttpCredentials(serverId: String, credentials: HttpCredentials?) {
+        val editor = credentialPreferences.edit()
+        if (credentials == null) {
+            editor.remove(serverId)
+        } else {
+            editor.putString(serverId, encodeHttpCredentials(credentials))
+        }
+        editor.apply()
+    }
+
     fun getRecentDirectories(): List<String> =
         getMediaHistory().map(LastMediaSession::directoryPath)
 
@@ -221,7 +243,8 @@ class ScrtvwrPreferences(context: Context) {
                 JSONObject()
                     .put("id", server.id)
                     .put("name", server.name)
-                    .put("url", server.baseUrl),
+                    .put("url", server.baseUrl)
+                    .put("sha256", server.certificateSha256),
             )
         }
         return json.toString()
@@ -236,13 +259,29 @@ class ScrtvwrPreferences(context: Context) {
                         id = server.optString("id"),
                         name = server.optString("name"),
                         baseUrl = server.optString("url"),
+                        certificateSha256 = server.optString("sha256").takeIf(String::isNotBlank),
                     )
                 }
             }.filterNotNull().filter { it.id.isNotBlank() && it.baseUrl.isNotBlank() }
         }.getOrDefault(emptyList())
 
+    private fun encodeHttpCredentials(credentials: HttpCredentials): String =
+        JSONObject()
+            .put("username", credentials.username)
+            .put("password", credentials.password)
+            .toString()
+
+    private fun decodeHttpCredentials(value: String): HttpCredentials? =
+        runCatching {
+            val json = JSONObject(value)
+            HttpCredentials(username = json.optString("username"), password = json.optString("password"))
+        }.getOrNull()?.takeIf { it.username.isNotEmpty() }
+
     private companion object {
         const val PREFERENCES_NAME = "scrtvwr_preferences"
+
+        // Excluded in res/xml/backup_rules.xml and data_extraction_rules.xml; rename it there too.
+        const val CREDENTIALS_PREFERENCES_NAME = "scrtvwr_http_credentials"
         const val KEY_SLIDE_SHOW_STAY_MILLIS = "slide_show_stay_millis"
         const val KEY_HOLD_SLIDE_SHOW_ENABLED = "hold_slide_show_enabled"
         const val KEY_SLIDE_SHOW_DIRECTION = "slide_show_direction"

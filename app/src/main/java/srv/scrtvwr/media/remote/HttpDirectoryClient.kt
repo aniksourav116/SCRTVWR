@@ -17,6 +17,7 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.Charset
+import javax.net.ssl.HttpsURLConnection
 
 /**
  * Reads directory listings and files from HTTP storage servers.
@@ -153,6 +154,12 @@ object HttpDirectoryClient {
         }
     }
 
+    /** Forgets cached listings and file details under [baseUrl], for example after its sign-in changes. */
+    fun clearCache(baseUrl: String) {
+        synchronized(listings) { listings.keys.removeAll { RemotePaths.isSameOrChildOf(it, baseUrl) } }
+        synchronized(metadata) { metadata.keys.removeAll { RemotePaths.isSameOrChildOf(it, baseUrl) } }
+    }
+
     private fun fileMetadata(url: String): RemoteFileMetadata? {
         synchronized(metadata) { metadata[url] }?.let { return it }
         return runCatching {
@@ -176,7 +183,19 @@ object HttpDirectoryClient {
             connection.connectTimeout = CONNECT_TIMEOUT_MILLIS
             connection.readTimeout = READ_TIMEOUT_MILLIS
             connection.instanceFollowRedirects = true
+            // Redirects keep these on the same server; a cross-host redirect drops the
+            // Authorization header and fails the pinned certificate check.
+            HttpServerAccess.authorizationFor(url)?.let { connection.setRequestProperty("Authorization", it) }
+            if (connection is HttpsURLConnection) {
+                HttpServerAccess.pinFor(url)?.let(PinnedCertificates::pinning)?.let { pinning ->
+                    connection.sslSocketFactory = pinning.socketFactory
+                    connection.hostnameVerifier = pinning.hostnameVerifier
+                }
+            }
             val status = connection.responseCode
+            if (status == HttpURLConnection.HTTP_UNAUTHORIZED) {
+                throw HttpAuthException("HTTP $status ${connection.responseMessage.orEmpty()}".trim())
+            }
             if (status !in 200..299) {
                 throw IOException("HTTP $status ${connection.responseMessage.orEmpty()}".trim())
             }
@@ -218,3 +237,6 @@ object HttpDirectoryClient {
 
     private class RemoteFileMetadata(val sizeBytes: Long, val lastModifiedMillis: Long)
 }
+
+/** The server turned the request away until it gets valid credentials (HTTP 401). */
+class HttpAuthException(message: String) : IOException(message)

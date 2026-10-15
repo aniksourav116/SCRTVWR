@@ -23,6 +23,14 @@ class RemotePathsTest {
     }
 
     @Test
+    fun credentials_comeFromUserInfoThatTheServerUrlLeavesOut() {
+        assertEquals(HttpCredentials("alice", "p@ss word"), RemotePaths.credentials("http://alice:p%40ss%20word@host:8000/"))
+        assertEquals(HttpCredentials("alice", ""), RemotePaths.credentials("alice@192.168.1.20:8000"))
+        assertNull(RemotePaths.credentials("192.168.1.20:8000"))
+        assertEquals("http://host:8000/", RemotePaths.normalizeServerUrl("http://alice:secret@host:8000/"))
+    }
+
+    @Test
     fun parent_climbsToTheServerRootAndStops() {
         assertEquals("http://host:8000/Photos/", RemotePaths.parent("http://host:8000/Photos/2024/"))
         assertEquals("http://host:8000/Photos/", RemotePaths.parent("http://host:8000/Photos/a%20b.jpg"))
