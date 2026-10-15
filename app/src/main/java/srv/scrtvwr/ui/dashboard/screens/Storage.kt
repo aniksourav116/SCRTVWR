@@ -18,15 +18,22 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SdStorage
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Usb
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ElevatedCard
@@ -56,6 +63,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -66,7 +75,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import srv.scrtvwr.media.remote.HttpServer
+import srv.scrtvwr.media.remote.PinnedCertificates
+import srv.scrtvwr.media.remote.ServerCertificate
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HttpServerDevice
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.HttpServerInput
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HttpServerInputError
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HttpServerStatus
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.StorageDevice
@@ -75,7 +87,9 @@ import srv.scrtvwr.ui.dashboard.screens.viewmodels.StorageViewModel
 import srv.scrtvwr.ui.components.hasLocalNetworkAccess
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.R
+import java.text.DateFormat
 import java.text.DecimalFormat
+import java.util.Date
 
 @Composable
 fun Storage(
@@ -184,12 +198,14 @@ fun Storage(
                 requestLocalNetworkAccess()
             }
         },
-        onAddHttpServer = { name, address ->
-            viewModel.addHttpServer(name, address).also { error ->
+        onAddHttpServer = { input ->
+            viewModel.addHttpServer(input).also { error ->
                 if (error == null && !context.hasLocalNetworkAccess()) requestLocalNetworkAccess()
             }
         },
+        onEditHttpServer = { server, input -> viewModel.updateHttpServer(server.id, input) },
         onRemoveHttpServer = viewModel::removeHttpServer,
+        onTrustCertificate = viewModel::trustCertificate,
         hasLocalNetworkAccess = hasLocalNetworkAccess,
         onGrantLocalNetworkAccess = requestLocalNetworkAccess,
         onOpenAppSettings = {
@@ -209,15 +225,21 @@ fun StorageScreen(
     hasStorageAccess: Boolean = true,
     onGrantStorageAccess: () -> Unit = {},
     onOpenHttpServer: (HttpServer) -> Unit = {},
-    onAddHttpServer: (name: String, address: String) -> HttpServerInputError? = { _, _ -> null },
+    onAddHttpServer: (HttpServerInput) -> HttpServerInputError? = { null },
+    onEditHttpServer: (HttpServer, HttpServerInput) -> HttpServerInputError? = { _, _ -> null },
     onRemoveHttpServer: (HttpServer) -> Unit = {},
+    onTrustCertificate: (HttpServer, ServerCertificate) -> Unit = { _, _ -> },
     hasLocalNetworkAccess: Boolean = true,
     onGrantLocalNetworkAccess: () -> Unit = {},
     onOpenAppSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var showAddServerDialog by remember { mutableStateOf(false) }
+    var serverBeingEdited by remember { mutableStateOf<HttpServerDevice?>(null) }
     var serverPendingRemoval by remember { mutableStateOf<HttpServer?>(null) }
+    var certificateUnderReview by remember {
+        mutableStateOf<Pair<HttpServer, HttpServerStatus.UntrustedCertificate>?>(null)
+    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -291,7 +313,9 @@ fun StorageScreen(
             HttpServerCard(
                 device = device,
                 onClick = { onOpenHttpServer(device.server) },
+                onEdit = { serverBeingEdited = device },
                 onRemove = { serverPendingRemoval = device.server },
+                onReviewCertificate = { status -> certificateUnderReview = device.server to status },
             )
         }
 
@@ -310,12 +334,37 @@ fun StorageScreen(
     }
 
     if (showAddServerDialog) {
-        AddHttpServerDialog(
+        HttpServerDialog(
+            initial = null,
             onDismiss = { showAddServerDialog = false },
-            onAdd = { name, address ->
-                onAddHttpServer(name, address).also { error ->
+            onSave = { input ->
+                onAddHttpServer(input).also { error ->
                     if (error == null) showAddServerDialog = false
                 }
+            },
+        )
+    }
+
+    serverBeingEdited?.let { device ->
+        HttpServerDialog(
+            initial = device,
+            onDismiss = { serverBeingEdited = null },
+            onSave = { input ->
+                onEditHttpServer(device.server, input).also { error ->
+                    if (error == null) serverBeingEdited = null
+                }
+            },
+        )
+    }
+
+    certificateUnderReview?.let { (server, status) ->
+        CertificateReviewDialog(
+            serverName = server.name,
+            status = status,
+            onDismiss = { certificateUnderReview = null },
+            onTrust = {
+                onTrustCertificate(server, status.certificate)
+                certificateUnderReview = null
             },
         )
     }
@@ -376,6 +425,16 @@ private fun HttpServerHelp() {
             fontFamily = FontFamily.Monospace,
             style = MaterialTheme.typography.bodySmall,
         )
+        Text(
+            stringResource(R.string.http_server_auth_help),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Text(
+            stringResource(R.string.http_server_auth_command),
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 
@@ -383,7 +442,9 @@ private fun HttpServerHelp() {
 private fun HttpServerCard(
     device: HttpServerDevice,
     onClick: () -> Unit,
+    onEdit: () -> Unit,
     onRemove: () -> Unit,
+    onReviewCertificate: (HttpServerStatus.UntrustedCertificate) -> Unit,
 ) {
     ElevatedCard(
         Modifier
@@ -413,6 +474,9 @@ private fun HttpServerCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.edit_http_server))
+                }
                 IconButton(onClick = onRemove) {
                     Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.remove_http_server))
                 }
@@ -437,6 +501,23 @@ private fun HttpServerCard(
                     stringResource(R.string.http_server_local_network_blocked),
                     color = MaterialTheme.colorScheme.error,
                 )
+                HttpServerStatus.AuthRequired -> HttpServerProblem(
+                    message = stringResource(R.string.http_server_auth_required),
+                    action = stringResource(R.string.http_server_sign_in),
+                    onAction = onEdit,
+                )
+                HttpServerStatus.AuthFailed -> HttpServerProblem(
+                    message = stringResource(R.string.http_server_auth_failed),
+                    action = stringResource(R.string.http_server_sign_in),
+                    onAction = onEdit,
+                )
+                is HttpServerStatus.UntrustedCertificate -> HttpServerProblem(
+                    message = stringResource(
+                        if (status.changed) R.string.http_server_certificate_changed else R.string.http_server_certificate_untrusted,
+                    ),
+                    action = stringResource(R.string.http_server_review_certificate),
+                    onAction = { onReviewCertificate(status) },
+                )
             }
             Text(
                 stringResource(R.string.tap_open_directory),
@@ -447,21 +528,49 @@ private fun HttpServerCard(
     }
 }
 
+/** A server card's problem the user can fix, with the action that fixes it. */
 @Composable
-private fun AddHttpServerDialog(
-    onDismiss: () -> Unit,
-    onAdd: (name: String, address: String) -> HttpServerInputError?,
+private fun HttpServerProblem(
+    message: String,
+    action: String,
+    onAction: () -> Unit,
 ) {
-    var name by remember { mutableStateOf("") }
-    var address by remember { mutableStateOf("") }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            message,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onAction) { Text(action) }
+    }
+}
+
+/** Adds a server, or edits [initial] when it is given. */
+@Composable
+private fun HttpServerDialog(
+    initial: HttpServerDevice?,
+    onDismiss: () -> Unit,
+    onSave: (HttpServerInput) -> HttpServerInputError?,
+) {
+    var name by remember { mutableStateOf(initial?.server?.name.orEmpty()) }
+    var address by remember { mutableStateOf(initial?.server?.baseUrl.orEmpty()) }
+    var username by remember { mutableStateOf(initial?.username.orEmpty()) }
+    var password by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<HttpServerInputError?>(null) }
-    val submit = { error = onAdd(name, address) }
+    val hasSavedPassword = initial?.username != null
+    // Addresses typed without a scheme are plain http:// too.
+    val sendsPasswordUnencrypted = username.isNotBlank() && !address.trim().startsWith("https://", ignoreCase = true)
+    val submit = { error = onSave(HttpServerInput(name = name, address = address, username = username, password = password)) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.add_http_server)) },
+        title = { Text(stringResource(if (initial == null) R.string.add_http_server else R.string.edit_http_server)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 OutlinedTextField(
                     value = address,
                     onValueChange = {
@@ -489,15 +598,58 @@ private fun AddHttpServerDialog(
                     onValueChange = { name = it },
                     label = { Text(stringResource(R.string.http_server_name)) },
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                HttpServerHelp()
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it },
+                    label = { Text(stringResource(R.string.http_server_username)) },
+                    supportingText = { Text(stringResource(R.string.http_server_username_help)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Next),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text(stringResource(R.string.http_server_password)) },
+                    placeholder = {
+                        if (hasSavedPassword) Text(stringResource(R.string.http_server_password_unchanged))
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = stringResource(
+                                    if (passwordVisible) R.string.hide_password else R.string.show_password,
+                                ),
+                            )
+                        }
+                    },
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        autoCorrectEnabled = false,
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done,
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { if (address.isNotBlank()) submit() }),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (sendsPasswordUnencrypted) {
+                    Text(
+                        stringResource(R.string.http_server_unencrypted_password_warning),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (initial == null) HttpServerHelp()
             }
         },
         confirmButton = {
             Button(onClick = submit, enabled = address.isNotBlank()) {
-                Text(stringResource(R.string.add))
+                Text(stringResource(if (initial == null) R.string.add else R.string.save))
             }
         },
         dismissButton = {
@@ -506,6 +658,89 @@ private fun AddHttpServerDialog(
             }
         },
     )
+}
+
+/** Shows a server's untrusted certificate so the user can compare its fingerprint and trust it. */
+@Composable
+private fun CertificateReviewDialog(
+    serverName: String,
+    status: HttpServerStatus.UntrustedCertificate,
+    onDismiss: () -> Unit,
+    onTrust: () -> Unit,
+) {
+    val certificate = status.certificate
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                stringResource(
+                    if (status.changed) R.string.http_server_certificate_changed_title else R.string.http_server_certificate_title,
+                ),
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    stringResource(
+                        if (status.changed) {
+                            R.string.http_server_certificate_changed_message
+                        } else {
+                            R.string.http_server_certificate_message
+                        },
+                        serverName,
+                    ),
+                )
+                CertificateDetail(
+                    label = stringResource(R.string.http_server_certificate_fingerprint),
+                    value = PinnedCertificates.format(certificate.sha256),
+                    monospace = true,
+                )
+                CertificateDetail(
+                    label = stringResource(R.string.http_server_certificate_subject),
+                    value = certificate.subject,
+                )
+                CertificateDetail(
+                    label = stringResource(R.string.http_server_certificate_expires),
+                    value = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(certificate.expiresAtMillis)),
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onTrust) {
+                Text(stringResource(R.string.trust))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun CertificateDetail(
+    label: String,
+    value: String,
+    monospace: Boolean = false,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            label,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium,
+        )
+        SelectionContainer {
+            Text(
+                value,
+                fontFamily = if (monospace) FontFamily.Monospace else null,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
 }
 
 private fun android.content.Context.hasRequiredStorageAccess(): Boolean =

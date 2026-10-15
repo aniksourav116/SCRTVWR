@@ -121,6 +121,7 @@ import srv.scrtvwr.media.DirectoryTraversal
 import srv.scrtvwr.ui.components.BookmarkFlash
 import srv.scrtvwr.ui.components.TapeTransportButton
 import srv.scrtvwr.ui.components.VideoSideGestures
+import srv.scrtvwr.ui.components.remoteAccessMessage
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.media.MediaCatalog
 import srv.scrtvwr.media.MediaPaths
@@ -477,7 +478,9 @@ private fun VideoPage(
                     reloadWhenActive = true
                     activeReloadAttempts += 1
                 } else if (latestIsActive) {
-                    error = playbackError.localizedMessage ?: playbackError.errorCodeName
+                    error = playbackError.remoteAccessMessage(context)
+                        ?: playbackError.localizedMessage
+                        ?: playbackError.errorCodeName
                 } else {
                     error = null
                     reloadWhenActive = true

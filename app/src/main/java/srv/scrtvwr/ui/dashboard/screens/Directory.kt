@@ -112,6 +112,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import srv.scrtvwr.media.MediaPaths
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.PreviewResult
+import srv.scrtvwr.media.remote.HttpServerAccess
 import srv.scrtvwr.MediaViewerActivity
 import srv.scrtvwr.VideoPlayerActivity
 import srv.scrtvwr.R
@@ -1372,6 +1373,11 @@ private val VIDEO_EXTENSIONS = setOf("mp4", "mkv", "webm", "3gp", "mov", "avi", 
 private const val FILE_PROVIDER_AUTHORITY = "srv.scrtvwr.fileprovider"
 
 private fun Context.openWithOtherApp(entry: DirectoryEntry) {
+    // Other apps get only the URL, without the server's credentials or trusted certificate.
+    if (HttpServerAccess.isProtected(entry.path)) {
+        Toast.makeText(this, getString(R.string.open_with_protected_server), Toast.LENGTH_LONG).show()
+        return
+    }
     val mimeType = MimeTypeMap.getSingleton()
         .getMimeTypeFromExtension(MediaPaths.extension(entry.path))
         ?: "*/*"

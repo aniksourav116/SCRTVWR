@@ -39,6 +39,9 @@ object RemotePaths {
 
     fun directoryUrl(url: String): String = if (url.endsWith("/")) url else "$url/"
 
+    /** Scheme, host and port of [url], such as `https://192.168.1.20:8443`. */
+    fun origin(url: String): String? = parse(url)?.let { origin(it) }
+
     /** Directory holding [url], or null once [url] is the server root. */
     fun parent(url: String): String? {
         val uri = parse(url) ?: return null

@@ -28,6 +28,7 @@ import srv.scrtvwr.media.remote.serverFor
 import srv.scrtvwr.preferences.LastMediaSession
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.components.hasLocalNetworkAccess
+import srv.scrtvwr.ui.components.remoteAccessMessage
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.sort.fileComparator
 import srv.scrtvwr.ui.sort.needsFileMetadata
@@ -504,7 +505,7 @@ private suspend fun remoteExplorerEntries(
             entries = emptyList(),
             canRead = false,
             errorMessage = if (app.hasLocalNetworkAccess()) {
-                app.getString(R.string.http_listing_failed, error.userMessage(app))
+                error.remoteAccessMessage(app) ?: app.getString(R.string.http_listing_failed, error.userMessage(app))
             } else {
                 app.getString(R.string.http_listing_local_network_blocked)
             },

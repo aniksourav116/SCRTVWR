@@ -19,6 +19,7 @@ import srv.scrtvwr.media.MediaPaths
 import srv.scrtvwr.media.remote.DownloadProgress
 import srv.scrtvwr.media.remote.RemotePaths
 import srv.scrtvwr.media.remote.serverFor
+import srv.scrtvwr.ui.components.remoteAccessMessage
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import java.io.File
 
@@ -56,7 +57,9 @@ class MediaViewerViewModel(
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            errorMessage = error.message ?: "Unable to load media.",
+                            errorMessage = error.remoteAccessMessage(getApplication<Application>())
+                                ?: error.message
+                                ?: "Unable to load media.",
                             downloadProgress = null,
                         )
                     }
