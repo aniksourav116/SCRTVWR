@@ -2,11 +2,16 @@ from functools import partial
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+import os
+import subprocess
 import tempfile
 import threading
 import unittest
+from unittest.mock import Mock, patch
 
-from tools.media_http_server import MediaRequestHandler, parse_byte_range
+from tools.media_http_server import (
+    MAX_PREVIEW_BYTES, MediaRequestHandler, PREVIEW_HEADER, VideoPreviewCache, parse_byte_range,
+)
 
 
 class ByteRangeTest(unittest.TestCase):
@@ -101,6 +106,116 @@ class MediaServerTest(unittest.TestCase):
         status, _, body = self.request(headers={"Range": "bytes=10-20", "If-Range": headers["Last-Modified"]})
         self.assertEqual(206, status)
         self.assertEqual(self.payload[10:21], body)
+
+    def test_disabled_preview_does_not_serve_the_original_video(self):
+        status, headers, body = self.request(path="/video.mp4?scrtvwr-preview=1")
+        self.assertEqual(501, status)
+        self.assertNotIn(PREVIEW_HEADER, headers)
+        self.assertNotEqual(self.payload, body)
+
+
+class VideoPreviewServerTest(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.name = "clip & \u00e9.mp4"
+        Path(self.directory.name, self.name).write_bytes(b"original video")
+        Path(self.directory.name, "image.jpg").write_bytes(b"image")
+        self.previews = Mock()
+        self.previews.get.return_value = b"\xff\xd8thumbnail\xff\xd9"
+        handler = partial(MediaRequestHandler, directory=self.directory.name, previews=self.previews)
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join()
+        self.directory.cleanup()
+
+    def request(self, path="/clip%20%26%20%C3%A9.mp4?scrtvwr-preview=1", method="GET"):
+        connection = HTTPConnection(*self.server.server_address, timeout=5)
+        try:
+            connection.request(method, path)
+            response = connection.getresponse()
+            return response.status, dict(response.getheaders()), response.read()
+        finally:
+            connection.close()
+
+    def test_preview_is_a_jpeg_instead_of_video_bytes(self):
+        status, headers, body = self.request()
+        self.assertEqual(200, status)
+        self.assertEqual("image/jpeg", headers["Content-Type"])
+        self.assertEqual("1", headers[PREVIEW_HEADER])
+        self.assertEqual(str(len(body)), headers["Content-Length"])
+        self.assertEqual(self.previews.get.return_value, body)
+        self.previews.get.assert_called_once_with(os.path.realpath(Path(self.directory.name, self.name)))
+
+    def test_head_checks_support_without_generating_a_frame(self):
+        status, headers, body = self.request(method="HEAD")
+        self.assertEqual(200, status)
+        self.assertEqual("1", headers[PREVIEW_HEADER])
+        self.assertEqual(b"", body)
+        self.previews.get.assert_not_called()
+
+    def test_listing_preserves_links_and_escapes_names(self):
+        status, _, body = self.request("/")
+        self.assertEqual(200, status)
+        self.assertIn(b'href="clip%20%26%20%C3%A9.mp4"', body)
+        self.assertIn(b'src="clip%20%26%20%C3%A9.mp4?scrtvwr-preview=1"', body)
+        self.assertIn("clip &amp; \u00e9.mp4".encode(), body)
+        self.assertIn(b'loading="lazy"', body)
+        self.previews.get.assert_not_called()
+
+    def test_missing_and_non_video_files_are_rejected(self):
+        for name in ["missing.mp4", "image.jpg"]:
+            with self.subTest(name=name):
+                status, _, _ = self.request(f"/{name}?scrtvwr-preview=1")
+                self.assertEqual(404, status)
+        self.previews.get.assert_not_called()
+
+    def test_decoder_failure_does_not_break_video_serving(self):
+        self.previews.get.side_effect = subprocess.TimeoutExpired("ffmpeg", 20)
+        status, _, _ = self.request()
+        self.assertEqual(503, status)
+        status, _, body = self.request("/clip%20%26%20%C3%A9.mp4")
+        self.assertEqual(200, status)
+        self.assertEqual(b"original video", body)
+
+
+class VideoPreviewCacheTest(unittest.TestCase):
+    def test_reuses_frame_until_video_changes_and_removes_temporary_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory, "video.mp4")
+            source.write_bytes(b"video")
+            outputs = []
+
+            def generate(command, **kwargs):
+                target = Path(command[-1])
+                outputs.append(target)
+                target.write_bytes(b"jpeg")
+
+            with patch("tools.media_http_server.subprocess.run", side_effect=generate) as decoder:
+                cache = VideoPreviewCache("ffmpeg")
+                self.assertEqual(b"jpeg", cache.get(str(source)))
+                self.assertEqual(b"jpeg", cache.get(str(source)))
+                self.assertEqual(1, decoder.call_count)
+                source.write_bytes(b"updated video")
+                self.assertEqual(b"jpeg", cache.get(str(source)))
+                self.assertEqual(2, decoder.call_count)
+            self.assertTrue(all(not target.parent.exists() for target in outputs))
+
+    def test_oversized_frame_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory, "video.mp4")
+            source.write_bytes(b"video")
+
+            def generate(command, **kwargs):
+                Path(command[-1]).write_bytes(b"x" * (MAX_PREVIEW_BYTES + 1))
+
+            with patch("tools.media_http_server.subprocess.run", side_effect=generate):
+                with self.assertRaises(OSError):
+                    VideoPreviewCache("ffmpeg").get(str(source))
 
 
 if __name__ == "__main__":

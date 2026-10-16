@@ -1168,7 +1168,7 @@ private fun EntryThumbnail(
                 imageVector = if (entry.isDirectory) {
                     Icons.Default.Folder
                 } else if (entry.mediaType == DirectoryMediaType.Video) {
-                    // Videos on HTTP servers have no frame preview.
+                    // Missing decoders or servers without thumbnail support keep the play icon.
                     Icons.Default.PlayCircle
                 } else if (entry.mediaType == DirectoryMediaType.Archive) {
                     Icons.Default.Archive

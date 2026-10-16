@@ -34,6 +34,8 @@ object HttpDirectoryClient {
     private const val MAX_CACHED_METADATA = 8_192
     private const val METADATA_REQUEST_PARALLELISM = 6
     private const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
+    private const val MAX_VIDEO_PREVIEW_BYTES = 1024L * 1024L
+    private const val VIDEO_PREVIEW_HEADER = "X-SCRTVWR-Video-Previews"
 
     private val listings = lruMap<String, CachedListing>(MAX_CACHED_LISTINGS)
     private val metadata = lruMap<String, RemoteFileMetadata>(MAX_CACHED_METADATA)
@@ -139,6 +141,52 @@ object HttpDirectoryClient {
             }
         }
     }
+
+    /**
+     * Only requests a JPEG from a server that advertises the thumbnail protocol. The HEAD probe
+     * has no body, so an ordinary HTTP server never transfers a video to make a thumbnail.
+     */
+    suspend fun videoPreview(url: String): ByteArray? {
+        val source = URL(url)
+        val previewUrl = source.toExternalForm().substringBefore('#') +
+            (if (source.query == null) "?" else "&") + "scrtvwr-preview=1"
+        val supported = previewRequest(previewUrl, "HEAD") { connection ->
+            connection.getHeaderField(VIDEO_PREVIEW_HEADER) == "1"
+        }
+        if (!supported) return null
+        return previewRequest(previewUrl, "GET") { connection ->
+            if (connection.getHeaderField(VIDEO_PREVIEW_HEADER) != "1" ||
+                !connection.contentType.orEmpty().substringBefore(';').trim().equals("image/jpeg", ignoreCase = true)
+            ) return@previewRequest null
+            if (connection.contentLengthLong > MAX_VIDEO_PREVIEW_BYTES) {
+                throw IOException("Video preview is too large")
+            }
+            connection.inputStream.use { it.readLimited(MAX_VIDEO_PREVIEW_BYTES) }
+        }
+    }
+
+    private suspend fun <T> previewRequest(url: String, method: String, read: (HttpURLConnection) -> T): T =
+        withContext(Dispatchers.IO) {
+            ensureActive()
+            request(url, method) { connection ->
+                val disconnectOnCancel = launch(start = CoroutineStart.UNDISPATCHED) {
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        connection.disconnect()
+                    }
+                }
+                try {
+                    ensureActive()
+                    read(connection).also { ensureActive() }
+                } catch (error: IOException) {
+                    ensureActive()
+                    throw error
+                } finally {
+                    disconnectOnCancel.cancel()
+                }
+            }
+        }
 
     private fun fileMetadata(url: String): RemoteFileMetadata? {
         synchronized(metadata) { metadata[url] }?.let { return it }

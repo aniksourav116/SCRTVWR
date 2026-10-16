@@ -39,6 +39,7 @@ object MediaPreviewLoader {
     private const val DISK_WRITES_PER_TRIM = 32
     private val directoryThumbnailSemaphore = Semaphore(2)
     private val remoteImageSemaphore = Semaphore(4)
+    private val videoThumbnailSemaphore = Semaphore(2)
     private val diskCacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val diskWritesSinceTrim = AtomicInteger()
     @Volatile private var diskCacheDirectory: File? = null
@@ -72,33 +73,52 @@ object MediaPreviewLoader {
         }
 
     suspend fun loadVideoFrame(path: String, modified: Long, maxDimension: Int): PreviewResult {
-        // Servers without Range support (python -m http.server) would have to send most of the
-        // video before a frame decodes, so remote videos keep their placeholder icon.
-        if (MediaPaths.isRemote(path)) return PreviewResult()
         return loadCached("video:$path:$modified:$maxDimension", maxDimension) {
-            runCatching {
-                val retriever = MediaMetadataRetriever()
-                try {
-                    retriever.setDataSource(path)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                        retriever.getScaledFrameAtTime(
-                            0L,
-                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
-                            maxDimension,
-                            maxDimension,
-                        )
-                    } else {
-                        retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                            ?.scaledToFit(maxDimension)
+            videoThumbnailSemaphore.withPermit {
+                if (MediaPaths.isRemote(path)) return@withPermit loadRemoteVideoFrame(path, maxDimension)
+                runCatching {
+                    val retriever = MediaMetadataRetriever()
+                    try {
+                        retriever.setDataSource(path)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                            retriever.getScaledFrameAtTime(
+                                0L,
+                                MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                                maxDimension,
+                                maxDimension,
+                            )
+                        } else {
+                            retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                                ?.scaledToFit(maxDimension)
+                        }
+                    } finally {
+                        retriever.release()
                     }
-                } finally {
-                    retriever.release()
-                }
-            }.fold(
-                onSuccess = { PreviewResult(bitmap = it) },
-                onFailure = { PreviewResult(error = it.readableMessage("Unable to read video preview")) },
-            )
+                }.fold(
+                    onSuccess = { PreviewResult(bitmap = it) },
+                    onFailure = { PreviewResult(error = it.readableMessage("Unable to read video preview")) },
+                )
+            }
         }
+    }
+
+    private suspend fun loadRemoteVideoFrame(path: String, maxDimension: Int): PreviewResult = try {
+        val data = HttpDirectoryClient.videoPreview(path)
+        if (data == null) {
+            PreviewResult()
+        } else {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+            require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Unsupported or damaged video preview" }
+            val options = BitmapFactory.Options().apply { inSampleSize = bounds.sampleSize(maxDimension) }
+            val bitmap = BitmapFactory.decodeByteArray(data, 0, data.size, options)
+                ?: error("Video preview decoder returned no bitmap")
+            PreviewResult(bitmap = bitmap.scaledToFit(maxDimension))
+        }
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        PreviewResult(error = error.readableMessage("Unable to read video preview"))
     }
 
     suspend fun loadDirectoryThumbnail(path: String, modified: Long, maxDimension: Int): PreviewResult =
