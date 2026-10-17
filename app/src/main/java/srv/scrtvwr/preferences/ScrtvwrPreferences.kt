@@ -5,6 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import srv.scrtvwr.media.MediaPaths
 import srv.scrtvwr.media.remote.HttpServer
+import srv.scrtvwr.media.remote.HttpServerConnections
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
 import srv.scrtvwr.ui.media.VideoCompletionAction
@@ -128,6 +129,13 @@ class ScrtvwrPreferences(context: Context) {
             .apply()
     }
 
+    /** Saved servers connected in this process; see [HttpServerConnections]. */
+    fun getConnectedHttpServers(): List<HttpServer> = HttpServerConnections.connected(getHttpServers())
+
+    fun setHttpServerConnected(serverId: String, connected: Boolean) {
+        HttpServerConnections.setConnected(serverId, connected, getHttpServers())
+    }
+
     fun getRecentDirectories(): List<String> =
         getMediaHistory().map(LastMediaSession::directoryPath)
 
@@ -221,7 +229,8 @@ class ScrtvwrPreferences(context: Context) {
                 JSONObject()
                     .put("id", server.id)
                     .put("name", server.name)
-                    .put("url", server.baseUrl),
+                    .put("url", server.baseUrl)
+                    .put("autoReconnect", server.autoReconnect),
             )
         }
         return json.toString()
@@ -236,6 +245,7 @@ class ScrtvwrPreferences(context: Context) {
                         id = server.optString("id"),
                         name = server.optString("name"),
                         baseUrl = server.optString("url"),
+                        autoReconnect = server.optBoolean("autoReconnect", false),
                     )
                 }
             }.filterNotNull().filter { it.id.isNotBlank() && it.baseUrl.isNotBlank() }
