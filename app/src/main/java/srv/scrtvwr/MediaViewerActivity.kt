@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FirstPage
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.ImageNotSupported
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
@@ -114,6 +115,7 @@ import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.remote.DownloadProgress
 import srv.scrtvwr.media.PreviewResult
 import srv.scrtvwr.ui.components.BookmarkFlash
+import srv.scrtvwr.ui.components.copyLink
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.MediaViewerItem
 import srv.scrtvwr.ui.media.MediaViewerSource
@@ -218,6 +220,7 @@ private fun MediaViewerScreen(
         pageCount = { uiState.pageCount.coerceAtLeast(1) },
     )
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
     var menuExpanded by rememberSaveable { mutableStateOf(false) }
     var slideShowDialogVisible by rememberSaveable { mutableStateOf(false) }
     var sortDialogVisible by rememberSaveable { mutableStateOf(false) }
@@ -443,6 +446,16 @@ private fun MediaViewerScreen(
                                         menuExpanded = false
                                     },
                                 )
+                                MediaPaths.link(selectedItem?.path)?.let { link ->
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.copy_link)) },
+                                        leadingIcon = { Icon(Icons.Default.Link, contentDescription = null) },
+                                        onClick = {
+                                            context.copyLink(link)
+                                            menuExpanded = false
+                                        },
+                                    )
+                                }
                             }
                         }
                     },

@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Pause
@@ -122,6 +123,7 @@ import srv.scrtvwr.media.remote.RemoteVideoPlayback
 import srv.scrtvwr.ui.components.BookmarkFlash
 import srv.scrtvwr.ui.components.TapeTransportButton
 import srv.scrtvwr.ui.components.VideoSideGestures
+import srv.scrtvwr.ui.components.copyLink
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.media.MediaCatalog
 import srv.scrtvwr.media.MediaPaths
@@ -747,6 +749,7 @@ private fun BoxScope.VideoControls(
     onMoveToFirst: () -> Unit,
     onMoveToLast: () -> Unit,
 ) {
+    val context = LocalContext.current
     // Whether the tape transport interrupted playback, so releasing it can pick up where it left off.
     var resumeAfterSpool by remember { mutableStateOf(false) }
 
@@ -816,6 +819,7 @@ private fun BoxScope.VideoControls(
                 onMoveToFirst = onMoveToFirst,
                 canMoveToLast = pageCount > 0 && page != pageCount - 1,
                 onMoveToLast = onMoveToLast,
+                onCopyLink = MediaPaths.link(item.path)?.let { link -> { context.copyLink(link) } },
             )
         }
     }
@@ -1006,6 +1010,7 @@ private fun PlayerOptionsRow(
     onMoveToFirst: () -> Unit,
     canMoveToLast: Boolean,
     onMoveToLast: () -> Unit,
+    onCopyLink: (() -> Unit)?,
 ) {
     Row(
         modifier = Modifier
@@ -1056,6 +1061,14 @@ private fun PlayerOptionsRow(
             onClick = onMoveToLast,
             contentDescription = stringResource(R.string.move_last_item),
         )
+        onCopyLink?.let {
+            PlayerOption(
+                icon = Icons.Default.Link,
+                label = stringResource(R.string.copy_link),
+                active = false,
+                onClick = it,
+            )
+        }
     }
 }
 
