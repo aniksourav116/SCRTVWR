@@ -21,18 +21,24 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SdStorage
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Usb
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ElevatedCard
@@ -77,6 +83,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -88,6 +95,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import srv.scrtvwr.media.remote.HttpCredentials
 import srv.scrtvwr.media.remote.HttpServer
 import srv.scrtvwr.media.remote.Ipv4ServerAddress
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HttpServerDevice
@@ -208,8 +216,8 @@ fun Storage(
                 requestLocalNetworkAccess()
             }
         },
-        onAddHttpServer = { name, address ->
-            viewModel.addHttpServer(name, address).also { error ->
+        onAddHttpServer = { name, address, credentials ->
+            viewModel.addHttpServer(name, address, credentials).also { error ->
                 if (error == null && !context.hasLocalNetworkAccess()) requestLocalNetworkAccess()
             }
         },
@@ -220,6 +228,7 @@ fun Storage(
         },
         onDisconnectHttpServer = viewModel::disconnectHttpServer,
         onHttpServerAutoReconnectChange = viewModel::setHttpServerAutoReconnect,
+        onHttpServerCredentialsChange = viewModel::setHttpServerCredentials,
         hasLocalNetworkAccess = hasLocalNetworkAccess,
         onGrantLocalNetworkAccess = requestLocalNetworkAccess,
         onOpenAppSettings = {
@@ -239,11 +248,13 @@ fun StorageScreen(
     hasStorageAccess: Boolean = true,
     onGrantStorageAccess: () -> Unit = {},
     onOpenHttpServer: (HttpServer) -> Unit = {},
-    onAddHttpServer: (name: String, address: String) -> HttpServerInputError? = { _, _ -> null },
+    onAddHttpServer: (name: String, address: String, credentials: HttpCredentials?) -> HttpServerInputError? =
+        { _, _, _ -> null },
     onRemoveHttpServer: (HttpServer) -> Unit = {},
     onConnectHttpServer: (HttpServer) -> Unit = {},
     onDisconnectHttpServer: (HttpServer) -> Unit = {},
     onHttpServerAutoReconnectChange: (HttpServer, Boolean) -> Unit = { _, _ -> },
+    onHttpServerCredentialsChange: (HttpServer, HttpCredentials?) -> Unit = { _, _ -> },
     hasLocalNetworkAccess: Boolean = true,
     onGrantLocalNetworkAccess: () -> Unit = {},
     onOpenAppSettings: () -> Unit = {},
@@ -251,6 +262,7 @@ fun StorageScreen(
 ) {
     var showAddServerDialog by remember { mutableStateOf(false) }
     var serverPendingRemoval by remember { mutableStateOf<HttpServer?>(null) }
+    var serverSigningIn by remember { mutableStateOf<HttpServer?>(null) }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -325,6 +337,7 @@ fun StorageScreen(
                 device = device,
                 onClick = { onOpenHttpServer(device.server) },
                 onRemove = { serverPendingRemoval = device.server },
+                onSignIn = { serverSigningIn = device.server },
                 onConnect = { onConnectHttpServer(device.server) },
                 onDisconnect = { onDisconnectHttpServer(device.server) },
                 onAutoReconnectChange = { enabled -> onHttpServerAutoReconnectChange(device.server, enabled) },
@@ -348,10 +361,21 @@ fun StorageScreen(
     if (showAddServerDialog) {
         AddHttpServerDialog(
             onDismiss = { showAddServerDialog = false },
-            onAdd = { name, address ->
-                onAddHttpServer(name, address).also { error ->
+            onAdd = { name, address, credentials ->
+                onAddHttpServer(name, address, credentials).also { error ->
                     if (error == null) showAddServerDialog = false
                 }
+            },
+        )
+    }
+
+    serverSigningIn?.let { server ->
+        HttpServerSignInDialog(
+            server = server,
+            onDismiss = { serverSigningIn = null },
+            onSave = { credentials ->
+                onHttpServerCredentialsChange(server, credentials)
+                serverSigningIn = null
             },
         )
     }
@@ -420,6 +444,7 @@ private fun HttpServerCard(
     device: HttpServerDevice,
     onClick: () -> Unit,
     onRemove: () -> Unit,
+    onSignIn: () -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onAutoReconnectChange: (Boolean) -> Unit,
@@ -452,6 +477,9 @@ private fun HttpServerCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                }
+                IconButton(onClick = onSignIn) {
+                    Icon(Icons.Default.Key, contentDescription = stringResource(R.string.http_server_sign_in_details))
                 }
                 IconButton(onClick = onRemove) {
                     Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.remove_http_server))
@@ -490,6 +518,23 @@ private fun HttpServerCard(
                     stringResource(R.string.http_server_local_network_blocked),
                     color = MaterialTheme.colorScheme.error,
                 )
+                HttpServerStatus.AuthenticationFailed -> Row(
+                    modifier = Modifier.padding(end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(
+                            if (device.server.credentials == null) {
+                                R.string.http_server_sign_in_required
+                            } else {
+                                R.string.http_server_sign_in_failed
+                            },
+                        ),
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = onSignIn) { Text(stringResource(R.string.http_server_sign_in)) }
+                }
             }
             Row(
                 modifier = Modifier.padding(end = 4.dp),
@@ -538,16 +583,22 @@ private fun HttpServerCard(
 @Composable
 private fun AddHttpServerDialog(
     onDismiss: () -> Unit,
-    onAdd: (name: String, address: String) -> HttpServerInputError?,
+    onAdd: (name: String, address: String, credentials: HttpCredentials?) -> HttpServerInputError?,
 ) {
     var name by remember { mutableStateOf("") }
     var splitInput by remember { mutableStateOf(true) }
     var splitAddress by remember { mutableStateOf(Ipv4ServerAddress.Default) }
     var address by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<HttpServerInputError?>(null) }
     val submit = {
         val input = if (splitInput) splitAddress.toAddress() else address
-        error = if (input == null) HttpServerInputError.InvalidAddress else onAdd(name, input)
+        error = if (input == null) {
+            HttpServerInputError.InvalidAddress
+        } else {
+            onAdd(name, input, HttpCredentials.of(username, password))
+        }
     }
     val canSubmit = if (splitInput) {
         splitAddress.octets.none(String::isBlank) && splitAddress.port.isNotBlank()
@@ -559,7 +610,11 @@ private fun AddHttpServerDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.add_http_server)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Scrolls once the sign-in fields no longer fit, such as with the keyboard open.
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     SegmentedButton(
                         selected = splitInput,
@@ -615,8 +670,15 @@ private fun AddHttpServerDialog(
                     onValueChange = { name = it },
                     label = { Text(stringResource(R.string.http_server_name)) },
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                     modifier = Modifier.fillMaxWidth(),
+                )
+                HttpCredentialsFields(
+                    username = username,
+                    onUsernameChange = { username = it },
+                    password = password,
+                    onPasswordChange = { password = it },
+                    onDone = { if (canSubmit) submit() },
                 )
                 HttpServerHelp()
             }
@@ -631,6 +693,92 @@ private fun AddHttpServerDialog(
                 Text(stringResource(R.string.cancel))
             }
         },
+    )
+}
+
+/** Changes the username and password sent to [server]; clearing both makes it an open server again. */
+@Composable
+private fun HttpServerSignInDialog(
+    server: HttpServer,
+    onDismiss: () -> Unit,
+    onSave: (HttpCredentials?) -> Unit,
+) {
+    var username by remember { mutableStateOf(server.credentials?.username.orEmpty()) }
+    var password by remember { mutableStateOf(server.credentials?.password.orEmpty()) }
+    val save = { onSave(HttpCredentials.of(username, password)) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.http_server_sign_in_title, server.name)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                HttpCredentialsFields(
+                    username = username,
+                    onUsernameChange = { username = it },
+                    password = password,
+                    onPasswordChange = { password = it },
+                    onDone = save,
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = save) {
+                Text(stringResource(R.string.save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
+/** Username and password for a server that asks for them; both stay empty for an open server. */
+@Composable
+private fun HttpCredentialsFields(
+    username: String,
+    onUsernameChange: (String) -> Unit,
+    password: String,
+    onPasswordChange: (String) -> Unit,
+    onDone: () -> Unit,
+) {
+    var showPassword by remember { mutableStateOf(false) }
+    OutlinedTextField(
+        value = username,
+        onValueChange = onUsernameChange,
+        label = { Text(stringResource(R.string.http_server_username)) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(
+            autoCorrectEnabled = false,
+            keyboardType = KeyboardType.Ascii,
+            imeAction = ImeAction.Next,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = password,
+        onValueChange = onPasswordChange,
+        label = { Text(stringResource(R.string.http_server_password)) },
+        supportingText = { Text(stringResource(R.string.http_server_credentials_help)) },
+        singleLine = true,
+        visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = {
+            IconButton(onClick = { showPassword = !showPassword }) {
+                Icon(
+                    if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                    contentDescription = stringResource(
+                        if (showPassword) R.string.http_server_hide_password else R.string.http_server_show_password,
+                    ),
+                )
+            }
+        },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { onDone() }),
+        modifier = Modifier.fillMaxWidth(),
     )
 }
 
@@ -873,6 +1021,14 @@ fun StorageScreenPreview() {
                             baseUrl = "http://192.168.1.20:8000/",
                         ),
                         status = HttpServerStatus.Online(itemCount = 12),
+                    ),
+                    HttpServerDevice(
+                        server = HttpServer(
+                            id = "nas",
+                            name = "NAS",
+                            baseUrl = "http://192.168.1.30:8000/",
+                        ),
+                        status = HttpServerStatus.AuthenticationFailed,
                     ),
                 ),
                 lastChecked = "Oct 27, 2023 10:00 AM"

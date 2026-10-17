@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import srv.scrtvwr.R
+import srv.scrtvwr.media.remote.HttpAuthenticationException
+import srv.scrtvwr.media.remote.HttpCredentials
 import srv.scrtvwr.media.remote.HttpDirectoryClient
 import srv.scrtvwr.media.remote.HttpServer
 import srv.scrtvwr.media.remote.RemotePaths
@@ -80,7 +82,7 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /** Saves a new server, or returns why [address] cannot be added. */
-    fun addHttpServer(name: String, address: String): HttpServerInputError? {
+    fun addHttpServer(name: String, address: String, credentials: HttpCredentials?): HttpServerInputError? {
         val baseUrl = RemotePaths.normalizeServerUrl(address) ?: return HttpServerInputError.InvalidAddress
         val servers = preferences.getHttpServers()
         if (servers.any { it.baseUrl == baseUrl }) return HttpServerInputError.AlreadyAdded
@@ -89,6 +91,7 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
             id = UUID.randomUUID().toString(),
             name = name.trim().ifBlank { RemotePaths.name(baseUrl) },
             baseUrl = baseUrl,
+            credentials = credentials,
         )
         preferences.saveHttpServers(servers + server)
         // A server is added to be used, so it starts connected.
@@ -132,6 +135,25 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
         if (enabled && device?.status is HttpServerStatus.Offline) checkHttpServer(device.server)
     }
 
+    /** Saves [credentials], or none for an open server, and checks a connected server again with them. */
+    fun setHttpServerCredentials(server: HttpServer, credentials: HttpCredentials?) {
+        preferences.saveHttpServers(
+            preferences.getHttpServers().map { if (it.id == server.id) it.copy(credentials = credentials) else it },
+        )
+        val updated = server.copy(credentials = credentials)
+        _uiState.update { state ->
+            state.copy(
+                httpServers = state.httpServers.map { device ->
+                    if (device.server.id == server.id) device.copy(server = updated) else device
+                },
+            )
+        }
+        if (_uiState.value.httpServers.firstOrNull { it.server.id == server.id }?.isConnected == true) {
+            updateServerStatus(server.id, HttpServerStatus.Checking)
+            checkHttpServer(updated)
+        }
+    }
+
     /**
      * Lists the server's root, so its card can say whether it is reachable. A server with auto
      * reconnect that turns out offline is tried again, waiting twice as long after each failure.
@@ -142,6 +164,9 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
             val status = withContext(Dispatchers.IO) {
                 try {
                     HttpServerStatus.Online(itemCount = HttpDirectoryClient.list(server.baseUrl, refresh = true).size)
+                } catch (_: HttpAuthenticationException) {
+                    // Not retried: the same credentials would fail again until the user changes them.
+                    HttpServerStatus.AuthenticationFailed
                 } catch (error: IOException) {
                     // Without local network access Android drops LAN connections, which
                     // only surfaces as a timeout, so name the actual cause instead.
@@ -205,6 +230,9 @@ sealed interface HttpServerStatus {
     data class Offline(val reason: String?) : HttpServerStatus
 
     data object LocalNetworkBlocked : HttpServerStatus
+
+    /** The server wants a username and password, and none or the wrong ones are saved. */
+    data object AuthenticationFailed : HttpServerStatus
 }
 
 enum class HttpServerInputError {
