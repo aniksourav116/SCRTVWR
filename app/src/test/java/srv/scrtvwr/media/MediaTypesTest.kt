@@ -30,6 +30,15 @@ class MediaTypesTest {
     }
 
     @Test
+    fun isComicBook_recognizesOnlyCbzAndCbrFiles() {
+        assertTrue(MediaTypes.isComicBook("/Comics/Issue 001.CBZ"))
+        assertTrue(MediaTypes.isComicBook("http://host:8000/Comics/Issue%20002.cbr"))
+        assertFalse(MediaTypes.isComicBook("/Comics/Issue 003.zip"))
+        assertFalse(MediaTypes.isComicBook("/Comics/Issue 004.rar"))
+        assertFalse(MediaTypes.isComicBook("/Comics/Issue 001.cbz::Pages/001.jpg"))
+    }
+
+    @Test
     fun archiveFormat_readsArchiveUrlsAndTheirEntries() {
         assertEquals(MediaTypes.ArchiveFormat.Zip, MediaTypes.archiveFormat("http://host:8000/Comics/Issue%20001.CBZ"))
         assertEquals(

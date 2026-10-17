@@ -8,6 +8,7 @@ package srv.scrtvwr.media
 object MediaTypes {
     private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif")
     private val VIDEO_EXTENSIONS = setOf("mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v")
+    private val COMIC_BOOK_EXTENSIONS = setOf("cbz", "cbr")
 
     enum class ArchiveFormat {
         Zip,
@@ -19,6 +20,9 @@ object MediaTypes {
     fun isVideo(path: String): Boolean = extensionOf(path) in VIDEO_EXTENSIONS
 
     fun isArchive(path: String): Boolean = archiveFormat(path) != null
+
+    /** Whether [path] is a comic book archive, whose first page makes a fitting cover thumbnail. */
+    fun isComicBook(path: String): Boolean = extensionOf(path) in COMIC_BOOK_EXTENSIONS
 
     /** Format of the archive [path] is, or points into when it is an archive entry path. */
     fun archiveFormat(path: String): ArchiveFormat? = when (extensionOf(MediaPaths.archivePath(path))) {
