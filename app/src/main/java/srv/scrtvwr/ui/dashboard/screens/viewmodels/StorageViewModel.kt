@@ -9,10 +9,12 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import srv.scrtvwr.R
 import srv.scrtvwr.media.remote.HttpDirectoryClient
 import srv.scrtvwr.media.remote.HttpServer
@@ -31,7 +33,8 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
         StorageUiState(lastChecked = application.getString(R.string.last_checked_not_yet)),
     )
     val uiState = _uiState.asStateFlow()
-    private var serverCheckJob: Job? = null
+    /** Running check, or wait before the next reconnect attempt, for each connected server. */
+    private val serverChecks = mutableMapOf<String, Job>()
 
     init {
         refresh()
@@ -60,12 +63,20 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
             )
         }.distinctBy(StorageDevice::id)
 
+        val connectedIds = preferences.getConnectedHttpServers().mapTo(mutableSetOf(), HttpServer::id)
         _uiState.value = StorageUiState(
             devices = volumes,
-            httpServers = preferences.getHttpServers().map(::HttpServerDevice),
+            httpServers = preferences.getHttpServers().map { server ->
+                HttpServerDevice(
+                    server = server,
+                    status = if (server.id in connectedIds) HttpServerStatus.Checking else HttpServerStatus.Disconnected,
+                )
+            },
             lastChecked = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date()),
         )
-        checkHttpServers()
+        serverChecks.values.forEach { it.cancel() }
+        serverChecks.clear()
+        _uiState.value.httpServers.filter(HttpServerDevice::isConnected).forEach { checkHttpServer(it.server) }
     }
 
     /** Saves a new server, or returns why [address] cannot be added. */
@@ -80,43 +91,92 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
             baseUrl = baseUrl,
         )
         preferences.saveHttpServers(servers + server)
+        // A server is added to be used, so it starts connected.
+        preferences.setHttpServerConnected(server.id, connected = true)
         refresh()
         return null
     }
 
     fun removeHttpServer(server: HttpServer) {
+        serverChecks.remove(server.id)?.cancel()
+        preferences.setHttpServerConnected(server.id, connected = false)
         preferences.saveHttpServers(preferences.getHttpServers().filterNot { it.id == server.id })
         _uiState.update { state -> state.copy(httpServers = state.httpServers.filterNot { it.server.id == server.id }) }
     }
 
-    /** Lists each server's root once, so its card can say whether it is reachable. */
-    private fun checkHttpServers() {
-        serverCheckJob?.cancel()
-        val servers = _uiState.value.httpServers.map(HttpServerDevice::server)
-        serverCheckJob = viewModelScope.launch {
-            servers.forEach { server ->
-                launch(Dispatchers.IO) {
-                    val status = try {
-                        HttpServerStatus.Online(itemCount = HttpDirectoryClient.list(server.baseUrl, refresh = true).size)
-                    } catch (error: IOException) {
-                        // Without local network access Android drops LAN connections, which
-                        // only surfaces as a timeout, so name the actual cause instead.
-                        if (getApplication<Application>().hasLocalNetworkAccess()) {
-                            HttpServerStatus.Offline(reason = error.message)
-                        } else {
-                            HttpServerStatus.LocalNetworkBlocked
-                        }
-                    }
-                    _uiState.update { state ->
-                        state.copy(
-                            httpServers = state.httpServers.map { device ->
-                                if (device.server.id == server.id) device.copy(status = status) else device
-                            },
-                        )
+    fun connectHttpServer(server: HttpServer) {
+        preferences.setHttpServerConnected(server.id, connected = true)
+        updateServerStatus(server.id, HttpServerStatus.Checking)
+        checkHttpServer(server)
+    }
+
+    fun disconnectHttpServer(server: HttpServer) {
+        serverChecks.remove(server.id)?.cancel()
+        preferences.setHttpServerConnected(server.id, connected = false)
+        updateServerStatus(server.id, HttpServerStatus.Disconnected)
+    }
+
+    fun setHttpServerAutoReconnect(server: HttpServer, enabled: Boolean) {
+        preferences.saveHttpServers(
+            preferences.getHttpServers().map { if (it.id == server.id) it.copy(autoReconnect = enabled) else it },
+        )
+        _uiState.update { state ->
+            state.copy(
+                httpServers = state.httpServers.map { device ->
+                    if (device.server.id == server.id) device.copy(server = device.server.copy(autoReconnect = enabled)) else device
+                },
+            )
+        }
+        // Turning it on for a server that is already down starts the retries straight away.
+        val device = _uiState.value.httpServers.firstOrNull { it.server.id == server.id }
+        if (enabled && device?.status is HttpServerStatus.Offline) checkHttpServer(device.server)
+    }
+
+    /**
+     * Lists the server's root, so its card can say whether it is reachable. A server with auto
+     * reconnect that turns out offline is tried again, waiting twice as long after each failure.
+     */
+    private fun checkHttpServer(server: HttpServer, retryDelayMillis: Long = FIRST_RECONNECT_DELAY_MILLIS) {
+        serverChecks.remove(server.id)?.cancel()
+        serverChecks[server.id] = viewModelScope.launch {
+            val status = withContext(Dispatchers.IO) {
+                try {
+                    HttpServerStatus.Online(itemCount = HttpDirectoryClient.list(server.baseUrl, refresh = true).size)
+                } catch (error: IOException) {
+                    // Without local network access Android drops LAN connections, which
+                    // only surfaces as a timeout, so name the actual cause instead.
+                    if (getApplication<Application>().hasLocalNetworkAccess()) {
+                        HttpServerStatus.Offline(reason = error.message)
+                    } else {
+                        HttpServerStatus.LocalNetworkBlocked
                     }
                 }
             }
+            updateServerStatus(server.id, status)
+
+            if (status !is HttpServerStatus.Offline) return@launch
+            delay(retryDelayMillis)
+            // Read the server again: auto reconnect may have been turned off while waiting.
+            val current = _uiState.value.httpServers.firstOrNull { it.server.id == server.id }
+            if (current?.server?.autoReconnect == true && current.isConnected) {
+                checkHttpServer(current.server, (retryDelayMillis * 2).coerceAtMost(MAX_RECONNECT_DELAY_MILLIS))
+            }
         }
+    }
+
+    private fun updateServerStatus(serverId: String, status: HttpServerStatus) {
+        _uiState.update { state ->
+            state.copy(
+                httpServers = state.httpServers.map { device ->
+                    if (device.server.id == serverId) device.copy(status = status) else device
+                },
+            )
+        }
+    }
+
+    private companion object {
+        const val FIRST_RECONNECT_DELAY_MILLIS = 10_000L
+        const val MAX_RECONNECT_DELAY_MILLIS = 5 * 60_000L
     }
 }
 
@@ -129,9 +189,15 @@ data class StorageUiState(
 data class HttpServerDevice(
     val server: HttpServer,
     val status: HttpServerStatus = HttpServerStatus.Checking,
-)
+) {
+    val isConnected: Boolean
+        get() = status != HttpServerStatus.Disconnected
+}
 
 sealed interface HttpServerStatus {
+    /** Saved but not in use: never checked or browsed until connected again. */
+    data object Disconnected : HttpServerStatus
+
     data object Checking : HttpServerStatus
 
     data class Online(val itemCount: Int) : HttpServerStatus

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -26,6 +27,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SdStorage
 import androidx.compose.material.icons.filled.Storage
@@ -43,6 +46,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -210,6 +214,12 @@ fun Storage(
             }
         },
         onRemoveHttpServer = viewModel::removeHttpServer,
+        onConnectHttpServer = { server ->
+            viewModel.connectHttpServer(server)
+            if (!context.hasLocalNetworkAccess()) requestLocalNetworkAccess()
+        },
+        onDisconnectHttpServer = viewModel::disconnectHttpServer,
+        onHttpServerAutoReconnectChange = viewModel::setHttpServerAutoReconnect,
         hasLocalNetworkAccess = hasLocalNetworkAccess,
         onGrantLocalNetworkAccess = requestLocalNetworkAccess,
         onOpenAppSettings = {
@@ -231,6 +241,9 @@ fun StorageScreen(
     onOpenHttpServer: (HttpServer) -> Unit = {},
     onAddHttpServer: (name: String, address: String) -> HttpServerInputError? = { _, _ -> null },
     onRemoveHttpServer: (HttpServer) -> Unit = {},
+    onConnectHttpServer: (HttpServer) -> Unit = {},
+    onDisconnectHttpServer: (HttpServer) -> Unit = {},
+    onHttpServerAutoReconnectChange: (HttpServer, Boolean) -> Unit = { _, _ -> },
     hasLocalNetworkAccess: Boolean = true,
     onGrantLocalNetworkAccess: () -> Unit = {},
     onOpenAppSettings: () -> Unit = {},
@@ -312,6 +325,9 @@ fun StorageScreen(
                 device = device,
                 onClick = { onOpenHttpServer(device.server) },
                 onRemove = { serverPendingRemoval = device.server },
+                onConnect = { onConnectHttpServer(device.server) },
+                onDisconnect = { onDisconnectHttpServer(device.server) },
+                onAutoReconnectChange = { enabled -> onHttpServerAutoReconnectChange(device.server, enabled) },
             )
         }
 
@@ -404,11 +420,15 @@ private fun HttpServerCard(
     device: HttpServerDevice,
     onClick: () -> Unit,
     onRemove: () -> Unit,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onAutoReconnectChange: (Boolean) -> Unit,
 ) {
     ElevatedCard(
         Modifier
             .fillMaxWidth()
-            .clickable(role = Role.Button, onClick = onClick),
+            // A disconnected server is not browsed until it is connected again.
+            .clickable(enabled = device.isConnected, role = Role.Button, onClick = onClick),
     ) {
         Column(
             Modifier.padding(start = 20.dp, top = 12.dp, end = 8.dp, bottom = 20.dp),
@@ -438,6 +458,10 @@ private fun HttpServerCard(
                 }
             }
             when (val status = device.status) {
+                HttpServerStatus.Disconnected -> Text(
+                    stringResource(R.string.http_server_disconnected),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 HttpServerStatus.Checking -> {
                     Text(
                         stringResource(R.string.http_server_checking),
@@ -448,21 +472,65 @@ private fun HttpServerCard(
                 is HttpServerStatus.Online -> Text(
                     pluralStringResource(R.plurals.http_server_online, status.itemCount, status.itemCount),
                 )
-                is HttpServerStatus.Offline -> Text(
-                    status.reason?.let { stringResource(R.string.http_server_offline, it) }
-                        ?: stringResource(R.string.http_server_offline_unknown),
-                    color = MaterialTheme.colorScheme.error,
-                )
+                is HttpServerStatus.Offline -> {
+                    Text(
+                        status.reason?.let { stringResource(R.string.http_server_offline, it) }
+                            ?: stringResource(R.string.http_server_offline_unknown),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    if (device.server.autoReconnect) {
+                        Text(
+                            stringResource(R.string.http_server_reconnecting),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
                 HttpServerStatus.LocalNetworkBlocked -> Text(
                     stringResource(R.string.http_server_local_network_blocked),
                     color = MaterialTheme.colorScheme.error,
                 )
             }
-            Text(
-                stringResource(R.string.tap_open_directory),
-                color = MaterialTheme.colorScheme.primary,
-                style = MaterialTheme.typography.labelLarge,
-            )
+            Row(
+                modifier = Modifier.padding(end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.http_server_auto_reconnect))
+                    Text(
+                        stringResource(R.string.http_server_auto_reconnect_summary),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(
+                    checked = device.server.autoReconnect,
+                    onCheckedChange = onAutoReconnectChange,
+                )
+            }
+            Row(
+                modifier = Modifier.padding(end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (device.isConnected) {
+                    Text(
+                        stringResource(R.string.tap_open_directory),
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedButton(onClick = onDisconnect) {
+                        Icon(Icons.Default.LinkOff, contentDescription = null)
+                        Text(stringResource(R.string.disconnect), Modifier.padding(start = 8.dp))
+                    }
+                } else {
+                    Spacer(Modifier.weight(1f))
+                    Button(onClick = onConnect) {
+                        Icon(Icons.Default.Link, contentDescription = null)
+                        Text(stringResource(R.string.connect), Modifier.padding(start = 8.dp))
+                    }
+                }
+            }
         }
     }
 }

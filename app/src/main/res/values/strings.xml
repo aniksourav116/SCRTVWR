@@ -132,6 +132,12 @@
     <string name="http_server_offline">Unreachable: %1$s</string>
     <string name="http_server_offline_unknown">Unreachable</string>
     <string name="remove_http_server">Remove server</string>
+    <string name="connect">Connect</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="http_server_disconnected">Disconnected</string>
+    <string name="http_server_auto_reconnect">Auto reconnect</string>
+    <string name="http_server_auto_reconnect_summary">Connect when the app starts and retry if the server goes offline.</string>
+    <string name="http_server_reconnecting">Retrying automatically…</string>
     <string name="remove_http_server_title">Remove server?</string>
     <string name="remove_http_server_message">Remove \"%1$s\" from storage devices? Files on the server are not affected.</string>
     <string name="http_listing_failed">Unable to load this folder from the server: %1$s</string>
