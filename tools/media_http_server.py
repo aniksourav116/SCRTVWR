@@ -168,8 +168,10 @@ class MediaRequestHandler(SimpleHTTPRequestHandler):
                 remaining -= len(block)
 
 
-def read_password(path):
-    """Password from the first line of the file at path, else from the environment, else None."""
+def read_password(password, path):
+    """The password given directly, else from the file at path, else from the environment, else None."""
+    if password is not None:
+        return password
     if path:
         # utf-8-sig drops the byte order mark Windows editors may add.
         with open(path, encoding="utf-8-sig") as file:
@@ -182,19 +184,27 @@ def main():
     parser.add_argument("port", nargs="?", type=int, default=8000)
     parser.add_argument("--bind", default="0.0.0.0")
     parser.add_argument("--directory", default=".")
-    parser.add_argument(
+    # Without any password option or the environment variable, anyone can connect.
+    password_source = parser.add_mutually_exclusive_group()
+    password_source.add_argument(
+        "--password",
+        help="require HTTP Basic auth with this password. Other users of the computer can see "
+        "command lines, so --password-file or the environment variable hides it better.",
+    )
+    password_source.add_argument(
         "--password-file",
         help="require HTTP Basic auth with the password on this file's first line; "
-        f"{PASSWORD_ENVIRONMENT_VARIABLE} sets it too. Without either, anyone can connect.",
+        f"{PASSWORD_ENVIRONMENT_VARIABLE} sets it too",
     )
     parser.add_argument("--user", help="username to require with the password; any username works without it")
     args = parser.parse_args()
-    # Not a command-line value, which other users of the computer could see in the process list.
-    password = read_password(args.password_file)
+    password = read_password(args.password, args.password_file)
+    if args.password is not None and not password:
+        parser.error("--password cannot be empty")
     if args.password_file and not password:
         parser.error(f"{args.password_file} has no password on its first line")
     if args.user and not password:
-        parser.error(f"--user needs a password from --password-file or {PASSWORD_ENVIRONMENT_VARIABLE}")
+        parser.error(f"--user needs a password from --password, --password-file or {PASSWORD_ENVIRONMENT_VARIABLE}")
     credentials = BasicCredentials(password, args.user) if password else None
     handler = partial(MediaRequestHandler, directory=os.path.abspath(args.directory), credentials=credentials)
     with ThreadingHTTPServer((args.bind, args.port), handler) as server:

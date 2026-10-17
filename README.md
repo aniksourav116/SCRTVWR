@@ -14,10 +14,17 @@ python tools/media_http_server.py 8000 --bind 0.0.0.0 --directory "D:\Media"
 Replace `D:\Media` with the folder you want to browse. Stop any other server using port 8000
 first. Add `http://<PC-LAN-IP>:8000/` as an HTTP server in SCRTVWR.
 
-To require a password, put it on the first line of a file and pass `--password-file`, or set
-`MEDIA_HTTP_PASSWORD` instead. Browsers then ask for a username and password; enter the same
-ones in SCRTVWR when adding the server, or tap the key on its card later. Any username works
-unless you also pass `--user`.
+To require a password, pass it with `--password`. Browsers then ask for a username and
+password; enter the same ones in SCRTVWR when adding the server, or tap the key on its card
+later. Any username works unless you also pass `--user`.
+
+```powershell
+python tools/media_http_server.py 8000 --bind 0.0.0.0 --directory "D:\Media" --password "your-password"
+```
+
+Other users of the PC can see command lines, and PowerShell keeps them in its history. To keep
+the password out of both, put it on the first line of a file and pass `--password-file` instead,
+or set `MEDIA_HTTP_PASSWORD`.
 
 ```powershell
 python tools/media_http_server.py 8000 --bind 0.0.0.0 --directory "D:\Media" --password-file "$HOME\media-password.txt"
