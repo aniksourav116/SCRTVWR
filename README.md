@@ -14,6 +14,18 @@ python tools/media_http_server.py 8000 --bind 0.0.0.0 --directory "D:\Media"
 Replace `D:\Media` with the folder you want to browse. Stop any other server using port 8000
 first. Add `http://<PC-LAN-IP>:8000/` as an HTTP server in SCRTVWR.
 
+To require a password, put it on the first line of a file and pass `--password-file`, or set
+`MEDIA_HTTP_PASSWORD` instead. Browsers then ask for a username and password; enter the same
+ones in SCRTVWR when adding the server, or tap the key on its card later. Any username works
+unless you also pass `--user`.
+
+```powershell
+python tools/media_http_server.py 8000 --bind 0.0.0.0 --directory "D:\Media" --password-file "$HOME\media-password.txt"
+```
+
+This is HTTP Basic auth over plain HTTP, so the password is not encrypted on the network. It
+keeps out casual visitors on a trusted home network, not someone watching its traffic.
+
 This server uses Python's standard library and supports byte ranges (`206 Partial Content`),
 so the video player can seek without downloading everything before the requested position.
 Expected connection resets when the player seeks or stops do not print a traceback.
