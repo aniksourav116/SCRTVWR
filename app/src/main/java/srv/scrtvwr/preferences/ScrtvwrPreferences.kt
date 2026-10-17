@@ -4,7 +4,9 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 import srv.scrtvwr.media.MediaPaths
+import srv.scrtvwr.media.remote.HttpCredentials
 import srv.scrtvwr.media.remote.HttpServer
+import srv.scrtvwr.media.remote.HttpServerAuth
 import srv.scrtvwr.media.remote.HttpServerConnections
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
@@ -127,6 +129,7 @@ class ScrtvwrPreferences(context: Context) {
         preferences.edit()
             .putString(KEY_HTTP_SERVERS, encodeHttpServers(servers))
             .apply()
+        HttpServerAuth.update(servers)
     }
 
     /** Saved servers connected in this process; see [HttpServerConnections]. */
@@ -230,7 +233,14 @@ class ScrtvwrPreferences(context: Context) {
                     .put("id", server.id)
                     .put("name", server.name)
                     .put("url", server.baseUrl)
-                    .put("autoReconnect", server.autoReconnect),
+                    .put("autoReconnect", server.autoReconnect)
+                    .apply {
+                        server.credentials?.let { credentials ->
+                            put("username", credentials.username)
+                            // Only the Keystore-encrypted form of the password is written.
+                            KeystoreSecrets.encrypt(credentials.password)?.let { put("password", it) }
+                        }
+                    },
             )
         }
         return json.toString()
@@ -246,6 +256,18 @@ class ScrtvwrPreferences(context: Context) {
                         name = server.optString("name"),
                         baseUrl = server.optString("url"),
                         autoReconnect = server.optBoolean("autoReconnect", false),
+                        // A password this device cannot decrypt reads as empty, so the server
+                        // answers 401 and its card asks to sign in again.
+                        credentials = if (server.has("username")) {
+                            HttpCredentials(
+                                username = server.optString("username"),
+                                password = server.optString("password").takeIf(String::isNotEmpty)
+                                    ?.let(KeystoreSecrets::decrypt)
+                                    .orEmpty(),
+                            )
+                        } else {
+                            null
+                        },
                     )
                 }
             }.filterNotNull().filter { it.id.isNotBlank() && it.baseUrl.isNotBlank() }
