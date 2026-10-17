@@ -55,7 +55,7 @@ class HistoryViewModel(
             ?.let { value -> HistoryFilter.entries.firstOrNull { it.name == value } }
             ?: HistoryFilter.ALL,
     ): HistoryUiState {
-        val servers = preferences.getHttpServers()
+        val servers = preferences.getConnectedHttpServers()
         return HistoryUiState(
             selectedFilter = filter,
             directories = preferences.getMediaHistory().mediaHistoryItems(servers),
@@ -110,7 +110,7 @@ private fun List<srv.scrtvwr.preferences.LastMediaSession>.mediaHistoryItems(
     mapNotNull { session ->
         val mediaPath = session.mediaPath ?: return@mapNotNull null
         if (MediaPaths.isRemote(session.directoryPath)) {
-            // Checking every entry would mean a request per row; keep those on saved servers.
+            // Checking every entry would mean a request per row; keep those on connected servers.
             if (servers.serverFor(session.directoryPath) == null) return@mapNotNull null
             return@mapNotNull HistoryDirectoryItem(
                 name = RemotePaths.name(session.directoryPath),

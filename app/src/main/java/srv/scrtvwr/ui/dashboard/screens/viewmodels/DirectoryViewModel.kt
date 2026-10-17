@@ -66,8 +66,8 @@ class DirectoryViewModel(
             showHiddenFiles = preferences.getShowHiddenFiles(),
             showDirectoryFileActions = preferences.getShowDirectoryFileActions(),
             canNavigateUp = initialDirectory.isDifferentDirectory(initialRoot),
-            recentDirectories = preferences.getRecentDirectories().validDirectories(preferences.getHttpServers()),
-            lastMediaSession = preferences.getLastMediaSession()?.takeIfValid(preferences.getHttpServers()),
+            recentDirectories = preferences.getRecentDirectories().validDirectories(preferences.getConnectedHttpServers()),
+            lastMediaSession = preferences.getLastMediaSession()?.takeIfValid(preferences.getConnectedHttpServers()),
             isLoading = true,
         ),
     )
@@ -111,7 +111,9 @@ class DirectoryViewModel(
 
     fun openDirectoryPath(path: String) {
         val directory = if (MediaPaths.isRemote(path)) {
-            // A server that is offline still opens; its listing explains why nothing loaded.
+            // A server that is offline still opens; its listing explains why nothing loaded. A
+            // disconnected one does not, until it is connected again from the storage screen.
+            if (preferences.getConnectedHttpServers().serverFor(path) == null) return
             RemotePaths.directoryUrl(path)
         } else {
             File(path).takeIf { it.exists() && it.isDirectory }?.absolutePath ?: return
@@ -174,7 +176,12 @@ class DirectoryViewModel(
      * of HTTP server listings, for an explicit refresh rather than a screen resuming.
      */
     fun refresh(reload: Boolean = false) {
-        val servers = preferences.getHttpServers()
+        val servers = preferences.getConnectedHttpServers()
+        val currentPath = _uiState.value.currentPath
+        if (MediaPaths.isRemote(currentPath) && servers.serverFor(currentPath) == null) {
+            // The server was disconnected or removed while this screen was away.
+            openDirectoryPath(defaultRootDirectory.absolutePath)
+        }
         _uiState.update {
             it.copy(
                 showHiddenFiles = preferences.getShowHiddenFiles(),
@@ -275,10 +282,10 @@ class DirectoryViewModel(
         preferences.saveLastDirectory(directory)
     }
 
-    /** Whether a remembered directory can be reopened: a local folder, or a folder on a saved server. */
+    /** Whether a remembered directory can be reopened: a local folder, or a folder on a connected server. */
     private fun isOpenableDirectory(path: String): Boolean =
         if (MediaPaths.isRemote(path)) {
-            preferences.getHttpServers().serverFor(path) != null
+            preferences.getConnectedHttpServers().serverFor(path) != null
         } else {
             File(path).let { it.exists() && it.isDirectory }
         }
