@@ -163,7 +163,9 @@ object HttpDirectoryClient {
             connection.connectTimeout = CONNECT_TIMEOUT_MILLIS
             connection.readTimeout = READ_TIMEOUT_MILLIS
             connection.instanceFollowRedirects = true
+            HttpServerAuth.authorizationFor(url)?.let { connection.setRequestProperty("Authorization", it) }
             val status = connection.responseCode
+            if (status == HttpURLConnection.HTTP_UNAUTHORIZED) throw HttpAuthenticationException()
             if (status !in 200..299) {
                 throw IOException("HTTP $status ${connection.responseMessage.orEmpty()}".trim())
             }
@@ -205,3 +207,6 @@ object HttpDirectoryClient {
 
     private class RemoteFileMetadata(val sizeBytes: Long, val lastModifiedMillis: Long)
 }
+
+/** The server answered 401: the username and password saved for it are missing or wrong. */
+class HttpAuthenticationException : IOException("HTTP 401: wrong or missing username and password")

@@ -13,12 +13,15 @@ import kotlin.concurrent.thread
 /**
  * A stand-in for `python -m http.server` on the loopback interface: serves [files] by relative
  * path and lists every folder as an HTML page of links. Like Python's server, it ignores Range
- * headers and closes each connection after one response.
+ * headers and closes each connection after one response. With [requiredAuthorization] set, it
+ * answers 401 to requests without that exact `Authorization` header, like
+ * `tools/media_http_server.py` run with a password.
  */
 class TestHttpServer(
     private val files: Map<String, ByteArray>,
     // Allows tests to exercise large Content-Length values without transferring gigabytes.
     private val declaredFileLength: Long? = null,
+    private val requiredAuthorization: String? = null,
 ) : Closeable {
     private val serverSocket = ServerSocket(0, 50, InetAddress.getLoopbackAddress())
     private val fileRequestCount = AtomicInteger()
@@ -55,13 +58,20 @@ class TestHttpServer(
     private fun respond(client: Socket) {
         val reader = client.getInputStream().bufferedReader(Charsets.ISO_8859_1)
         val requestLine = reader.readLine() ?: return
-        while (!reader.readLine().isNullOrEmpty()) {
-            // Headers are not needed.
+        var authorization: String? = null
+        while (true) {
+            val header = reader.readLine()
+            if (header.isNullOrEmpty()) break
+            if (header.substringBefore(':').equals("Authorization", ignoreCase = true)) {
+                authorization = header.substringAfter(':').trim()
+            }
         }
         val method = requestLine.substringBefore(' ')
         val path = URI(requestLine.substringAfter(' ').substringBefore(' ')).path.removePrefix("/")
         val file = files[path]
         val (status, contentType, body) = when {
+            requiredAuthorization != null && authorization != requiredAuthorization ->
+                Triple("401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"media\"", "text/plain", ByteArray(0))
             path.isEmpty() || path.endsWith("/") ->
                 Triple("200 OK", "text/html; charset=utf-8", listing(path).toByteArray(Charsets.UTF_8))
             file != null -> {
@@ -71,7 +81,7 @@ class TestHttpServer(
             else -> Triple("404 Not Found", "text/plain", ByteArray(0))
         }
         val output = client.getOutputStream()
-        val contentLength = if (file != null) declaredFileLength ?: body.size.toLong() else body.size.toLong()
+        val contentLength = if (body === file) declaredFileLength ?: body.size.toLong() else body.size.toLong()
         val headers = "HTTP/1.0 $status\r\n" +
             "Content-Type: $contentType\r\n" +
             "Content-Length: $contentLength\r\n" +
