@@ -38,6 +38,7 @@ object MediaPreviewLoader {
     private const val MAX_DISK_CACHE_DIMENSION = 256
     private const val DISK_WRITES_PER_TRIM = 32
     private val directoryThumbnailSemaphore = Semaphore(2)
+    private val comicBookCoverSemaphore = Semaphore(2)
     private val remoteImageSemaphore = Semaphore(4)
     private val diskCacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val diskWritesSinceTrim = AtomicInteger()
@@ -115,6 +116,27 @@ object MediaPreviewLoader {
                     file.isFile && MediaTypes.isImage(file.name)
                 } ?: return@withPermit PreviewResult()
                 decodeFile(image.path, maxDimension)
+            }
+        }
+
+    /**
+     * First page of the comic book archive at [path], the one the viewer opens on. A server archive
+     * is only read once the viewer has downloaded it, so a thumbnail never costs a whole archive.
+     */
+    suspend fun loadComicBookCover(path: String, modified: Long, maxDimension: Int): PreviewResult =
+        loadCached("cover:$path:$modified:$maxDimension", maxDimension) {
+            comicBookCoverSemaphore.withPermit {
+                val file = archiveFile(path, download = false) ?: return@withPermit PreviewResult()
+                val pages = try {
+                    MediaCatalog.listArchive(file)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    return@withPermit PreviewResult(error = error.readableMessage("Unable to read archive"))
+                }
+                val entryName = pages.firstOrNull()?.path?.let(MediaPaths::archiveEntryName)
+                    ?: return@withPermit PreviewResult()
+                loadArchiveImage(path, entryName, maxDimension, downloadArchive = false)
             }
         }
 

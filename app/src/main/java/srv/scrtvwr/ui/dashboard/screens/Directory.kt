@@ -1170,6 +1170,8 @@ private fun EntryThumbnail(
             entry.isDirectory -> MediaPreviewLoader.loadDirectoryThumbnail(entry.path, entry.lastModifiedMillis, size * 2)
             entry.mediaType == DirectoryMediaType.Image -> MediaPreviewLoader.loadImage(entry.path, entry.lastModifiedMillis, size * 2)
             entry.mediaType == DirectoryMediaType.Video -> MediaPreviewLoader.loadVideoFrame(entry.path, entry.lastModifiedMillis, size * 2)
+            entry.mediaType == DirectoryMediaType.Archive && MediaTypes.isComicBook(entry.path) ->
+                MediaPreviewLoader.loadComicBookCover(entry.path, entry.lastModifiedMillis, size * 2)
             else -> PreviewResult()
         }
     }
@@ -1211,6 +1213,7 @@ private fun EntryThumbnail(
                     // Videos on HTTP servers have no frame preview.
                     Icons.Default.PlayCircle
                 } else if (entry.mediaType == DirectoryMediaType.Archive) {
+                    // Server comic books have no cover until the viewer has downloaded them.
                     Icons.Default.Archive
                 } else {
                     Icons.AutoMirrored.Filled.InsertDriveFile
