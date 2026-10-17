@@ -9,24 +9,35 @@ import re
 
 
 def parse_byte_range(value, size):
-    """Return inclusive offsets for a single byte range, including suffix ranges."""
-    match = re.fullmatch(r"bytes=(\d*)-(\d*)", value.strip())
-    if not match or size <= 0 or not any(match.groups()):
-        raise ValueError("Invalid byte range")
+    """Return inclusive offsets for a single byte range, including suffix ranges.
+
+    Returns None for a header to ignore: malformed, another unit, or several ranges. HTTP asks
+    servers to answer those with the whole file. Raises ValueError when a valid range misses
+    the file, which calls for 416.
+    """
+    match = re.fullmatch(r"bytes=(\d*)-(\d*)", value.strip(), re.IGNORECASE)
+    if not match or not any(match.groups()):
+        return None
     first, last = match.groups()
+    if first and last and int(last) < int(first):
+        return None
     if not first:
         suffix = int(last)
-        if suffix <= 0:
-            raise ValueError("Empty suffix range")
+        if suffix <= 0 or size <= 0:
+            raise ValueError("Unsatisfiable suffix range")
         return max(0, size - suffix), size - 1
     start = int(first)
-    end = min(int(last), size - 1) if last else size - 1
-    if start >= size or start > end:
+    if start >= size:
         raise ValueError("Unsatisfiable byte range")
+    end = min(int(last), size - 1) if last else size - 1
     return start, end
 
 
 class MediaRequestHandler(SimpleHTTPRequestHandler):
+    # Seconds to wait for a request, so a client that connects and stalls cannot hold a thread
+    # forever. Matches the app's read timeout.
+    timeout = 60
+
     def handle(self):
         try:
             super().handle()
@@ -40,14 +51,14 @@ class MediaRequestHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def send_head(self):
+        # The request has arrived. A paused player stops reading while its buffer is full,
+        # which can block writing the body for minutes, so the response has no time limit.
+        self.connection.settimeout(None)
         self.remaining_bytes = None
         path = self.translate_path(self.path)
         range_header = self.headers.get("Range")
         # Directory listings, redirects, normal GETs, and HEAD keep the standard behavior.
         if self.command != "GET" or not range_header or not os.path.isfile(path):
-            return super().send_head()
-        # Multiple ranges are optional in HTTP. Ignore them and serve the complete file.
-        if "," in range_header:
             return super().send_head()
         try:
             source = open(path, "rb")
@@ -62,7 +73,7 @@ class MediaRequestHandler(SimpleHTTPRequestHandler):
                 source.close()
                 return super().send_head()
             try:
-                start, end = parse_byte_range(range_header, stat.st_size)
+                byte_range = parse_byte_range(range_header, stat.st_size)
             except ValueError:
                 source.close()
                 self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
@@ -70,6 +81,10 @@ class MediaRequestHandler(SimpleHTTPRequestHandler):
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return None
+            if byte_range is None:
+                source.close()
+                return super().send_head()
+            start, end = byte_range
             source.seek(start)
             self.remaining_bytes = end - start + 1
             self.send_response(HTTPStatus.PARTIAL_CONTENT)

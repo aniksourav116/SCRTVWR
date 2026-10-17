@@ -2,8 +2,10 @@ from functools import partial
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+import socket
 import tempfile
 import threading
+import time
 import unittest
 
 from tools.media_http_server import MediaRequestHandler, parse_byte_range
@@ -20,12 +22,19 @@ class ByteRangeTest(unittest.TestCase):
         self.assertEqual((0, 99), parse_byte_range("bytes=-200", 100))
         self.assertEqual((95, 99), parse_byte_range("bytes=95-200", 100))
 
+    def test_unit_is_case_insensitive(self):
+        self.assertEqual((0, 9), parse_byte_range("Bytes=0-9", 100))
+
     def test_unsatisfiable_ranges(self):
-        for value, size in [("bytes=100-", 100), ("bytes=20-10", 100),
-                            ("bytes=-0", 100), ("bytes=-", 100), ("bytes=0-", 0)]:
+        for value, size in [("bytes=100-", 100), ("bytes=-0", 100), ("bytes=0-", 0), ("bytes=-5", 0)]:
             with self.subTest(value=value, size=size):
                 with self.assertRaises(ValueError):
                     parse_byte_range(value, size)
+
+    def test_malformed_ranges_are_ignored(self):
+        for value in ["bytes=20-10", "bytes=-", "bytes=abc", "items=0-5", "bytes=0-1,5-6", "0-5"]:
+            with self.subTest(value=value):
+                self.assertIsNone(parse_byte_range(value, 100))
 
 
 class MediaServerTest(unittest.TestCase):
@@ -85,6 +94,14 @@ class MediaServerTest(unittest.TestCase):
         self.assertEqual(f"bytes */{len(self.payload)}", headers["Content-Range"])
         self.assertEqual(b"", body)
 
+    def test_malformed_range_sends_full_file(self):
+        for value in ["bytes=20-10", "bytes=abc", "bytes=0-1,5-6"]:
+            with self.subTest(value=value):
+                status, headers, body = self.request(headers={"Range": value})
+                self.assertEqual(200, status)
+                self.assertNotIn("Content-Range", headers)
+                self.assertEqual(self.payload, body)
+
     def test_head_ignores_range_and_reports_full_length(self):
         status, headers, body = self.request(method="HEAD", headers={"Range": "bytes=10-20"})
         self.assertEqual(200, status)
@@ -101,6 +118,56 @@ class MediaServerTest(unittest.TestCase):
         status, _, body = self.request(headers={"Range": "bytes=10-20", "If-Range": headers["Last-Modified"]})
         self.assertEqual(206, status)
         self.assertEqual(self.payload[10:21], body)
+
+
+class QuietShortTimeoutHandler(MediaRequestHandler):
+    timeout = 0.2
+
+    def log_message(self, format, *args):
+        pass
+
+
+class TimeoutTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.directory = tempfile.TemporaryDirectory()
+        # Larger than the socket buffers, so sending it blocks while the client is not reading.
+        cls.payload = bytes(range(256)) * (64 * 1024)
+        Path(cls.directory.name, "video.mp4").write_bytes(cls.payload)
+        handler = partial(QuietShortTimeoutHandler, directory=cls.directory.name)
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join()
+        cls.directory.cleanup()
+
+    def connect(self):
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        client.settimeout(10)
+        client.connect(self.server.server_address)
+        return client
+
+    def test_idle_connection_is_closed(self):
+        with self.connect() as client:
+            self.assertEqual(b"", client.recv(1))
+
+    def test_paused_reader_receives_whole_body(self):
+        with self.connect() as client:
+            client.sendall(b"GET /video.mp4 HTTP/1.0\r\nRange: bytes=0-\r\n\r\n")
+            time.sleep(QuietShortTimeoutHandler.timeout * 5)
+            response = bytearray()
+            while block := client.recv(1024 * 1024):
+                response += block
+        head, _, body = bytes(response).partition(b"\r\n\r\n")
+        self.assertTrue(head.startswith(b"HTTP/1.0 206"))
+        self.assertEqual(len(self.payload), len(body))
+        self.assertEqual(self.payload, body)
 
 
 if __name__ == "__main__":
