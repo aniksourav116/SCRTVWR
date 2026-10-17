@@ -106,13 +106,13 @@ object MediaPreviewLoader {
             directoryThumbnailSemaphore.withPermit {
                 if (MediaPaths.isRemote(path)) {
                     val image = runCatching { HttpDirectoryClient.list(path) }.getOrNull()?.firstOrNull { entry ->
-                        !entry.isDirectory && entry.name.substringAfterLast('.', "").lowercase() in IMAGE_EXTENSIONS
+                        !entry.isDirectory && MediaTypes.isImage(entry.name)
                     } ?: return@withPermit PreviewResult()
                     return@withPermit remoteImageSemaphore.withPermit { decodeRemoteImage(image.url, maxDimension) }
                 }
                 val image = File(path).listFiles()?.firstOrNull { file ->
                     coroutineContext.ensureActive()
-                    file.isFile && file.extension.lowercase() in IMAGE_EXTENSIONS
+                    file.isFile && MediaTypes.isImage(file.name)
                 } ?: return@withPermit PreviewResult()
                 decodeFile(image.path, maxDimension)
             }
@@ -268,15 +268,15 @@ object MediaPreviewLoader {
 
     /** Opens [entryName] in [file], a local archive or the cached copy of a server archive. */
     private fun <T> openArchiveEntry(file: File, entryName: String, block: (InputStream) -> T): T {
-        return when (MediaCatalog.archiveFormat(file.path)) {
-            MediaCatalog.ArchiveFormat.Zip -> ZipFile(file).use { zip ->
+        return when (MediaTypes.archiveFormat(file.path)) {
+            MediaTypes.ArchiveFormat.Zip -> ZipFile(file).use { zip ->
                 val entry = zip.getEntry(entryName) ?: error("Archive entry no longer exists")
                 require(entry.size < 0 || entry.size <= MAX_ARCHIVE_ENTRY_BYTES) {
                     "Archive image is larger than the 128 MB safety limit"
                 }
                 zip.getInputStream(entry).use { block(LimitedInputStream(it, MAX_ARCHIVE_ENTRY_BYTES)) }
             }
-            MediaCatalog.ArchiveFormat.Rar -> Archive(file).use { archive ->
+            MediaTypes.ArchiveFormat.Rar -> Archive(file).use { archive ->
                 val header = archive.fileHeaders.firstOrNull { it.fileName == entryName }
                     ?: error("Archive entry no longer exists")
                 require(header.fullUnpackSize <= MAX_ARCHIVE_ENTRY_BYTES) {
@@ -337,6 +337,4 @@ object MediaPreviewLoader {
             trimDiskCache()
         }
     }
-
-    private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif")
 }

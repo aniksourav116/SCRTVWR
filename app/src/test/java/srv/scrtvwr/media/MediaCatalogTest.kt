@@ -2,9 +2,7 @@ package srv.scrtvwr.media
 
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -21,13 +19,6 @@ import java.util.zip.ZipOutputStream
 class MediaCatalogTest {
     @get:Rule
     val temporaryFolder = TemporaryFolder()
-
-    @Test
-    fun isArchive_recognizesRarAndCbrFilesIncludingArchiveEntries() {
-        assertTrue(MediaCatalog.isArchive("/Comics/Issue 001.RAR"))
-        assertTrue(MediaCatalog.isArchive("/Comics/Issue 002.cbr::Pages/001.jpg"))
-        assertFalse(MediaCatalog.isArchive("/Comics/Issue 003.7z"))
-    }
 
     @Test
     fun nextArchive_usesSortOrderAndSkipsArchivesWithoutImages() = runBlocking {

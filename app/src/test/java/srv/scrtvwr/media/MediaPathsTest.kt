@@ -1,7 +1,6 @@
 package srv.scrtvwr.media
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -54,16 +53,5 @@ class MediaPathsTest {
         assertNull(MediaPaths.link("/storage/emulated/0/Photos/a.jpg"))
         assertNull(MediaPaths.link("/Comics/Issue 001.cbr::001.jpg"))
         assertNull(MediaPaths.link(null))
-    }
-
-    @Test
-    fun archiveFormat_readsArchiveUrlsAndTheirEntries() {
-        assertEquals(MediaCatalog.ArchiveFormat.Zip, MediaCatalog.archiveFormat("http://host:8000/Comics/Issue%20001.CBZ"))
-        assertEquals(
-            MediaCatalog.ArchiveFormat.Rar,
-            MediaCatalog.archiveFormat("http://host:8000/Comics/Issue%20002.cbr::Pages/001.jpg"),
-        )
-        assertFalse(MediaCatalog.isArchive("http://host:8000/Comics/"))
-        assertFalse(MediaCatalog.isArchive("http://host:8000/Comics/cover.jpg"))
     }
 }

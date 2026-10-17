@@ -112,6 +112,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import srv.scrtvwr.media.MediaPaths
 import srv.scrtvwr.media.MediaPreviewLoader
+import srv.scrtvwr.media.MediaTypes
 import srv.scrtvwr.media.PreviewResult
 import srv.scrtvwr.MediaViewerActivity
 import srv.scrtvwr.VideoPlayerActivity
@@ -204,7 +205,7 @@ fun Directory(
         onOpenWithOtherApp = { entry -> context.openWithOtherApp(entry) },
         onResumeMedia = {
             uiState.lastMediaSession?.let { session ->
-                val isVideo = session.mediaPath?.substringAfterLast('.', "")?.lowercase() in VIDEO_EXTENSIONS
+                val isVideo = session.mediaPath?.let(MediaTypes::isVideo) == true
                 val activityClass = if (isVideo) VideoPlayerActivity::class.java else MediaViewerActivity::class.java
                 val intent = Intent(context, activityClass).apply {
                         if (isVideo) {
@@ -1405,8 +1406,6 @@ private fun formatBytes(bytes: Long): String {
 
     return "%.1f %s".format(value, units[unitIndex])
 }
-
-private val VIDEO_EXTENSIONS = setOf("mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v")
 
 private const val FILE_PROVIDER_AUTHORITY = "srv.scrtvwr.fileprovider"
 

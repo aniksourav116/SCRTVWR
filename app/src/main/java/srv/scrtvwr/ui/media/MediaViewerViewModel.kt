@@ -16,6 +16,7 @@ import kotlinx.coroutines.launch
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.media.MediaCatalog
 import srv.scrtvwr.media.MediaPaths
+import srv.scrtvwr.media.MediaTypes
 import srv.scrtvwr.media.remote.DownloadProgress
 import srv.scrtvwr.media.remote.RemotePaths
 import srv.scrtvwr.media.remote.serverFor
@@ -73,7 +74,7 @@ class MediaViewerViewModel(
         val sortOrder = preferences.getDirectorySortOrder()
 
         val selectedFile = selectedPath?.let(::File)
-        val isArchive = selectedPath != null && MediaCatalog.isArchive(selectedPath)
+        val isArchive = selectedPath != null && MediaTypes.isArchive(selectedPath)
         val remoteDirectory = directoryPath?.takeIf(MediaPaths::isRemote)?.let(RemotePaths::directoryUrl)
             ?: selectedPath?.takeIf(MediaPaths::isRemote)?.let(RemotePaths::parent)
 

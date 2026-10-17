@@ -17,8 +17,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import srv.scrtvwr.R
-import srv.scrtvwr.media.MediaCatalog
 import srv.scrtvwr.media.MediaPaths
+import srv.scrtvwr.media.MediaTypes
 import srv.scrtvwr.media.remote.HttpDirectoryClient
 import srv.scrtvwr.media.remote.HttpServer
 import srv.scrtvwr.media.remote.RemoteEntry
@@ -746,18 +746,18 @@ private fun File.canonicalPathOrAbsolute(): String =
 private fun File.mediaType(): DirectoryMediaType {
     if (isDirectory) return DirectoryMediaType.Other
 
-    return mediaTypeOf(extension, path)
+    return mediaTypeOf(name)
 }
 
 private fun RemoteEntry.mediaType(): DirectoryMediaType {
     if (isDirectory) return DirectoryMediaType.Other
 
-    return mediaTypeOf(name.substringAfterLast('.', ""), name)
+    return mediaTypeOf(name)
 }
 
-private fun mediaTypeOf(extension: String, path: String): DirectoryMediaType =
-    when (extension.lowercase()) {
-        "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif" -> DirectoryMediaType.Image
-        "mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v" -> DirectoryMediaType.Video
-        else -> if (MediaCatalog.isArchive(path)) DirectoryMediaType.Archive else DirectoryMediaType.Other
-    }
+private fun mediaTypeOf(name: String): DirectoryMediaType = when {
+    MediaTypes.isImage(name) -> DirectoryMediaType.Image
+    MediaTypes.isVideo(name) -> DirectoryMediaType.Video
+    MediaTypes.isArchive(name) -> DirectoryMediaType.Archive
+    else -> DirectoryMediaType.Other
+}

@@ -54,6 +54,7 @@ import srv.scrtvwr.R
 import srv.scrtvwr.MediaViewerActivity
 import srv.scrtvwr.media.MediaPaths
 import srv.scrtvwr.media.MediaPreviewLoader
+import srv.scrtvwr.media.MediaTypes
 import srv.scrtvwr.media.PreviewResult
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HistoryDirectoryItem
 import java.io.File
@@ -178,7 +179,7 @@ private fun HistoryThumbnail(
     // Server files have no local timestamp; their thumbnails are keyed by URL alone.
     val sourceFile = sourcePath?.takeUnless(MediaPaths::isRemote)?.let(::File)
     val sourceModified = sourceFile?.lastModified() ?: 0L
-    val isVideo = sourcePath?.let(MediaPaths::extension) in VIDEO_EXTENSIONS
+    val isVideo = sourcePath?.let(MediaTypes::isVideo) == true
     val preview by produceState<PreviewResult?>(
         initialValue = null,
         key1 = mediaPath,
@@ -217,8 +218,6 @@ private fun HistoryThumbnail(
         }
     }
 }
-
-private val VIDEO_EXTENSIONS = setOf("mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v")
 
 private fun HistoryFilter.labelResource(): Int = when (this) {
     HistoryFilter.ALL -> R.string.all

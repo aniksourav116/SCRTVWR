@@ -127,6 +127,7 @@ import srv.scrtvwr.ui.components.copyLink
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.media.MediaCatalog
 import srv.scrtvwr.media.MediaPaths
+import srv.scrtvwr.media.MediaTypes
 import srv.scrtvwr.media.remote.RemoteDirectoryTree
 import srv.scrtvwr.media.remote.RemotePaths
 import srv.scrtvwr.media.remote.serverFor
@@ -1232,7 +1233,7 @@ private fun loadVideoDirectory(
 private fun File?.listVideos(sortOrder: DirectorySortOrder): List<VideoItem> = this?.listFiles()
         ?.asSequence()
         ?.filter(File::isFile)
-        ?.filter { it.extension.lowercase() in VIDEO_EXTENSIONS }
+        ?.filter { MediaTypes.isVideo(it.name) }
         ?.sortedWith(sortOrder.fileComparator(directoriesFirst = false))
         ?.map { VideoItem(it.name.ifBlank { it.absolutePath }, it.absolutePath) }
         ?.toList()
@@ -1350,7 +1351,7 @@ private fun List<MediaViewerItem>.videos(): List<VideoItem> =
 private fun File.listImages(sortOrder: DirectorySortOrder): List<File> = listFiles()
     ?.asSequence()
     ?.filter(File::isFile)
-    ?.filter { it.extension.lowercase() in IMAGE_EXTENSIONS }
+    ?.filter { MediaTypes.isImage(it.name) }
     ?.sortedWith(sortOrder.fileComparator(directoriesFirst = false))
     ?.toList()
     .orEmpty()
@@ -1396,8 +1397,6 @@ private fun VideoDirectoryDirection.moveStringRes(isArchive: Boolean): Int = whe
 
 private enum class VideoDirectoryType { Video, Image }
 
-private val VIDEO_EXTENSIONS = setOf("mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v")
-private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif")
 private val PLAYBACK_SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 private val PLAYER_OPTION_WIDTH = 76.dp
 private const val SHORT_SEEK_MILLIS = 2_000L

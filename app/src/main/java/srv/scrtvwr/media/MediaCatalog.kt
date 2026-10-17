@@ -23,21 +23,6 @@ import java.util.zip.ZipFile
 object MediaCatalog {
     private const val MAX_ARCHIVE_ITEMS = 5_000
 
-    enum class ArchiveFormat {
-        Zip,
-        Rar,
-    }
-
-    fun isArchive(path: String): Boolean = archiveFormat(path) != null
-
-    fun archiveFormat(path: String): ArchiveFormat? = when (
-        MediaPaths.archivePath(path).substringAfterLast('.', "").lowercase()
-    ) {
-        "zip", "cbz" -> ArchiveFormat.Zip
-        "rar", "cbr" -> ArchiveFormat.Rar
-        else -> null
-    }
-
     suspend fun listDirectory(directory: File, sortOrder: DirectorySortOrder): List<MediaViewerItem> =
         runCatching {
             val context = currentCoroutineContext()
@@ -51,14 +36,14 @@ object MediaCatalog {
                 ?.toList()
         }.getOrNull().orEmpty()
 
-    fun mediaType(extension: String): MediaViewerType? = when (extension.lowercase()) {
-        "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif" -> MediaViewerType.Image
-        "mp4", "mkv", "webm", "3gp", "mov", "avi", "m4v" -> MediaViewerType.Video
+    private fun viewerType(name: String): MediaViewerType? = when {
+        MediaTypes.isImage(name) -> MediaViewerType.Image
+        MediaTypes.isVideo(name) -> MediaViewerType.Video
         else -> null
     }
 
     fun toItem(file: File): MediaViewerItem? {
-        val type = mediaType(file.extension) ?: return null
+        val type = viewerType(file.name) ?: return null
         return MediaViewerItem(
             name = file.name.ifBlank { file.absolutePath },
             path = file.absolutePath,
@@ -91,7 +76,7 @@ object MediaCatalog {
 
     fun toRemoteItem(entry: RemoteEntry): MediaViewerItem? {
         if (entry.isDirectory) return null
-        val type = mediaType(entry.name.substringAfterLast('.', "")) ?: return null
+        val type = viewerType(entry.name) ?: return null
         return MediaViewerItem(
             name = entry.name,
             path = entry.url,
@@ -224,7 +209,7 @@ object MediaCatalog {
             return null
         }
         val archives = entries
-            .filter { !it.isDirectory && isArchive(it.name) }
+            .filter { !it.isDirectory && MediaTypes.isArchive(it.name) }
             .sortedWith(sortOrder.remoteEntryComparator(directoriesFirst = false))
         val index = archives.indexOfFirst { it.url == archiveUrl }
         if (index < 0) return null
@@ -266,7 +251,7 @@ object MediaCatalog {
             ?.listFiles()
             ?.asSequence()
             ?.filter(File::isFile)
-            ?.filter { isArchive(it.path) }
+            ?.filter { MediaTypes.isArchive(it.path) }
             ?.sortedWith(sortOrder.fileComparator(directoriesFirst = false))
             ?.toList()
             .orEmpty()
@@ -303,10 +288,10 @@ object MediaCatalog {
     /** Images in [file], addressed as entries of [archivePath]. */
     private suspend fun readArchive(file: File, archivePath: String, modifiedMillis: Long): List<MediaViewerItem> {
         val context = currentCoroutineContext()
-        return when (archiveFormat(archivePath)) {
-        ArchiveFormat.Zip -> ZipFile(file).use { zip ->
+        return when (MediaTypes.archiveFormat(archivePath)) {
+        MediaTypes.ArchiveFormat.Zip -> ZipFile(file).use { zip ->
             zip.entries().asSequence()
-                .filter { !it.isDirectory && it.name.isImageExtension() }
+                .filter { !it.isDirectory && MediaTypes.isImage(it.name) }
                 .onEach { context.ensureActive() }
                 .take(MAX_ARCHIVE_ITEMS)
                 .map { entry ->
@@ -321,9 +306,9 @@ object MediaCatalog {
                 .sortedBy(MediaViewerItem::name)
                 .toList()
         }
-        ArchiveFormat.Rar -> Archive(file).use { archive ->
+        MediaTypes.ArchiveFormat.Rar -> Archive(file).use { archive ->
             archive.fileHeaders.asSequence()
-                .filter { !it.isDirectory && it.fileName.isImageExtension() }
+                .filter { !it.isDirectory && MediaTypes.isImage(it.fileName) }
                 .onEach { context.ensureActive() }
                 .take(MAX_ARCHIVE_ITEMS)
                 .map { header ->
@@ -341,7 +326,4 @@ object MediaCatalog {
             null -> error("Unsupported archive type")
         }
     }
-
-    private fun String.isImageExtension(): Boolean =
-        substringAfterLast('.', "").lowercase() in setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif")
 }
