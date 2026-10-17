@@ -24,6 +24,9 @@
     <string name="file">File</string>
     <string name="no_app_found_to_open_file">No app found that can open this file.</string>
     <string name="copy">Copy</string>
+    <string name="copy_link">Copy link</string>
+    <string name="link">Link</string>
+    <string name="link_copied">Link copied</string>
     <string name="move">Move</string>
     <string name="delete">Delete</string>
     <string name="paste_here">Paste here</string>

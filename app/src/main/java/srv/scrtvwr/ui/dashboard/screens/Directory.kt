@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
@@ -127,6 +128,7 @@ import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewModel
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewMode
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.PendingDirectoryFileOperation
 import srv.scrtvwr.ui.components.BaseScaffold
+import srv.scrtvwr.ui.components.copyLink
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import kotlinx.coroutines.launch
@@ -224,6 +226,7 @@ fun Directory(
         onPasteFileOperation = viewModel::pastePendingFileOperation,
         onCancelFileOperation = viewModel::cancelFileOperation,
         onClearFileOperationStatus = viewModel::clearFileOperationStatus,
+        onCopyLink = context::copyLink,
         modifier = modifier,
     )
 }
@@ -250,6 +253,7 @@ fun DirectoryScreen(
     onPasteFileOperation: () -> Unit,
     onCancelFileOperation: () -> Unit,
     onClearFileOperationStatus: () -> Unit,
+    onCopyLink: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var moreMenuExpanded by remember { mutableStateOf(false) }
@@ -316,6 +320,7 @@ fun DirectoryScreen(
                     onRefresh = onRefresh,
                     onResumeMedia = onResumeMedia,
                     onOpenRecentDirectory = onOpenRecentDirectory,
+                    onCopyLink = onCopyLink,
                 )
             }
         },
@@ -375,6 +380,7 @@ fun DirectoryScreen(
                 onCopyEntry = onCopyEntry,
                 onMoveEntry = onMoveEntry,
                 onRequestDeleteEntry = { entryPendingDeletion = it },
+                onCopyLink = onCopyLink,
             )
 
             DirectoryViewMode.Grid -> DirectoryGrid(
@@ -389,6 +395,7 @@ fun DirectoryScreen(
                 onCopyEntry = onCopyEntry,
                 onMoveEntry = onMoveEntry,
                 onRequestDeleteEntry = { entryPendingDeletion = it },
+                onCopyLink = onCopyLink,
             )
         }
     }
@@ -441,6 +448,7 @@ private fun DirectoryOptionsMenu(
     onRefresh: () -> Unit,
     onResumeMedia: () -> Unit,
     onOpenRecentDirectory: (String) -> Unit,
+    onCopyLink: (String) -> Unit,
 ) {
     DropdownMenu(
         expanded = expanded,
@@ -454,6 +462,16 @@ private fun DirectoryOptionsMenu(
                 onDismissRequest()
             },
         )
+        MediaPaths.link(uiState.currentPath)?.let { link ->
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.copy_link)) },
+                leadingIcon = { Icon(Icons.Default.Link, contentDescription = null) },
+                onClick = {
+                    onCopyLink(link)
+                    onDismissRequest()
+                },
+            )
+        }
         HorizontalDivider()
         DropdownMenuItem(
             text = { Text(stringResource(R.string.resume)) },
@@ -680,10 +698,13 @@ private fun DeleteEntryDialog(
 @Composable
 private fun DirectoryEntryActionMenu(
     entry: DirectoryEntry,
+    showFileActions: Boolean,
     onCopyEntry: (DirectoryEntry) -> Unit,
     onMoveEntry: (DirectoryEntry) -> Unit,
     onRequestDeleteEntry: (DirectoryEntry) -> Unit,
+    onCopyLink: (String) -> Unit,
 ) {
+    val link = MediaPaths.link(entry.path)
     var expanded by remember { mutableStateOf(false) }
 
     Box {
@@ -703,28 +724,40 @@ private fun DirectoryEntryActionMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
         ) {
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.copy)) },
-                onClick = {
-                    onCopyEntry(entry)
-                    expanded = false
-                },
-            )
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.move)) },
-                onClick = {
-                    onMoveEntry(entry)
-                    expanded = false
-                },
-            )
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.delete)) },
-                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                onClick = {
-                    onRequestDeleteEntry(entry)
-                    expanded = false
-                },
-            )
+            link?.let {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.copy_link)) },
+                    leadingIcon = { Icon(Icons.Default.Link, contentDescription = null) },
+                    onClick = {
+                        onCopyLink(it)
+                        expanded = false
+                    },
+                )
+            }
+            if (showFileActions) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.copy)) },
+                    onClick = {
+                        onCopyEntry(entry)
+                        expanded = false
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.move)) },
+                    onClick = {
+                        onMoveEntry(entry)
+                        expanded = false
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.delete)) },
+                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                    onClick = {
+                        onRequestDeleteEntry(entry)
+                        expanded = false
+                    },
+                )
+            }
         }
     }
 }
@@ -742,6 +775,7 @@ private fun DirectoryList(
     onCopyEntry: (DirectoryEntry) -> Unit,
     onMoveEntry: (DirectoryEntry) -> Unit,
     onRequestDeleteEntry: (DirectoryEntry) -> Unit,
+    onCopyLink: (String) -> Unit,
 ) {
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
@@ -806,13 +840,15 @@ private fun DirectoryList(
                             else -> onOpenWithOtherApp(entry)
                         }
                     },
-                    actions = if (showFileActions) {
+                    actions = if (showFileActions || MediaPaths.link(entry.path) != null) {
                         {
                             DirectoryEntryActionMenu(
                                 entry = entry,
+                                showFileActions = showFileActions,
                                 onCopyEntry = onCopyEntry,
                                 onMoveEntry = onMoveEntry,
                                 onRequestDeleteEntry = onRequestDeleteEntry,
+                                onCopyLink = onCopyLink,
                             )
                         }
                     } else {
@@ -898,6 +934,7 @@ private fun DirectoryGrid(
     onCopyEntry: (DirectoryEntry) -> Unit,
     onMoveEntry: (DirectoryEntry) -> Unit,
     onRequestDeleteEntry: (DirectoryEntry) -> Unit,
+    onCopyLink: (String) -> Unit,
 ) {
     val gridState = rememberLazyGridState()
     val coroutineScope = rememberCoroutineScope()
@@ -987,13 +1024,15 @@ private fun DirectoryGrid(
                             else -> onOpenWithOtherApp(entry)
                         }
                     },
-                    actions = if (showFileActions) {
+                    actions = if (showFileActions || MediaPaths.link(entry.path) != null) {
                         {
                             DirectoryEntryActionMenu(
                                 entry = entry,
+                                showFileActions = showFileActions,
                                 onCopyEntry = onCopyEntry,
                                 onMoveEntry = onMoveEntry,
                                 onRequestDeleteEntry = onRequestDeleteEntry,
+                                onCopyLink = onCopyLink,
                             )
                         }
                     } else {
@@ -1448,6 +1487,7 @@ fun DirectoryScreenPreview() {
             onPasteFileOperation = {},
             onCancelFileOperation = {},
             onClearFileOperationStatus = {},
+            onCopyLink = {},
         )
     }
 }
