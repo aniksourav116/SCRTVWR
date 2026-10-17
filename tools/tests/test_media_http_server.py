@@ -1,3 +1,4 @@
+import base64
 from functools import partial
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
@@ -8,7 +9,7 @@ import threading
 import time
 import unittest
 
-from tools.media_http_server import MediaRequestHandler, parse_byte_range
+from tools.media_http_server import BasicCredentials, MediaRequestHandler, parse_byte_range
 
 
 class ByteRangeTest(unittest.TestCase):
@@ -118,6 +119,89 @@ class MediaServerTest(unittest.TestCase):
         status, _, body = self.request(headers={"Range": "bytes=10-20", "If-Range": headers["Last-Modified"]})
         self.assertEqual(206, status)
         self.assertEqual(self.payload[10:21], body)
+
+
+class AuthenticationTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.directory = tempfile.TemporaryDirectory()
+        cls.payload = bytes(range(256)) * 4
+        Path(cls.directory.name, "video.mp4").write_bytes(cls.payload)
+        cls.servers = []
+
+    @classmethod
+    def tearDownClass(cls):
+        for server, thread in cls.servers:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+        cls.directory.cleanup()
+
+    def start(self, credentials):
+        handler = partial(QuietHandler, directory=self.directory.name, credentials=credentials)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.servers.append((server, thread))
+        return server.server_address
+
+    def request(self, address, method="GET", path="/video.mp4", headers=None):
+        connection = HTTPConnection(*address, timeout=5)
+        try:
+            connection.request(method, path, headers=headers or {})
+            response = connection.getresponse()
+            return response.status, dict(response.getheaders()), response.read()
+        finally:
+            connection.close()
+
+    @staticmethod
+    def basic(username, password):
+        return {"Authorization": "Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()}
+
+    def test_missing_credentials_get_a_browser_challenge(self):
+        address = self.start(BasicCredentials("secret"))
+        for method in ["GET", "HEAD"]:
+            with self.subTest(method=method):
+                status, headers, body = self.request(address, method=method)
+                self.assertEqual(401, status)
+                self.assertTrue(headers["WWW-Authenticate"].startswith("Basic "))
+                self.assertNotIn(self.payload, body)
+        status, _, _ = self.request(address, path="/")
+        self.assertEqual(401, status)
+
+    def test_any_username_with_the_password_is_accepted(self):
+        address = self.start(BasicCredentials("pässword"))
+        status, _, body = self.request(address, headers=self.basic("anyone", "pässword"))
+        self.assertEqual(200, status)
+        self.assertEqual(self.payload, body)
+        status, headers, body = self.request(address, headers={**self.basic("", "pässword"), "Range": "bytes=0-9"})
+        self.assertEqual(206, status)
+        self.assertEqual(self.payload[:10], body)
+
+    def test_wrong_or_malformed_credentials_are_rejected(self):
+        address = self.start(BasicCredentials("secret", username="media"))
+        for headers in [
+            self.basic("media", "wrong"),
+            self.basic("other", "secret"),
+            {"Authorization": "Bearer secret"},
+            {"Authorization": "Basic not-base64!"},
+            {"Authorization": "Basic " + base64.b64encode(b"no-separator").decode()},
+        ]:
+            with self.subTest(headers=headers):
+                status, _, _ = self.request(address, headers=headers)
+                self.assertEqual(401, status)
+        status, _, _ = self.request(address, headers=self.basic("media", "secret"))
+        self.assertEqual(200, status)
+
+    def test_password_containing_a_colon(self):
+        address = self.start(BasicCredentials("a:b"))
+        status, _, _ = self.request(address, headers=self.basic("user", "a:b"))
+        self.assertEqual(200, status)
+
+
+class QuietHandler(MediaRequestHandler):
+    def log_message(self, format, *args):
+        pass
 
 
 class QuietShortTimeoutHandler(MediaRequestHandler):
