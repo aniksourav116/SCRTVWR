@@ -116,6 +116,12 @@
     <string name="http_server_address_placeholder" translatable="false">192.168.1.20:8000</string>
     <string name="http_server_address_help">The computer\'s local IP address and the server\'s port.</string>
     <string name="http_server_name">Name (optional)</string>
+    <string name="http_server_input_split">IP and port</string>
+    <string name="http_server_input_address">Address</string>
+    <string name="http_server_octet">IP address part %1$d</string>
+    <string name="http_server_port">Port</string>
+    <string name="http_server_port_placeholder" translatable="false">8000</string>
+    <string name="http_server_invalid_ip_port">Each IP address part must be 0 to 255, and the port 1 to 65535.</string>
     <string name="http_server_invalid_address">Enter an http:// or https:// address with a host name or IPv4 address.</string>
     <string name="http_server_already_added">This server has already been added.</string>
     <string name="http_server_checking">Checking connection…</string>

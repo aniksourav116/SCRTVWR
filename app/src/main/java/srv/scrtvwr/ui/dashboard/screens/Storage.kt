@@ -10,14 +10,17 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -36,6 +39,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -48,7 +55,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
@@ -56,6 +73,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -66,6 +85,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import srv.scrtvwr.media.remote.HttpServer
+import srv.scrtvwr.media.remote.Ipv4ServerAddress
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HttpServerDevice
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HttpServerInputError
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HttpServerStatus
@@ -453,37 +473,75 @@ private fun AddHttpServerDialog(
     onAdd: (name: String, address: String) -> HttpServerInputError?,
 ) {
     var name by remember { mutableStateOf("") }
+    var splitInput by remember { mutableStateOf(true) }
+    var splitAddress by remember { mutableStateOf(Ipv4ServerAddress.Default) }
     var address by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<HttpServerInputError?>(null) }
-    val submit = { error = onAdd(name, address) }
+    val submit = {
+        val input = if (splitInput) splitAddress.toAddress() else address
+        error = if (input == null) HttpServerInputError.InvalidAddress else onAdd(name, input)
+    }
+    val canSubmit = if (splitInput) {
+        splitAddress.octets.none(String::isBlank) && splitAddress.port.isNotBlank()
+    } else {
+        address.isNotBlank()
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.add_http_server)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = address,
-                    onValueChange = {
-                        address = it
-                        error = null
-                    },
-                    label = { Text(stringResource(R.string.http_server_address)) },
-                    placeholder = { Text(stringResource(R.string.http_server_address_placeholder)) },
-                    supportingText = {
-                        Text(
-                            when (error) {
-                                HttpServerInputError.InvalidAddress -> stringResource(R.string.http_server_invalid_address)
-                                HttpServerInputError.AlreadyAdded -> stringResource(R.string.http_server_already_added)
-                                null -> stringResource(R.string.http_server_address_help)
-                            },
-                        )
-                    },
-                    isError = error != null,
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    SegmentedButton(
+                        selected = splitInput,
+                        onClick = {
+                            // Carry what was typed over, so switching never loses an address.
+                            Ipv4ServerAddress.parse(address)?.let { splitAddress = it }
+                            splitInput = true
+                            error = null
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                    ) {
+                        Text(stringResource(R.string.http_server_input_split))
+                    }
+                    SegmentedButton(
+                        selected = !splitInput,
+                        onClick = {
+                            splitAddress.toAddress()?.let { address = it }
+                            splitInput = false
+                            error = null
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                    ) {
+                        Text(stringResource(R.string.http_server_input_address))
+                    }
+                }
+                if (splitInput) {
+                    SplitServerAddressField(
+                        value = splitAddress,
+                        onValueChange = {
+                            splitAddress = it
+                            error = null
+                        },
+                        error = error,
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = address,
+                        onValueChange = {
+                            address = it
+                            error = null
+                        },
+                        label = { Text(stringResource(R.string.http_server_address)) },
+                        placeholder = { Text(stringResource(R.string.http_server_address_placeholder)) },
+                        supportingText = { Text(error.message(splitInput = false)) },
+                        isError = error != null,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -496,7 +554,7 @@ private fun AddHttpServerDialog(
             }
         },
         confirmButton = {
-            Button(onClick = submit, enabled = address.isNotBlank()) {
+            Button(onClick = submit, enabled = canSubmit) {
                 Text(stringResource(R.string.add))
             }
         },
@@ -507,6 +565,146 @@ private fun AddHttpServerDialog(
         },
     )
 }
+
+/**
+ * Four octet boxes and a port box. Focus moves on by itself once an octet has three digits or a
+ * `.` is typed, back again on backspace in an empty box, and pasting a whole address into an
+ * octet box fills every box.
+ */
+@Composable
+private fun SplitServerAddressField(
+    value: Ipv4ServerAddress,
+    onValueChange: (Ipv4ServerAddress) -> Unit,
+    error: HttpServerInputError?,
+) {
+    val portIndex = Ipv4ServerAddress.OCTET_COUNT
+    val focusRequesters = remember { List(portIndex + 1) { FocusRequester() } }
+    val isError = error != null
+    val messageColor = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            stringResource(R.string.http_server_address),
+            style = MaterialTheme.typography.labelLarge,
+            color = messageColor,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            value.octets.forEachIndexed { index, octet ->
+                AddressPartField(
+                    value = octet,
+                    onValueChange = { input ->
+                        val pasted = Ipv4ServerAddress.parse(input)
+                        if (pasted != null) {
+                            onValueChange(pasted.copy(port = pasted.port.ifEmpty { value.port }))
+                            focusRequesters[portIndex].requestFocus()
+                        } else {
+                            val digits = input.filter(Char::isDigit).take(3)
+                            onValueChange(value.copy(octets = value.octets.toMutableList().apply { set(index, digits) }))
+                            val typedSeparator = input.endsWith('.') || input.endsWith(':')
+                            if (typedSeparator || (digits.length == 3 && digits.length > octet.length)) {
+                                focusRequesters[index + 1].requestFocus()
+                            }
+                        }
+                    },
+                    onBackspaceWhenEmpty = { if (index > 0) focusRequesters[index - 1].requestFocus() },
+                    isError = isError,
+                    keyboardType = KeyboardType.Decimal,
+                    contentDescription = stringResource(R.string.http_server_octet, index + 1),
+                    modifier = Modifier.weight(1f).focusRequester(focusRequesters[index]),
+                )
+                Text(
+                    if (index < portIndex - 1) "." else ":",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 2.dp),
+                )
+            }
+            AddressPartField(
+                value = value.port,
+                onValueChange = { input -> onValueChange(value.copy(port = input.filter(Char::isDigit).take(5))) },
+                onBackspaceWhenEmpty = { focusRequesters[portIndex - 1].requestFocus() },
+                isError = isError,
+                keyboardType = KeyboardType.Number,
+                contentDescription = stringResource(R.string.http_server_port),
+                placeholder = stringResource(R.string.http_server_port_placeholder),
+                modifier = Modifier.weight(1.4f).focusRequester(focusRequesters[portIndex]),
+            )
+        }
+        Text(
+            error.message(splitInput = true),
+            style = MaterialTheme.typography.bodySmall,
+            color = messageColor,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+    }
+}
+
+/**
+ * Outlined box narrow enough for five to share a dialog row; [OutlinedTextField] pads its text
+ * too widely for that.
+ */
+@Composable
+private fun AddressPartField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    onBackspaceWhenEmpty: () -> Unit,
+    isError: Boolean,
+    keyboardType: KeyboardType,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    placeholder: String? = null,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val colors = OutlinedTextFieldDefaults.colors()
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyLarge.copy(
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center,
+        ),
+        cursorBrush = SolidColor(if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary),
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = ImeAction.Next),
+        interactionSource = interactionSource,
+        modifier = modifier
+            .semantics { this.contentDescription = contentDescription }
+            .onPreviewKeyEvent { event ->
+                val isBackspace = event.type == KeyEventType.KeyDown && event.key == Key.Backspace
+                if (isBackspace && value.isEmpty()) {
+                    onBackspaceWhenEmpty()
+                    true
+                } else {
+                    false
+                }
+            },
+        decorationBox = { innerTextField ->
+            OutlinedTextFieldDefaults.DecorationBox(
+                value = value,
+                innerTextField = innerTextField,
+                enabled = true,
+                singleLine = true,
+                visualTransformation = VisualTransformation.None,
+                interactionSource = interactionSource,
+                isError = isError,
+                placeholder = placeholder?.let { text ->
+                    { Text(text, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }
+                },
+                colors = colors,
+                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 14.dp),
+            )
+        },
+    )
+}
+
+@Composable
+private fun HttpServerInputError?.message(splitInput: Boolean): String = stringResource(
+    when (this) {
+        HttpServerInputError.InvalidAddress ->
+            if (splitInput) R.string.http_server_invalid_ip_port else R.string.http_server_invalid_address
+        HttpServerInputError.AlreadyAdded -> R.string.http_server_already_added
+        null -> R.string.http_server_address_help
+    },
+)
 
 private fun android.content.Context.hasRequiredStorageAccess(): Boolean =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
