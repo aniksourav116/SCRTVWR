@@ -88,7 +88,9 @@ class RemoteArchiveCacheTest {
             }.exceptionOrNull()
 
             assertEquals(declaredLength, reportedLength ?: -1L)
-            assertEquals(stoppedByCaller, error)
+            // With assertions on, kotlinx.coroutines recovers stack traces by rethrowing a copy of
+            // an exception that crosses withContext, keeping the original as its cause.
+            assertTrue(error === stoppedByCaller || error?.cause === stoppedByCaller)
             assertNull(RemoteArchiveCache.cachedFile(url))
             assertTrue(File(cacheDirectory, "remote_archives").list().orEmpty().isEmpty())
         }
