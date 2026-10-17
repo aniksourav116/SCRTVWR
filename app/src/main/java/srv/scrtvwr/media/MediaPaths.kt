@@ -26,6 +26,12 @@ object MediaPaths {
     fun archiveEntryPath(archivePath: String, entryName: String): String =
         "$archivePath$ARCHIVE_ENTRY_SEPARATOR$entryName"
 
+    /**
+     * URL another device can open [path] from, or null for local media. An archive entry has no URL
+     * of its own, so it links to its archive.
+     */
+    fun link(path: String?): String? = path?.let(::archivePath)?.takeIf(::isRemote)
+
     /** Directory holding [path]: an absolute local path, or a directory URL ending with `/`. */
     fun parent(path: String): String? =
         if (isRemote(path)) RemotePaths.parent(path) else File(path).parentFile?.absolutePath

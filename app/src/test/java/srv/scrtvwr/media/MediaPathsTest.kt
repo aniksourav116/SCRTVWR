@@ -44,6 +44,19 @@ class MediaPathsTest {
     }
 
     @Test
+    fun link_coversServerPathsOnly() {
+        assertEquals("http://host:8000/Photos/", MediaPaths.link("http://host:8000/Photos/"))
+        assertEquals("http://host:8000/Photos/a%20b.jpg", MediaPaths.link("http://host:8000/Photos/a%20b.jpg"))
+        assertEquals(
+            "http://host:8000/Comics/Issue%20001.cbz",
+            MediaPaths.link("http://host:8000/Comics/Issue%20001.cbz::Pages/001.jpg"),
+        )
+        assertNull(MediaPaths.link("/storage/emulated/0/Photos/a.jpg"))
+        assertNull(MediaPaths.link("/Comics/Issue 001.cbr::001.jpg"))
+        assertNull(MediaPaths.link(null))
+    }
+
+    @Test
     fun archiveFormat_readsArchiveUrlsAndTheirEntries() {
         assertEquals(MediaCatalog.ArchiveFormat.Zip, MediaCatalog.archiveFormat("http://host:8000/Comics/Issue%20001.CBZ"))
         assertEquals(
