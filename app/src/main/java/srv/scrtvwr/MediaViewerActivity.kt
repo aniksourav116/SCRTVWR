@@ -669,7 +669,8 @@ private fun MediaViewerScreen(
                     when {
                         item != null -> MediaPage(
                             item = item,
-                            fillFrame = uiState.fillFrame,
+                            // Fill only applies in full screen; with the slider showing, show the whole image.
+                            fillFrame = uiState.fillFrame && uiState.isChromeHidden,
                             rotation = uiState.rotation,
                             flipped = uiState.flipped,
                             zoomCommand = zoomCommand,
