@@ -58,13 +58,23 @@ object MediaCatalog {
      * [listDirectory], an unreachable server throws so the viewer can say why nothing loaded.
      */
     @Throws(IOException::class)
-    suspend fun listRemoteDirectory(directoryUrl: String, sortOrder: DirectorySortOrder): List<MediaViewerItem> {
-        // Sizes and times cost a request per file, so only the files the viewer shows ask for them.
-        val media = HttpDirectoryClient.list(directoryUrl).filter { toRemoteItem(it) != null }
-        val entries = if (sortOrder.needsFileMetadata) HttpDirectoryClient.withMetadata(media) else media
-        return entries
+    suspend fun listRemoteDirectory(directoryUrl: String, sortOrder: DirectorySortOrder): List<MediaViewerItem> =
+        listRemoteEntries(directoryUrl, sortOrder) { toRemoteItem(it) != null }
             .sortedWith(sortOrder.remoteEntryComparator(directoriesFirst = false))
             .mapNotNull(::toRemoteItem)
+
+    /**
+     * Entries of [directoryUrl] that [include] keeps, with sizes and times only when [sortOrder]
+     * needs them. Those cost a request per file, so only the kept entries ask for them.
+     */
+    @Throws(IOException::class)
+    private suspend fun listRemoteEntries(
+        directoryUrl: String,
+        sortOrder: DirectorySortOrder,
+        include: (RemoteEntry) -> Boolean,
+    ): List<RemoteEntry> {
+        val entries = HttpDirectoryClient.list(directoryUrl).filter(include)
+        return if (sortOrder.needsFileMetadata) HttpDirectoryClient.withMetadata(entries) else entries
     }
 
     fun toRemoteItem(entry: RemoteEntry): MediaViewerItem? {
@@ -197,13 +207,11 @@ object MediaCatalog {
     ): MediaViewerSource? {
         val directoryUrl = RemotePaths.parent(archiveUrl) ?: return null
         val entries = try {
-            listRemoteEntries(directoryUrl, sortOrder)
+            listRemoteEntries(directoryUrl, sortOrder) { !it.isDirectory && MediaTypes.isArchive(it.name) }
         } catch (_: IOException) {
             return null
         }
-        val archives = entries
-            .filter { !it.isDirectory && MediaTypes.isArchive(it.name) }
-            .sortedWith(sortOrder.remoteEntryComparator(directoriesFirst = false))
+        val archives = entries.sortedWith(sortOrder.remoteEntryComparator(directoriesFirst = false))
         val index = archives.indexOfFirst { it.url == archiveUrl }
         if (index < 0) return null
         val candidate = archives.getOrNull(index + step) ?: return null
