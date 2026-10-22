@@ -65,6 +65,7 @@ class DirectoryViewModel(
             sortOrder = preferences.getDirectorySortOrder(),
             showHiddenFiles = preferences.getShowHiddenFiles(),
             showDirectoryFileActions = preferences.getShowDirectoryFileActions(),
+            loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
             canNavigateUp = initialDirectory.isDifferentDirectory(initialRoot),
             recentDirectories = preferences.getRecentDirectories().validDirectories(preferences.getConnectedHttpServers()),
             lastMediaSession = preferences.getLastMediaSession()?.takeIfValid(preferences.getConnectedHttpServers()),
@@ -187,6 +188,7 @@ class DirectoryViewModel(
             it.copy(
                 showHiddenFiles = preferences.getShowHiddenFiles(),
                 showDirectoryFileActions = preferences.getShowDirectoryFileActions(),
+                loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
                 recentDirectories = preferences.getRecentDirectories().validDirectories(servers),
                 lastMediaSession = preferences.getLastMediaSession()?.takeIfValid(servers),
             )
@@ -410,6 +412,8 @@ data class DirectoryUiState(
     val lastMediaSession: LastMediaSession? = null,
     val showHiddenFiles: Boolean = false,
     val showDirectoryFileActions: Boolean = false,
+    /** Whether server videos show their first frame; local videos always do. */
+    val loadVideoThumbnails: Boolean = true,
     val isLoading: Boolean = false,
     /** Server entries are shown by name while the sizes or dates the sort order needs still load. */
     val isSortPending: Boolean = false,

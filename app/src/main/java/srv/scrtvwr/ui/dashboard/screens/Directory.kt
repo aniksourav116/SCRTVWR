@@ -852,7 +852,7 @@ private fun DirectoryList(
                 DirectoryListRow(
                     title = entry.name,
                     subtitle = entry.supportingText(),
-                    thumbnail = { EntryThumbnail(entry, size = 48, style = style) },
+                    thumbnail = { EntryThumbnail(entry, size = 48, style = style, loadVideoFrame = uiState.loadVideoThumbnails) },
                     style = style,
                     onClick = {
                         when {
@@ -1032,6 +1032,7 @@ private fun DirectoryGrid(
                             entry = entry,
                             size = 128,
                             style = style,
+                            loadVideoFrame = uiState.loadVideoThumbnails,
                             showFolderBadge = entry.isDirectory,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1177,21 +1178,25 @@ private fun EntryThumbnail(
     entry: DirectoryEntry,
     size: Int,
     style: EntryVisualStyle,
+    loadVideoFrame: Boolean,
     showFolderBadge: Boolean = false,
     modifier: Modifier = Modifier.size(size.dp),
 ) {
     // A server file's time arrives after its row appears; keying on it would restart the download.
-    val modified = if (MediaPaths.isRemote(entry.path)) 0L else entry.lastModifiedMillis
+    val isRemote = MediaPaths.isRemote(entry.path)
+    val modified = if (isRemote) 0L else entry.lastModifiedMillis
+    // Turning the setting off cancels the server reads of tiles already on screen.
+    val readsVideoFrame = entry.mediaType == DirectoryMediaType.Video && (loadVideoFrame || !isRemote)
     val preview by produceState<PreviewResult?>(
         initialValue = null,
         key1 = entry.path,
         key2 = modified,
-        key3 = entry.isDirectory,
+        key3 = entry.isDirectory to readsVideoFrame,
     ) {
         value = when {
             entry.isDirectory -> MediaPreviewLoader.loadDirectoryThumbnail(entry.path, modified, size * 2)
             entry.mediaType == DirectoryMediaType.Image -> MediaPreviewLoader.loadImage(entry.path, modified, size * 2)
-            entry.mediaType == DirectoryMediaType.Video -> MediaPreviewLoader.loadVideoFrame(entry.path, modified, size * 2)
+            readsVideoFrame -> MediaPreviewLoader.loadVideoFrame(entry.path, modified, size * 2)
             entry.mediaType == DirectoryMediaType.Archive && MediaTypes.isComicBook(entry.path) ->
                 MediaPreviewLoader.loadComicBookCover(entry.path, modified, size * 2)
             else -> PreviewResult()
@@ -1232,7 +1237,7 @@ private fun EntryThumbnail(
                 imageVector = if (entry.isDirectory) {
                     Icons.Default.Folder
                 } else if (entry.mediaType == DirectoryMediaType.Video) {
-                    // Server videos have no frame preview when the server ignores Range requests.
+                    // Server videos have no frame preview when the setting is off or the server ignores Range requests.
                     Icons.Default.PlayCircle
                 } else if (entry.mediaType == DirectoryMediaType.Archive) {
                     // Server comic books have no cover until the viewer has downloaded them.

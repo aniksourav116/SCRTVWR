@@ -63,6 +63,7 @@ class HistoryViewModel(
                 .mapNotNull(String::bookmarkSession)
                 .distinctBy { it.directoryPath }
                 .mediaHistoryItems(servers),
+            loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
         )
     }
 
@@ -75,6 +76,8 @@ data class HistoryUiState(
     val selectedFilter: HistoryFilter = HistoryFilter.ALL,
     val directories: List<HistoryDirectoryItem> = emptyList(),
     val favoriteDirectories: List<HistoryDirectoryItem> = emptyList(),
+    /** Whether server videos show their first frame; local videos always do. */
+    val loadVideoThumbnails: Boolean = true,
 ) {
     val visibleDirectories: List<HistoryDirectoryItem>
         get() = when (selectedFilter) {

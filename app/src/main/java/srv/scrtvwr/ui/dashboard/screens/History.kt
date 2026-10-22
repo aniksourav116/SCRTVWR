@@ -150,7 +150,7 @@ fun HistoryScreen(
                     ListItem(
                         headlineContent = { Text(directory.name) },
                         supportingContent = { Text(directory.path) },
-                        leadingContent = { HistoryThumbnail(directory) },
+                        leadingContent = { HistoryThumbnail(directory, loadVideoFrame = uiState.loadVideoThumbnails) },
                         trailingContent = {
                             IconButton(onClick = { onRemoveDirectory(directory) }) {
                                 Icon(
@@ -172,6 +172,7 @@ fun HistoryScreen(
 @Composable
 private fun HistoryThumbnail(
     item: HistoryDirectoryItem,
+    loadVideoFrame: Boolean,
     modifier: Modifier = Modifier.size(56.dp),
 ) {
     val mediaPath = item.mediaPath
@@ -180,14 +181,16 @@ private fun HistoryThumbnail(
     val sourceFile = sourcePath?.takeUnless(MediaPaths::isRemote)?.let(::File)
     val sourceModified = sourceFile?.lastModified() ?: 0L
     val isVideo = sourcePath?.let(MediaTypes::isVideo) == true
+    val readsVideoFrame = isVideo && (loadVideoFrame || sourceFile != null)
     val preview by produceState<PreviewResult?>(
         initialValue = null,
         key1 = mediaPath,
         key2 = sourceModified,
+        key3 = readsVideoFrame,
     ) {
         value = when {
             mediaPath == null -> PreviewResult()
-            isVideo -> MediaPreviewLoader.loadVideoFrame(mediaPath, sourceModified, 112)
+            isVideo -> if (readsVideoFrame) MediaPreviewLoader.loadVideoFrame(mediaPath, sourceModified, 112) else PreviewResult()
             // A server archive is only read here once the viewer has downloaded it.
             else -> MediaPreviewLoader.loadImage(mediaPath, sourceModified, 112, downloadArchive = false)
         }
