@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Slideshow
+import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
@@ -54,6 +55,7 @@ fun Others(
         uiState = uiState,
         onShowHiddenFilesChange = viewModel::setShowHiddenFiles,
         onShowDirectoryFileActionsChange = viewModel::setShowDirectoryFileActions,
+        onLoadVideoThumbnailsChange = viewModel::setLoadVideoThumbnails,
         onSlideShowStayMillisChange = viewModel::setSlideShowStayMillis,
         onHoldSlideShowEnabledChange = viewModel::setHoldSlideShowEnabled,
         onSlideShowDirectionChange = viewModel::setSlideShowDirection,
@@ -69,6 +71,7 @@ fun OthersScreen(
     uiState: OthersUiState,
     onShowHiddenFilesChange: (Boolean) -> Unit,
     onShowDirectoryFileActionsChange: (Boolean) -> Unit,
+    onLoadVideoThumbnailsChange: (Boolean) -> Unit,
     onSlideShowStayMillisChange: (Long) -> Unit,
     onHoldSlideShowEnabledChange: (Boolean) -> Unit,
     onSlideShowDirectionChange: (SlideShowDirection) -> Unit,
@@ -183,6 +186,20 @@ fun OthersScreen(
                     Switch(
                         checked = uiState.showDirectoryFileActions,
                         onCheckedChange = onShowDirectoryFileActionsChange,
+                    )
+                },
+            )
+        }
+        item {
+            ListItem(
+                modifier = Modifier.fillMaxWidth(),
+                headlineContent = { Text(stringResource(R.string.load_video_thumbnails)) },
+                supportingContent = { Text(stringResource(R.string.load_video_thumbnails_summary)) },
+                leadingContent = { Icon(Icons.Default.VideoLibrary, contentDescription = null) },
+                trailingContent = {
+                    Switch(
+                        checked = uiState.loadVideoThumbnails,
+                        onCheckedChange = onLoadVideoThumbnailsChange,
                     )
                 },
             )
@@ -326,6 +343,7 @@ fun OthersPreview() {
             ),
             onShowHiddenFilesChange = {},
             onShowDirectoryFileActionsChange = {},
+            onLoadVideoThumbnailsChange = {},
             onSlideShowStayMillisChange = {},
             onHoldSlideShowEnabledChange = {},
             onSlideShowDirectionChange = {},

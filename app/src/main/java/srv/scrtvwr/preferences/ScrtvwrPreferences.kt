@@ -97,6 +97,14 @@ class ScrtvwrPreferences(context: Context) {
         preferences.edit().putBoolean(KEY_SHOW_DIRECTORY_FILE_ACTIONS, enabled).apply()
     }
 
+    /** Whether videos on HTTP servers show their first frame; local videos always do. */
+    fun getLoadVideoThumbnails(): Boolean =
+        preferences.getBoolean(KEY_LOAD_VIDEO_THUMBNAILS, true)
+
+    fun saveLoadVideoThumbnails(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_LOAD_VIDEO_THUMBNAILS, enabled).apply()
+    }
+
     fun getBookmarkedMedia(): Set<String> =
         preferences.getStringSet(KEY_BOOKMARKED_MEDIA, emptySet()).orEmpty().toSet()
 
@@ -284,6 +292,7 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_MEDIA_EDGE_DIALOG_STYLE = "media_edge_dialog_style"
         const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
         const val KEY_SHOW_DIRECTORY_FILE_ACTIONS = "show_directory_file_actions"
+        const val KEY_LOAD_VIDEO_THUMBNAILS = "load_video_thumbnails"
         const val KEY_BOOKMARKED_MEDIA = "bookmarked_media"
         const val KEY_MEDIA_HISTORY = "media_history"
         const val KEY_LAST_DIRECTORY = "last_directory"
