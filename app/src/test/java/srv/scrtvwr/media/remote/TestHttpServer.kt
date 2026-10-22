@@ -12,8 +12,9 @@ import kotlin.concurrent.thread
 
 /**
  * A stand-in for `python -m http.server` on the loopback interface: serves [files] by relative
- * path and lists every folder as an HTML page of links. Like Python's server, it ignores Range
- * headers and closes each connection after one response. With [requiredAuthorization] set, it
+ * path and lists every folder as an HTML page of links. Like Python's server, it closes each
+ * connection after one response and ignores Range headers, unless [supportsRanges] is set; then
+ * it answers them with the requested bytes, as nginx does. With [requiredAuthorization] set, it
  * answers 401 to requests without that exact `Authorization` header, like
  * `tools/media_http_server.py` run with a password.
  */
@@ -22,6 +23,7 @@ class TestHttpServer(
     // Allows tests to exercise large Content-Length values without transferring gigabytes.
     private val declaredFileLength: Long? = null,
     private val requiredAuthorization: String? = null,
+    private val supportsRanges: Boolean = false,
 ) : Closeable {
     private val serverSocket = ServerSocket(0, 50, InetAddress.getLoopbackAddress())
     private val fileRequestCount = AtomicInteger()
@@ -59,11 +61,15 @@ class TestHttpServer(
         val reader = client.getInputStream().bufferedReader(Charsets.ISO_8859_1)
         val requestLine = reader.readLine() ?: return
         var authorization: String? = null
+        var range: String? = null
         while (true) {
             val header = reader.readLine()
             if (header.isNullOrEmpty()) break
-            if (header.substringBefore(':').equals("Authorization", ignoreCase = true)) {
+            val name = header.substringBefore(':')
+            if (name.equals("Authorization", ignoreCase = true)) {
                 authorization = header.substringAfter(':').trim()
+            } else if (name.equals("Range", ignoreCase = true)) {
+                range = header.substringAfter(':').trim()
             }
         }
         val method = requestLine.substringBefore(' ')
@@ -74,6 +80,10 @@ class TestHttpServer(
                 Triple("401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"media\"", "text/plain", ByteArray(0))
             path.isEmpty() || path.endsWith("/") ->
                 Triple("200 OK", "text/html; charset=utf-8", listing(path).toByteArray(Charsets.UTF_8))
+            file != null && supportsRanges && range != null -> {
+                fileRequestCount.incrementAndGet()
+                partial(file, range)
+            }
             file != null -> {
                 fileRequestCount.incrementAndGet()
                 Triple("200 OK", "application/octet-stream", file)
@@ -89,6 +99,20 @@ class TestHttpServer(
         output.write(headers.toByteArray(Charsets.ISO_8859_1))
         if (method != "HEAD") output.write(body)
         output.flush()
+    }
+
+    /** Response to a single `bytes=start-end` range of [file]; the end may be left out. */
+    private fun partial(file: ByteArray, range: String): Triple<String, String, ByteArray> {
+        val start = range.removePrefix("bytes=").substringBefore('-').toInt()
+        if (start >= file.size) {
+            return Triple("416 Range Not Satisfiable\r\nContent-Range: bytes */${file.size}", "text/plain", ByteArray(0))
+        }
+        val end = minOf(range.substringAfter('-').toIntOrNull() ?: file.size - 1, file.size - 1)
+        return Triple(
+            "206 Partial Content\r\nContent-Range: bytes $start-$end/${file.size}",
+            "application/octet-stream",
+            file.copyOfRange(start, end + 1),
+        )
     }
 
     private fun listing(directory: String): String {

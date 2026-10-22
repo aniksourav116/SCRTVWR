@@ -54,6 +54,13 @@ class RemotePathsTest {
     }
 
     @Test
+    fun origin_keepsOnlySchemeHostAndPort() {
+        assertEquals("http://host:8000", RemotePaths.origin("http://host:8000/media/clip.mp4"))
+        assertEquals("https://example.com", RemotePaths.origin("https://example.com/"))
+        assertNull(RemotePaths.origin("/storage/emulated/0/clip.mp4"))
+    }
+
+    @Test
     fun serverFor_picksTheMostSpecificServer() {
         val root = HttpServer(id = "root", name = "Root", baseUrl = "http://host:8000/")
         val media = HttpServer(id = "media", name = "Media", baseUrl = "http://host:8000/media/")

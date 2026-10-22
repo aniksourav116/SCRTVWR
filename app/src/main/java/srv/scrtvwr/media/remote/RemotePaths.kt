@@ -45,6 +45,10 @@ object RemotePaths {
 
     fun extension(url: String): String = name(url).substringAfterLast('.', "").lowercase()
 
+    /** Scheme, host and port of [url], such as `http://host:8000`, or null when it has none. */
+    fun origin(url: String): String? =
+        parse(url)?.takeIf { it.scheme != null && it.rawAuthority != null }?.let { origin(it) }
+
     /** The server address followed by the decoded path segments. */
     fun pathSegments(url: String): List<String> {
         val uri = parse(url) ?: return listOf(url)
