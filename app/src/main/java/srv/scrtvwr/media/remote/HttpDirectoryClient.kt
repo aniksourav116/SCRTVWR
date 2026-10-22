@@ -2,10 +2,9 @@ package srv.scrtvwr.media.remote
 
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -17,13 +16,18 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.Charset
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.FutureTask
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Reads directory listings and files from HTTP storage servers.
  *
  * Listings are cached briefly so a traversal that revisits folders, or a screen that refreshes
- * on resume, does not hit the server each time. Sizes and modification times come from HEAD
- * requests, which are only made when a sort order needs them.
+ * on resume, does not hit the server each time, and callers asking for the same folder at once
+ * share one request. Sizes and modification times come from one HEAD request per file, so they
+ * are only fetched for the files a caller asks about.
  */
 object HttpDirectoryClient {
     internal const val CONNECT_TIMEOUT_MILLIS = 15_000
@@ -31,64 +35,98 @@ object HttpDirectoryClient {
     private const val LISTING_CACHE_MILLIS = 30_000L
     private const val MAX_LISTING_BYTES = 8L * 1024L * 1024L
     private const val MAX_CACHED_LISTINGS = 256
-    private const val MAX_CACHED_METADATA = 8_192
+    private const val MAX_CACHED_METADATA_DIRECTORIES = 64
     private const val METADATA_REQUEST_PARALLELISM = 6
+    private const val METADATA_FILL_WORKERS = 4
     private const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
 
     private val listings = lruMap<String, CachedListing>(MAX_CACHED_LISTINGS)
-    private val metadata = lruMap<String, RemoteFileMetadata>(MAX_CACHED_METADATA)
+    private val listingRequests = ConcurrentHashMap<String, FutureTask<List<RemoteEntry>>>()
+
+    // Kept per folder, so filling in one huge folder never evicts the results it just fetched.
+    private val metadata = lruMap<String, MutableMap<String, RemoteFileMetadata>>(MAX_CACHED_METADATA_DIRECTORIES)
     private val metadataRequests = Semaphore(METADATA_REQUEST_PARALLELISM)
 
     /**
      * Entries [directoryUrl] lists, in server order, without sizes or times. Blocks on the network,
-     * so call it off the main thread. [refresh] skips the cache.
+     * so call it off the main thread. [refresh] skips the cache and forgets the folder's sizes and
+     * times. A call made while the same folder is already downloading waits for that download.
      */
     @Throws(IOException::class)
     fun list(directoryUrl: String, refresh: Boolean = false): List<RemoteEntry> {
         val url = RemotePaths.directoryUrl(directoryUrl)
-        if (!refresh) {
-            synchronized(listings) { listings[url] }
-                ?.takeIf { System.currentTimeMillis() - it.fetchedAtMillis < LISTING_CACHE_MILLIS }
-                ?.let { return it.entries }
-        }
-        val entries = request(url, method = "GET") { connection ->
-            val contentType = connection.contentType.orEmpty()
-            if (!contentType.contains("html", ignoreCase = true)) {
-                throw IOException("$url is not a directory listing")
+        if (!refresh) cachedListing(url)?.let { return it }
+        // The cache is checked again inside the task, in case a request finished since the check above.
+        val task = FutureTask { (if (refresh) null else cachedListing(url)) ?: fetchListing(url) }
+        val running = listingRequests.putIfAbsent(url, task)
+        if (running == null) {
+            try {
+                task.run()
+            } finally {
+                listingRequests.remove(url, task)
             }
-            val body = connection.inputStream.use { it.readLimited(MAX_LISTING_BYTES) }
-            // Redirects (for example "/folder" to "/folder/") change the base links resolve against.
-            HttpDirectoryListingParser.parse(
-                html = String(body, contentType.charset()),
-                directoryUrl = connection.url.toString(),
-            )
         }
-        synchronized(listings) { listings[url] = CachedListing(entries, System.currentTimeMillis()) }
+        val entries = try {
+            (running ?: task).get()
+        } catch (error: ExecutionException) {
+            throw error.cause ?: error
+        }
         if (refresh) {
-            synchronized(metadata) { entries.forEach { metadata.remove(it.url) } }
+            val directories = entries.mapNotNullTo(HashSet()) { RemotePaths.parent(it.url) }
+            synchronized(metadata) { directories.forEach { metadata.remove(it) } }
         }
         return entries
     }
 
+    /** Whether [entry] needs no HEAD request: a folder, or a file whose size and time are cached. */
+    fun hasMetadata(entry: RemoteEntry): Boolean = entry.isDirectory || cachedMetadata(entry.url) != null
+
+    /** [entries] with the sizes and times fetched earlier filled in. Makes no requests. */
+    fun withCachedMetadata(entries: List<RemoteEntry>): List<RemoteEntry> =
+        entries.map { entry ->
+            if (entry.isDirectory) entry else cachedMetadata(entry.url)?.let { entry.filledWith(it) } ?: entry
+        }
+
+    /**
+     * [entry] with its size and modification time, from the cache or a HEAD request. Folders, and
+     * files the server would not describe, come back unchanged.
+     */
+    suspend fun withMetadata(entry: RemoteEntry): RemoteEntry {
+        if (entry.isDirectory) return entry
+        val fileMetadata = cachedMetadata(entry.url)
+            ?: withContext(Dispatchers.IO) {
+                metadataRequests.withPermit {
+                    ensureActive()
+                    fetchMetadata(entry.url)
+                }
+            }
+            ?: return entry
+        return entry.filledWith(fileMetadata)
+    }
+
+    /**
+     * [entries] with every file's size and modification time, in the same order. Only a few
+     * requests queue for a connection at a time, so a file scrolling into view waits behind those
+     * rather than behind the rest of the folder.
+     */
+    suspend fun withMetadata(entries: List<RemoteEntry>): List<RemoteEntry> = withContext(Dispatchers.IO) {
+        val results = entries.toTypedArray()
+        val next = AtomicInteger()
+        List(METADATA_FILL_WORKERS) {
+            launch {
+                while (true) {
+                    val index = next.getAndIncrement()
+                    if (index >= results.size) break
+                    results[index] = withMetadata(results[index])
+                }
+            }
+        }.joinAll()
+        results.asList()
+    }
+
     /** [list] with each file's size and modification time filled in from HEAD requests. */
     suspend fun listWithMetadata(directoryUrl: String, refresh: Boolean = false): List<RemoteEntry> =
-        withContext(Dispatchers.IO) {
-            list(directoryUrl, refresh)
-                .map { entry ->
-                    async {
-                        if (entry.isDirectory) return@async entry
-                        val fileMetadata = metadataRequests.withPermit {
-                            ensureActive()
-                            fileMetadata(entry.url)
-                        } ?: return@async entry
-                        entry.copy(
-                            sizeBytes = fileMetadata.sizeBytes,
-                            lastModifiedMillis = fileMetadata.lastModifiedMillis,
-                        )
-                    }
-                }
-                .awaitAll()
-        }
+        withMetadata(withContext(Dispatchers.IO) { list(directoryUrl, refresh) })
 
     /**
      * Streams [url] into [target] without a file-size cap. [onProgress] receives the
@@ -140,16 +178,47 @@ object HttpDirectoryClient {
         }
     }
 
-    private fun fileMetadata(url: String): RemoteFileMetadata? {
-        synchronized(metadata) { metadata[url] }?.let { return it }
-        return runCatching {
+    private fun cachedListing(url: String): List<RemoteEntry>? =
+        synchronized(listings) { listings[url] }
+            ?.takeIf { System.currentTimeMillis() - it.fetchedAtMillis < LISTING_CACHE_MILLIS }
+            ?.entries
+
+    private fun fetchListing(url: String): List<RemoteEntry> {
+        val entries = request(url, method = "GET") { connection ->
+            val contentType = connection.contentType.orEmpty()
+            if (!contentType.contains("html", ignoreCase = true)) {
+                throw IOException("$url is not a directory listing")
+            }
+            val body = connection.inputStream.use { it.readLimited(MAX_LISTING_BYTES) }
+            // Redirects (for example "/folder" to "/folder/") change the base links resolve against.
+            HttpDirectoryListingParser.parse(
+                html = String(body, contentType.charset()),
+                directoryUrl = connection.url.toString(),
+            )
+        }
+        synchronized(listings) { listings[url] = CachedListing(entries, System.currentTimeMillis()) }
+        return entries
+    }
+
+    private fun cachedMetadata(url: String): RemoteFileMetadata? {
+        val directory = RemotePaths.parent(url) ?: return null
+        return synchronized(metadata) { metadata[directory]?.get(url) }
+    }
+
+    private fun fetchMetadata(url: String): RemoteFileMetadata? {
+        cachedMetadata(url)?.let { return it }
+        val value = runCatching {
             request(url, method = "HEAD") { connection ->
                 RemoteFileMetadata(
                     sizeBytes = connection.contentLengthLong.takeIf { it >= 0 } ?: RemoteEntry.UNKNOWN_SIZE,
                     lastModifiedMillis = connection.lastModified,
                 )
             }
-        }.getOrNull()?.also { value -> synchronized(metadata) { metadata[url] = value } }
+        }.getOrNull() ?: return null
+        RemotePaths.parent(url)?.let { directory ->
+            synchronized(metadata) { metadata.getOrPut(directory) { HashMap() }[url] = value }
+        }
+        return value
     }
 
     private fun <T> request(url: String, method: String, read: (HttpURLConnection) -> T): T {
@@ -206,6 +275,9 @@ object HttpDirectoryClient {
     private class CachedListing(val entries: List<RemoteEntry>, val fetchedAtMillis: Long)
 
     private class RemoteFileMetadata(val sizeBytes: Long, val lastModifiedMillis: Long)
+
+    private fun RemoteEntry.filledWith(value: RemoteFileMetadata): RemoteEntry =
+        copy(sizeBytes = value.sizeBytes, lastModifiedMillis = value.lastModifiedMillis)
 }
 
 /** The server answered 401: the username and password saved for it are missing or wrong. */
