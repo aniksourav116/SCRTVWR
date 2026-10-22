@@ -4,6 +4,7 @@ import android.app.Activity
 import android.os.Bundle
 import android.content.Intent
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -181,6 +182,16 @@ private fun MediaViewerRoute(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     LaunchedEffect(uiState.sourceDirectoryPath) {
         uiState.sourceDirectoryPath?.let(onDirectoryChanged)
+    }
+    val context = LocalContext.current
+    val videoFrameLoadWarning by MediaPreviewLoader.videoFrameLoadWarning.collectAsStateWithLifecycle()
+    // Once per viewer; the directory listing keeps the warning, with a button that turns frames off.
+    var videoFrameLoadWarningShown by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(videoFrameLoadWarning, uiState.loadVideoThumbnails) {
+        if (videoFrameLoadWarning && uiState.loadVideoThumbnails && !videoFrameLoadWarningShown) {
+            videoFrameLoadWarningShown = true
+            Toast.makeText(context, R.string.video_frame_load_warning_viewer, Toast.LENGTH_LONG).show()
+        }
     }
     MediaViewerScreen(
         uiState = uiState,

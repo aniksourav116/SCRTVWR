@@ -159,6 +159,7 @@ fun Directory(
     }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val videoFrameLoadWarning by MediaPreviewLoader.videoFrameLoadWarning.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val mediaLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
@@ -230,6 +231,10 @@ fun Directory(
         onClearFileOperationStatus = viewModel::clearFileOperationStatus,
         onCopyLink = context::copyLink,
         onLoadEntryDetails = viewModel::loadEntryDetails,
+        // Reads from the viewer count too, so the warning can appear on returning to the folder.
+        showVideoFrameLoadWarning = videoFrameLoadWarning && uiState.loadVideoThumbnails && uiState.isRemote,
+        onTurnOffVideoThumbnails = viewModel::turnOffVideoThumbnails,
+        onDismissVideoFrameLoadWarning = MediaPreviewLoader::dismissVideoFrameLoadWarning,
         modifier = modifier,
     )
 }
@@ -258,6 +263,9 @@ fun DirectoryScreen(
     onClearFileOperationStatus: () -> Unit,
     onCopyLink: (String) -> Unit,
     onLoadEntryDetails: suspend (DirectoryEntry) -> Unit = {},
+    showVideoFrameLoadWarning: Boolean = false,
+    onTurnOffVideoThumbnails: () -> Unit = {},
+    onDismissVideoFrameLoadWarning: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var moreMenuExpanded by remember { mutableStateOf(false) }
@@ -364,6 +372,13 @@ fun DirectoryScreen(
                 onPaste = onPasteFileOperation,
                 onCancel = onCancelFileOperation,
                 onDismissStatus = onClearFileOperationStatus,
+            )
+        }
+
+        if (showVideoFrameLoadWarning) {
+            VideoFrameLoadWarning(
+                onTurnOff = onTurnOffVideoThumbnails,
+                onDismiss = onDismissVideoFrameLoadWarning,
             )
         }
 
@@ -675,6 +690,37 @@ private fun DirectoryFileOperationPanel(
                         Icon(Icons.Default.Close, contentDescription = stringResource(R.string.close))
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VideoFrameLoadWarning(
+    onTurnOff: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.video_frame_load_warning),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            TextButton(onClick = onTurnOff) {
+                Text(stringResource(R.string.turn_off))
+            }
+            IconButton(onClick = onDismiss) {
+                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.close))
             }
         }
     }

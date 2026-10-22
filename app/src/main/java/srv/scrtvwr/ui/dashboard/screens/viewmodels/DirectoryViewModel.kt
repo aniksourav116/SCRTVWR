@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import srv.scrtvwr.R
 import srv.scrtvwr.media.MediaPaths
+import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.MediaTypes
 import srv.scrtvwr.media.remote.HttpDirectoryClient
 import srv.scrtvwr.media.remote.HttpServer
@@ -177,6 +178,12 @@ class DirectoryViewModel(
      * Rereads preferences and the current directory. [reload] also bypasses the short-lived cache
      * of HTTP server listings, for an explicit refresh rather than a screen resuming.
      */
+    fun turnOffVideoThumbnails() {
+        preferences.saveLoadVideoThumbnails(false)
+        MediaPreviewLoader.dismissVideoFrameLoadWarning()
+        _uiState.update { it.copy(loadVideoThumbnails = false) }
+    }
+
     fun refresh(reload: Boolean = false) {
         val servers = preferences.getConnectedHttpServers()
         val currentPath = _uiState.value.currentPath

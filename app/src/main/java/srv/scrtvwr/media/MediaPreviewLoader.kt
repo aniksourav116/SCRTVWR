@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.media.MediaDataSource
 import android.media.MediaMetadataRetriever
 import android.os.Build
+import android.os.SystemClock
 import android.util.LruCache
 import com.github.junrar.Archive
 import kotlinx.coroutines.CancellationException
@@ -16,6 +17,9 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -54,6 +58,12 @@ object MediaPreviewLoader {
     private val remoteImageSemaphore = Semaphore(4)
     private val remoteVideoSemaphore = Semaphore(3)
     private val unreadableRemoteVideos = LruCache<String, Boolean>(256)
+    private val videoFrameLoad = VideoFrameLoadMonitor()
+    private val _videoFrameLoadWarning = MutableStateFlow(false)
+    @Volatile private var videoFrameLoadWarningDismissed = false
+
+    /** True once reading video frames from servers has been slow enough to suggest turning it off. */
+    val videoFrameLoadWarning: StateFlow<Boolean> = _videoFrameLoadWarning.asStateFlow()
     private val diskCacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val diskWritesSinceTrim = AtomicInteger()
     @Volatile private var diskCacheDirectory: File? = null
@@ -115,33 +125,64 @@ object MediaPreviewLoader {
 
     private suspend fun decodeRemoteVideoFrame(url: String, key: String, maxDimension: Int): PreviewResult {
         val reader = HttpRangeReader(url, REMOTE_VIDEO_MAX_BYTES)
-        val (bitmap, stopReason) = withTimeoutOrNull(REMOTE_VIDEO_TIMEOUT_MILLIS) {
-            coroutineScope {
-                // The retriever blocks in its reads and ignores cancellation; cancelling the reader fails them.
-                val cancelReads = launch(start = CoroutineStart.UNDISPATCHED) {
+        val startedAt = SystemClock.elapsedRealtime()
+        var finished = false
+        var exhausted = false
+        try {
+            val result = withTimeoutOrNull(REMOTE_VIDEO_TIMEOUT_MILLIS) {
+                coroutineScope {
+                    // The retriever blocks in its reads and ignores cancellation; cancelling the reader fails them.
+                    val cancelReads = launch(start = CoroutineStart.UNDISPATCHED) {
+                        try {
+                            awaitCancellation()
+                        } finally {
+                            reader.cancel()
+                        }
+                    }
                     try {
-                        awaitCancellation()
+                        val frame = runCatching {
+                            retrieveFrame(maxDimension) { setDataSource(RemoteVideoSource(reader)) }
+                        }.getOrNull()
+                        // Read before cancelReads stops the reader on the way out.
+                        frame to reader.stopReason
                     } finally {
-                        reader.cancel()
+                        cancelReads.cancel()
                     }
                 }
-                try {
-                    val frame = runCatching {
-                        retrieveFrame(maxDimension) { setDataSource(RemoteVideoSource(reader)) }
-                    }.getOrNull()
-                    // Read before cancelReads stops the reader on the way out.
-                    frame to reader.stopReason
-                } finally {
-                    cancelReads.cancel()
-                }
             }
-        } ?: (null to HttpRangeReader.StopReason.Cancelled)
-        coroutineContext.ensureActive()
-        // A file that fails by itself, rather than through the network, is not tried again this run.
-        if (bitmap == null && (stopReason == null || stopReason == HttpRangeReader.StopReason.BudgetExceeded)) {
-            unreadableRemoteVideos.put(key, true)
+            coroutineContext.ensureActive()
+            finished = true
+            val (bitmap, stopReason) = result ?: (null to HttpRangeReader.StopReason.Cancelled)
+            exhausted = result == null || stopReason == HttpRangeReader.StopReason.BudgetExceeded
+            // A file that fails by itself, rather than through the network, is not tried again this run.
+            if (bitmap == null && (stopReason == null || stopReason == HttpRangeReader.StopReason.BudgetExceeded)) {
+                unreadableRemoteVideos.put(key, true)
+            }
+            return PreviewResult(bitmap = bitmap)
+        } finally {
+            noteVideoFrameLoad(SystemClock.elapsedRealtime() - startedAt, finished, exhausted)
         }
-        return PreviewResult(bitmap = bitmap)
+    }
+
+    private fun noteVideoFrameLoad(elapsedMillis: Long, finished: Boolean, exhausted: Boolean) {
+        // A tile scrolled away early says nothing about how heavy the reads are.
+        if (!finished && elapsedMillis < videoFrameLoad.slowMillis) return
+        if (videoFrameLoad.record(elapsedMillis, exhausted) && !videoFrameLoadWarningDismissed) {
+            _videoFrameLoadWarning.value = true
+        }
+    }
+
+    /** Hides the slow-loading warning until [resetVideoFrameLoadWarning], such as once the user acted on it. */
+    fun dismissVideoFrameLoadWarning() {
+        videoFrameLoadWarningDismissed = true
+        _videoFrameLoadWarning.value = false
+    }
+
+    /** Forgets past slow reads, for when the user turns server video frames back on. */
+    fun resetVideoFrameLoadWarning() {
+        videoFrameLoad.reset()
+        videoFrameLoadWarningDismissed = false
+        _videoFrameLoadWarning.value = false
     }
 
     private fun retrieveFrame(maxDimension: Int, open: MediaMetadataRetriever.() -> Unit): Bitmap? {

@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
@@ -38,6 +39,8 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setLoadVideoThumbnails(enabled: Boolean) {
         preferences.saveLoadVideoThumbnails(enabled)
+        // Turning frames back on starts the slow-loading check over.
+        if (enabled) MediaPreviewLoader.resetVideoFrameLoadWarning()
         _uiState.update { it.copy(loadVideoThumbnails = enabled) }
     }
 
