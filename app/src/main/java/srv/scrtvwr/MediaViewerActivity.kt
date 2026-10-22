@@ -39,7 +39,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.LastPage
+import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FirstPage
@@ -92,6 +94,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -193,6 +196,9 @@ private fun MediaViewerRoute(
         onSlideShowStart = viewModel::startSlideShow,
         onSlideShowStop = viewModel::stopSlideShow,
         onSortOrderChange = viewModel::setSortOrder,
+        onJumpRecorded = viewModel::recordJump,
+        onJumpBack = viewModel::jumpBack,
+        onJumpForward = viewModel::jumpForward,
         onBack = onBack,
     )
 }
@@ -213,6 +219,9 @@ private fun MediaViewerScreen(
     onSlideShowStart: (Long, SlideShowDirection) -> Unit,
     onSlideShowStop: () -> Unit,
     onSortOrderChange: (DirectorySortOrder) -> Unit,
+    onJumpRecorded: (fromPage: Int, toPage: Int) -> Unit,
+    onJumpBack: (currentPage: Int) -> Unit,
+    onJumpForward: (currentPage: Int) -> Unit,
     onBack: () -> Unit,
 ) {
     val pagerState = rememberPagerState(
@@ -233,6 +242,7 @@ private fun MediaViewerScreen(
     var pseudoSlideShowStayMillis by remember { mutableStateOf(uiState.slideShowStayMillis) }
     var pseudoSlideShowHorizontalFraction by remember { mutableFloatStateOf(0f) }
     var pseudoSlideShowPageOffset by remember { mutableStateOf(1) }
+    var pseudoSlideShowStartPage by remember { mutableStateOf<Int?>(null) }
     val readyMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
     val zoomedMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
     var zoomCommand by remember { mutableStateOf<ZoomCommand?>(null) }
@@ -274,10 +284,14 @@ private fun MediaViewerScreen(
         pseudoSlideShowStayMillis = uiState.slideShowStayMillis
         pseudoSlideShowHorizontalFraction = 0f
         pseudoSlideShowPageOffset = pageOffset
+        pseudoSlideShowStartPage = pagerState.currentPage
         isPseudoSlideShowRunning = true
     }
 
     fun stopPseudoSlideShow() {
+        // A whole hold counts as one jump, so it can be undone if it ran past the wanted page.
+        pseudoSlideShowStartPage?.let { onJumpRecorded(it, pagerState.currentPage) }
+        pseudoSlideShowStartPage = null
         isPseudoSlideShowRunning = false
         pseudoSlideShowHorizontalFraction = 0f
         pseudoSlideShowPageOffset = 1
@@ -483,6 +497,7 @@ private fun MediaViewerScreen(
                     fillFrame = uiState.fillFrame,
                     flipped = uiState.flipped,
                     onMoveFirstClick = {
+                        onJumpRecorded(pagerState.currentPage, 0)
                         coroutineScope.launch {
                             pagerState.animateScrollToPage(0)
                         }
@@ -493,6 +508,7 @@ private fun MediaViewerScreen(
                     onSortClick = { sortDialogVisible = true },
                     onSlideShowClick = { slideShowDialogVisible = true },
                     onMoveLastClick = {
+                        onJumpRecorded(pagerState.currentPage, uiState.items.lastIndex)
                         coroutineScope.launch {
                             pagerState.animateScrollToPage(uiState.items.lastIndex)
                         }
@@ -735,11 +751,16 @@ private fun MediaViewerScreen(
                 ViewerTimeline(
                     currentPage = pagerState.currentPage,
                     pageCount = uiState.pageCount,
+                    backPage = uiState.jumpHistory.backTarget(pagerState.currentPage),
+                    forwardPage = uiState.jumpHistory.forwardTarget(pagerState.currentPage),
                     onPageSelected = { page ->
                         coroutineScope.launch {
                             pagerState.animateScrollToPage(page)
                         }
                     },
+                    onSeekFinished = onJumpRecorded,
+                    onJumpBack = { onJumpBack(pagerState.currentPage) },
+                    onJumpForward = { onJumpForward(pagerState.currentPage) },
                 )
             }
         }
@@ -1650,8 +1671,17 @@ private fun EmptyViewerMessage() {
 private fun ViewerTimeline(
     currentPage: Int,
     pageCount: Int,
+    backPage: Int?,
+    forwardPage: Int?,
     onPageSelected: (Int) -> Unit,
+    onSeekFinished: (fromPage: Int, toPage: Int) -> Unit,
+    onJumpBack: () -> Unit,
+    onJumpForward: () -> Unit,
 ) {
+    // The page a drag or a tap on the track started from; one gesture is recorded as one jump.
+    var seekStartPage by remember { mutableStateOf<Int?>(null) }
+    var seekPage by remember { mutableIntStateOf(currentPage) }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1664,15 +1694,66 @@ private fun ViewerTimeline(
             color = Color.White,
             style = MaterialTheme.typography.labelSmall,
         )
-        Slider(
-            value = currentPage.toFloat(),
-            onValueChange = { value -> onPageSelected(value.toInt()) },
-            valueRange = 0f..(pageCount - 1).coerceAtLeast(0).toFloat(),
-            steps = (pageCount - 2).coerceAtLeast(0),
-            enabled = pageCount > 1,
-            modifier = Modifier
-                .height(28.dp)
-                .padding(horizontal = 32.dp),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Both buttons always take their space, so the slider never resizes under a finger.
+            JumpHistoryButton(
+                icon = Icons.AutoMirrored.Filled.Undo,
+                contentDescription = backPage
+                    ?.let { stringResource(R.string.jump_back_to, it + 1) }
+                    ?: stringResource(R.string.jump_back),
+                enabled = backPage != null,
+                onClick = onJumpBack,
+            )
+            Slider(
+                value = currentPage.toFloat(),
+                onValueChange = { value ->
+                    if (seekStartPage == null) seekStartPage = currentPage
+                    seekPage = value.toInt()
+                    onPageSelected(seekPage)
+                },
+                onValueChangeFinished = {
+                    seekStartPage?.let { onSeekFinished(it, seekPage) }
+                    seekStartPage = null
+                },
+                valueRange = 0f..(pageCount - 1).coerceAtLeast(0).toFloat(),
+                steps = (pageCount - 2).coerceAtLeast(0),
+                enabled = pageCount > 1,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(28.dp)
+                    .padding(horizontal = 4.dp),
+            )
+            JumpHistoryButton(
+                icon = Icons.AutoMirrored.Filled.Redo,
+                contentDescription = forwardPage
+                    ?.let { stringResource(R.string.jump_forward_to, it + 1) }
+                    ?: stringResource(R.string.jump_forward),
+                enabled = forwardPage != null,
+                onClick = onJumpForward,
+            )
+        }
+    }
+}
+
+@Composable
+private fun JumpHistoryButton(
+    icon: ImageVector,
+    contentDescription: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(32.dp),
+    ) {
+        Icon(
+            icon,
+            contentDescription = contentDescription,
+            tint = Color.White.copy(alpha = if (enabled) 1f else 0.38f),
         )
     }
 }
@@ -1738,6 +1819,9 @@ private fun MediaViewerScreenPreview() {
             onSlideShowStart = { _, _ -> },
             onSlideShowStop = {},
             onSortOrderChange = {},
+            onJumpRecorded = { _, _ -> },
+            onJumpBack = {},
+            onJumpForward = {},
             onBack = {}
         )
     }

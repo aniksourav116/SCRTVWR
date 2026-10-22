@@ -220,6 +220,10 @@
     <string name="move_next_directory">Move to next directory</string>
     <string name="move_first_item">Move to first item</string>
     <string name="move_last_item">Move to last item</string>
+    <string name="jump_back">Jump back</string>
+    <string name="jump_back_to">Back to %1$d</string>
+    <string name="jump_forward">Jump forward</string>
+    <string name="jump_forward_to">Forward to %1$d</string>
     <string name="previous_directory">Previous directory</string>
     <string name="next_directory">Next directory</string>
     <string name="previous_archive">Previous archive</string>
