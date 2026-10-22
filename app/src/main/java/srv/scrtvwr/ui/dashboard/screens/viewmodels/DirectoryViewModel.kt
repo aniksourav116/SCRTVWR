@@ -73,6 +73,7 @@ class DirectoryViewModel(
     )
     val uiState: StateFlow<DirectoryUiState> = _uiState.asStateFlow()
     private var scanJob: Job? = null
+    private var scanKey: DirectoryScanKey? = null
     private val scrollPositions = mutableMapOf<String, DirectoryScrollPosition>()
 
     init {
@@ -190,6 +191,9 @@ class DirectoryViewModel(
                 lastMediaSession = preferences.getLastMediaSession()?.takeIfValid(servers),
             )
         }
+        // Creating, showing, and resuming the screen each refresh it. A scan of the same listing that
+        // is still running is kept rather than restarted, so a large server folder downloads once.
+        if (!reload && scanJob?.isActive == true && scanKey == _uiState.value.scanKey) return
         scanDirectory(reload = reload)
     }
 
@@ -316,6 +320,7 @@ class DirectoryViewModel(
 
     private fun scanDirectory(delayMillis: Long = 0L, reload: Boolean = false) {
         scanJob?.cancel()
+        scanKey = _uiState.value.scanKey
         scanJob = viewModelScope.launch {
             if (delayMillis > 0) delay(delayMillis)
             val request = _uiState.value
@@ -429,6 +434,18 @@ data class DirectoryUiState(
     val fileActionsAvailable: Boolean
         get() = showDirectoryFileActions && !isRemote
 }
+
+/** What a scan lists. A refresh while a scan for the same key still runs leaves that scan running. */
+private data class DirectoryScanKey(
+    val path: String,
+    val searchQuery: String,
+    val sortOrder: DirectorySortOrder,
+    val mediaFilter: DirectoryMediaFilter,
+    val showHiddenFiles: Boolean,
+)
+
+private val DirectoryUiState.scanKey: DirectoryScanKey
+    get() = DirectoryScanKey(currentPath, searchQuery, sortOrder, mediaFilter, showHiddenFiles)
 
 data class DirectoryListing(
     val entries: List<DirectoryEntry>,
