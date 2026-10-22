@@ -317,7 +317,7 @@ fun OthersPreview() {
             uiState = OthersUiState(
                 showHiddenFiles = true,
                 showDirectoryFileActions = false,
-                slideShowStayMillis = 3000L,
+                slideShowStayMillis = 100L,
                 holdSlideShowEnabled = true,
                 slideShowDirection = SlideShowDirection.Next,
                 imagePreloadDistance = 5,

@@ -1715,7 +1715,7 @@ private fun MediaViewerScreenPreview() {
         bookmarked = false,
         isChromeHidden = false,
         isSlideShowRunning = false,
-        slideShowStayMillis = 3000L,
+        slideShowStayMillis = 100L,
         slideShowDirection = SlideShowDirection.Next,
         holdSlideShowEnabled = true,
         imagePreloadDistance = 1,
