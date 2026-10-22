@@ -1232,7 +1232,7 @@ private fun EntryThumbnail(
                 imageVector = if (entry.isDirectory) {
                     Icons.Default.Folder
                 } else if (entry.mediaType == DirectoryMediaType.Video) {
-                    // Videos on HTTP servers have no frame preview.
+                    // Server videos have no frame preview when the server ignores Range requests.
                     Icons.Default.PlayCircle
                 } else if (entry.mediaType == DirectoryMediaType.Archive) {
                     // Server comic books have no cover until the viewer has downloaded them.

@@ -2,20 +2,27 @@ package srv.scrtvwr.media
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaDataSource
 import android.media.MediaMetadataRetriever
 import android.os.Build
 import android.util.LruCache
 import com.github.junrar.Archive
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import srv.scrtvwr.media.remote.HttpDirectoryClient
+import srv.scrtvwr.media.remote.HttpRangeReader
 import srv.scrtvwr.media.remote.RemoteArchiveCache
 import java.io.File
 import java.io.FilterInputStream
@@ -37,9 +44,14 @@ object MediaPreviewLoader {
     private const val MAX_DISK_CACHE_BYTES = 64L * 1024L * 1024L
     private const val MAX_DISK_CACHE_DIMENSION = 256
     private const val DISK_WRITES_PER_TRIM = 32
+    private const val REMOTE_VIDEO_MAX_BYTES = 8L * 1024L * 1024L
+    private const val REMOTE_VIDEO_TIMEOUT_MILLIS = 30_000L
+    private const val REMOTE_VIDEO_SETTLE_MILLIS = 200L
     private val directoryThumbnailSemaphore = Semaphore(2)
     private val comicBookCoverSemaphore = Semaphore(2)
     private val remoteImageSemaphore = Semaphore(4)
+    private val remoteVideoSemaphore = Semaphore(2)
+    private val unreadableRemoteVideos = LruCache<String, Boolean>(256)
     private val diskCacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val diskWritesSinceTrim = AtomicInteger()
     @Volatile private var diskCacheDirectory: File? = null
@@ -73,32 +85,81 @@ object MediaPreviewLoader {
         }
 
     suspend fun loadVideoFrame(path: String, modified: Long, maxDimension: Int): PreviewResult {
-        // Servers without Range support (python -m http.server) would have to send most of the
-        // video before a frame decodes, so remote videos keep their placeholder icon.
-        if (MediaPaths.isRemote(path)) return PreviewResult()
+        if (MediaPaths.isRemote(path)) return loadRemoteVideoFrame(path, modified, maxDimension)
         return loadCached("video:$path:$modified:$maxDimension", maxDimension) {
-            runCatching {
-                val retriever = MediaMetadataRetriever()
-                try {
-                    retriever.setDataSource(path)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                        retriever.getScaledFrameAtTime(
-                            0L,
-                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
-                            maxDimension,
-                            maxDimension,
-                        )
-                    } else {
-                        retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                            ?.scaledToFit(maxDimension)
-                    }
-                } finally {
-                    retriever.release()
-                }
-            }.fold(
+            runCatching { retrieveFrame(maxDimension) { setDataSource(path) } }.fold(
                 onSuccess = { PreviewResult(bitmap = it) },
                 onFailure = { PreviewResult(error = it.readableMessage("Unable to read video preview")) },
             )
+        }
+    }
+
+    /**
+     * First frame of a server video, read with Range requests so it costs a few blocks rather than
+     * the whole file. Servers without Range support (python -m http.server) keep the placeholder
+     * icon, and so do large previews: they skip the disk cache, and the player shows the frame itself.
+     */
+    private suspend fun loadRemoteVideoFrame(url: String, modified: Long, maxDimension: Int): PreviewResult {
+        if (maxDimension > MAX_DISK_CACHE_DIMENSION) return PreviewResult()
+        val key = "video:$url:$modified:$maxDimension"
+        return loadCached(key, maxDimension) {
+            if (!HttpRangeReader.supportsRanges(url) || unreadableRemoteVideos.get(key) != null) {
+                return@loadCached PreviewResult()
+            }
+            // Tiles that only flash past during a fling are cancelled here, before any request.
+            delay(REMOTE_VIDEO_SETTLE_MILLIS)
+            remoteVideoSemaphore.withPermit { decodeRemoteVideoFrame(url, key, maxDimension) }
+        }
+    }
+
+    private suspend fun decodeRemoteVideoFrame(url: String, key: String, maxDimension: Int): PreviewResult {
+        val reader = HttpRangeReader(url, REMOTE_VIDEO_MAX_BYTES)
+        val (bitmap, stopReason) = withTimeoutOrNull(REMOTE_VIDEO_TIMEOUT_MILLIS) {
+            coroutineScope {
+                // The retriever blocks in its reads and ignores cancellation; cancelling the reader fails them.
+                val cancelReads = launch(start = CoroutineStart.UNDISPATCHED) {
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        reader.cancel()
+                    }
+                }
+                try {
+                    val frame = runCatching {
+                        retrieveFrame(maxDimension) { setDataSource(RemoteVideoSource(reader)) }
+                    }.getOrNull()
+                    // Read before cancelReads stops the reader on the way out.
+                    frame to reader.stopReason
+                } finally {
+                    cancelReads.cancel()
+                }
+            }
+        } ?: (null to HttpRangeReader.StopReason.Cancelled)
+        coroutineContext.ensureActive()
+        // A file that fails by itself, rather than through the network, is not tried again this run.
+        if (bitmap == null && (stopReason == null || stopReason == HttpRangeReader.StopReason.BudgetExceeded)) {
+            unreadableRemoteVideos.put(key, true)
+        }
+        return PreviewResult(bitmap = bitmap)
+    }
+
+    private fun retrieveFrame(maxDimension: Int, open: MediaMetadataRetriever.() -> Unit): Bitmap? {
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.open()
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                retriever.getScaledFrameAtTime(
+                    0L,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                    maxDimension,
+                    maxDimension,
+                )
+            } else {
+                retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    ?.scaledToFit(maxDimension)
+            }
+        } finally {
+            retriever.release()
         }
     }
 
@@ -331,6 +392,16 @@ object MediaPreviewLoader {
         )
         if (scaled !== this) recycle()
         return scaled
+    }
+
+    /** Server video for [MediaMetadataRetriever], read through [reader]. */
+    private class RemoteVideoSource(private val reader: HttpRangeReader) : MediaDataSource() {
+        override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int =
+            reader.readAt(position, buffer, offset, size)
+
+        override fun getSize(): Long = reader.size()
+
+        override fun close() = reader.close()
     }
 
     private class LimitedInputStream(input: InputStream, private val limit: Long) : FilterInputStream(input) {
