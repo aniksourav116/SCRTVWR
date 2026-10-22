@@ -124,10 +124,6 @@ object HttpDirectoryClient {
         results.asList()
     }
 
-    /** [list] with each file's size and modification time filled in from HEAD requests. */
-    suspend fun listWithMetadata(directoryUrl: String, refresh: Boolean = false): List<RemoteEntry> =
-        withMetadata(withContext(Dispatchers.IO) { list(directoryUrl, refresh) })
-
     /**
      * Streams [url] into [target] without a file-size cap. [onProgress] receives the
      * bytes written so far and the length the server announced, or -1 when it sent none.

@@ -193,6 +193,26 @@ class DirectoryViewModel(
         scanDirectory(reload = reload)
     }
 
+    /**
+     * Fills in the size and modification time of [entry], a file on an HTTP server that just came
+     * into view. Suspends while the request runs, so cancel it once the entry leaves the screen.
+     */
+    suspend fun loadEntryDetails(entry: DirectoryEntry) {
+        if (entry.isDirectory || !MediaPaths.isRemote(entry.path) || entry.sizeBytes != RemoteEntry.UNKNOWN_SIZE) return
+        val remote = HttpDirectoryClient.withMetadata(RemoteEntry(name = entry.name, url = entry.path, isDirectory = false))
+        if (remote.sizeBytes == entry.sizeBytes && remote.lastModifiedMillis == entry.lastModifiedMillis) return
+        _uiState.update { state ->
+            val index = state.entries.indexOfFirst { it.path == entry.path }
+            if (index < 0) return@update state
+            val entries = state.entries.toMutableList()
+            entries[index] = entries[index].copy(
+                sizeBytes = remote.sizeBytes,
+                lastModifiedMillis = remote.lastModifiedMillis,
+            )
+            state.copy(directoryListing = state.directoryListing.copy(entries = entries))
+        }
+    }
+
     fun prepareCopy(entry: DirectoryEntry) {
         prepareFileOperation(entry, DirectoryFileOperation.Copy)
     }
@@ -299,37 +319,67 @@ class DirectoryViewModel(
         scanJob = viewModelScope.launch {
             if (delayMillis > 0) delay(delayMillis)
             val request = _uiState.value
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            val listing = withContext(Dispatchers.IO) {
-                if (request.isRemote) {
-                    remoteExplorerEntries(
-                        directoryUrl = request.currentPath,
-                        searchQuery = request.searchQuery,
-                        sortOrder = request.sortOrder,
-                        showHiddenFiles = request.showHiddenFiles,
-                        mediaFilter = request.mediaFilter,
-                        reload = reload,
-                        app = app,
-                    )
-                } else {
-                    File(request.currentPath).fileExplorerEntries(
-                        searchQuery = request.searchQuery,
-                        sortOrder = request.sortOrder,
-                        showHiddenFiles = request.showHiddenFiles,
-                        mediaFilter = request.mediaFilter,
-                    )
-                }
+            _uiState.update { it.copy(isLoading = true, isSortPending = false, errorMessage = null) }
+            if (request.isRemote) {
+                scanRemoteDirectory(request, reload)
+                return@launch
             }
-            _uiState.update { current ->
-                if (current.currentPath != request.currentPath ||
-                    current.searchQuery != request.searchQuery || current.sortOrder != request.sortOrder ||
-                    current.mediaFilter != request.mediaFilter
-                ) current else current.copy(
-                    directoryListing = listing,
-                    isLoading = false,
-                    errorMessage = listing.errorMessage,
+            val listing = withContext(Dispatchers.IO) {
+                File(request.currentPath).fileExplorerEntries(
+                    searchQuery = request.searchQuery,
+                    sortOrder = request.sortOrder,
+                    showHiddenFiles = request.showHiddenFiles,
+                    mediaFilter = request.mediaFilter,
                 )
             }
+            publishListing(request, listing)
+        }
+    }
+
+    /**
+     * Shows the server listing as soon as it downloads. A date or size order needs every file's
+     * HEAD request first, so until those finish the entries are shown by name and then re-sorted.
+     */
+    private suspend fun scanRemoteDirectory(request: DirectoryUiState, reload: Boolean) {
+        val (entries, sortable) = try {
+            withContext(Dispatchers.IO) {
+                val listed = remoteExplorerEntries(
+                    directoryUrl = request.currentPath,
+                    searchQuery = request.searchQuery,
+                    showHiddenFiles = request.showHiddenFiles,
+                    mediaFilter = request.mediaFilter,
+                    reload = reload,
+                )
+                listed to (!request.sortOrder.needsFileMetadata || listed.all(HttpDirectoryClient::hasMetadata))
+            }
+        } catch (error: IOException) {
+            publishListing(request, remoteListingFailure(error, app))
+            return
+        }
+        if (sortable) {
+            publishListing(request, withContext(Dispatchers.Default) { entries.toDirectoryListing(request.sortOrder) })
+            return
+        }
+        publishListing(
+            request = request,
+            listing = withContext(Dispatchers.Default) { entries.toDirectoryListing(DirectorySortOrder.NameAscending) },
+            isSortPending = true,
+        )
+        val filled = HttpDirectoryClient.withMetadata(entries)
+        publishListing(request, withContext(Dispatchers.Default) { filled.toDirectoryListing(request.sortOrder) })
+    }
+
+    private fun publishListing(request: DirectoryUiState, listing: DirectoryListing, isSortPending: Boolean = false) {
+        _uiState.update { current ->
+            if (current.currentPath != request.currentPath ||
+                current.searchQuery != request.searchQuery || current.sortOrder != request.sortOrder ||
+                current.mediaFilter != request.mediaFilter
+            ) current else current.copy(
+                directoryListing = listing,
+                isLoading = false,
+                isSortPending = isSortPending,
+                errorMessage = listing.errorMessage,
+            )
         }
     }
 
@@ -356,6 +406,8 @@ data class DirectoryUiState(
     val showHiddenFiles: Boolean = false,
     val showDirectoryFileActions: Boolean = false,
     val isLoading: Boolean = false,
+    /** Server entries are shown by name while the sizes or dates the sort order needs still load. */
+    val isSortPending: Boolean = false,
     val isFileOperationRunning: Boolean = false,
     val pendingFileOperation: PendingDirectoryFileOperation? = null,
     val fileOperationStatus: DirectoryFileOperationStatus? = null,
@@ -489,51 +541,41 @@ private suspend fun File.fileExplorerEntries(
     }
 }
 
-/** Entries an HTTP server lists for [directoryUrl], filtered and sorted like local listings. */
-private suspend fun remoteExplorerEntries(
+/**
+ * Entries an HTTP server lists for [directoryUrl], filtered like local listings, with the sizes and
+ * times fetched earlier filled in. Makes no request per file.
+ */
+@Throws(IOException::class)
+private fun remoteExplorerEntries(
     directoryUrl: String,
     searchQuery: String,
-    sortOrder: DirectorySortOrder,
     showHiddenFiles: Boolean,
     mediaFilter: DirectoryMediaFilter,
     reload: Boolean,
-    app: Application,
-): DirectoryListing {
+): List<RemoteEntry> {
     val normalizedQuery = searchQuery.trim()
-    val entries = try {
-        if (sortOrder.needsFileMetadata) {
-            HttpDirectoryClient.listWithMetadata(directoryUrl, refresh = reload)
-        } else {
-            HttpDirectoryClient.list(directoryUrl, refresh = reload)
+    val entries = HttpDirectoryClient.list(directoryUrl, refresh = reload)
+        .asSequence()
+        .filter { showHiddenFiles || !it.isHidden }
+        .filter { entry ->
+            normalizedQuery.isBlank() || entry.name.contains(normalizedQuery, ignoreCase = true)
         }
-    } catch (error: IOException) {
-        return DirectoryListing(
-            entries = emptyList(),
-            canRead = false,
-            errorMessage = if (app.hasLocalNetworkAccess()) {
-                app.getString(R.string.http_listing_failed, error.userMessage(app))
-            } else {
-                app.getString(R.string.http_listing_local_network_blocked)
-            },
-        )
-    }
+        .filter { entry ->
+            when (mediaFilter) {
+                DirectoryMediaFilter.All -> true
+                DirectoryMediaFilter.Folders -> entry.isDirectory
+                DirectoryMediaFilter.Images -> entry.mediaType() == DirectoryMediaType.Image
+                DirectoryMediaFilter.Videos -> entry.mediaType() == DirectoryMediaType.Video
+                DirectoryMediaFilter.Archives -> entry.mediaType() == DirectoryMediaType.Archive
+            }
+        }
+        .toList()
+    return HttpDirectoryClient.withCachedMetadata(entries)
+}
 
-    return DirectoryListing(
-        entries = entries.asSequence()
-            .filter { showHiddenFiles || !it.isHidden }
-            .filter { entry ->
-                normalizedQuery.isBlank() || entry.name.contains(normalizedQuery, ignoreCase = true)
-            }
-            .filter { entry ->
-                when (mediaFilter) {
-                    DirectoryMediaFilter.All -> true
-                    DirectoryMediaFilter.Folders -> entry.isDirectory
-                    DirectoryMediaFilter.Images -> entry.mediaType() == DirectoryMediaType.Image
-                    DirectoryMediaFilter.Videos -> entry.mediaType() == DirectoryMediaType.Video
-                    DirectoryMediaFilter.Archives -> entry.mediaType() == DirectoryMediaType.Archive
-                }
-            }
-            .sortedWith(sortOrder.remoteEntryComparator(directoriesFirst = true))
+private fun List<RemoteEntry>.toDirectoryListing(sortOrder: DirectorySortOrder): DirectoryListing =
+    DirectoryListing(
+        entries = sortedWith(sortOrder.remoteEntryComparator(directoriesFirst = true))
             .map { entry ->
                 DirectoryEntry(
                     name = entry.name,
@@ -543,10 +585,19 @@ private suspend fun remoteExplorerEntries(
                     lastModifiedMillis = entry.lastModifiedMillis,
                     mediaType = entry.mediaType(),
                 )
-            }
-            .toList(),
+            },
     )
-}
+
+private fun remoteListingFailure(error: IOException, app: Application): DirectoryListing =
+    DirectoryListing(
+        entries = emptyList(),
+        canRead = false,
+        errorMessage = if (app.hasLocalNetworkAccess()) {
+            app.getString(R.string.http_listing_failed, error.userMessage(app))
+        } else {
+            app.getString(R.string.http_listing_local_network_blocked)
+        },
+    )
 
 private fun String.isSameOrChildOf(root: String): Boolean = when {
     MediaPaths.isRemote(this) && MediaPaths.isRemote(root) -> RemotePaths.isSameOrChildOf(this, root)

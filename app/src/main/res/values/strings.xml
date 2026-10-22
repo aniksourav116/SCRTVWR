@@ -142,6 +142,7 @@
     <string name="remove_http_server_message">Remove \"%1$s\" from storage devices? Files on the server are not affected.</string>
     <string name="http_listing_failed">Unable to load this folder from the server: %1$s</string>
     <string name="http_listing_local_network_blocked">Android is blocking SCRTVWR from the local network. Allow local network access from the Storage screen to reach this server.</string>
+    <string name="http_listing_sort_pending">Shown by name until every file\'s size and date has loaded</string>
     <string name="http_server_local_network_blocked">Can\'t connect: local network access isn\'t allowed</string>
     <string name="http_server_username">Username</string>
     <string name="http_server_password">Password</string>

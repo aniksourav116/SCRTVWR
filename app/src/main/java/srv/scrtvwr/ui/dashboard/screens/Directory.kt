@@ -67,6 +67,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
@@ -228,6 +229,7 @@ fun Directory(
         onCancelFileOperation = viewModel::cancelFileOperation,
         onClearFileOperationStatus = viewModel::clearFileOperationStatus,
         onCopyLink = context::copyLink,
+        onLoadEntryDetails = viewModel::loadEntryDetails,
         modifier = modifier,
     )
 }
@@ -255,6 +257,7 @@ fun DirectoryScreen(
     onCancelFileOperation: () -> Unit,
     onClearFileOperationStatus: () -> Unit,
     onCopyLink: (String) -> Unit,
+    onLoadEntryDetails: suspend (DirectoryEntry) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var moreMenuExpanded by remember { mutableStateOf(false) }
@@ -364,6 +367,17 @@ fun DirectoryScreen(
             )
         }
 
+        if (uiState.isSortPending) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                Text(
+                    text = stringResource(R.string.http_listing_sort_pending),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
         if (uiState.isLoading && uiState.entries.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
@@ -382,6 +396,7 @@ fun DirectoryScreen(
                 onMoveEntry = onMoveEntry,
                 onRequestDeleteEntry = { entryPendingDeletion = it },
                 onCopyLink = onCopyLink,
+                onLoadEntryDetails = onLoadEntryDetails,
             )
 
             DirectoryViewMode.Grid -> DirectoryGrid(
@@ -777,6 +792,7 @@ private fun DirectoryList(
     onMoveEntry: (DirectoryEntry) -> Unit,
     onRequestDeleteEntry: (DirectoryEntry) -> Unit,
     onCopyLink: (String) -> Unit,
+    onLoadEntryDetails: suspend (DirectoryEntry) -> Unit,
 ) {
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
@@ -828,6 +844,10 @@ private fun DirectoryList(
             }
 
             items(uiState.entries, key = DirectoryEntry::path) { entry ->
+                if (uiState.isRemote && !entry.isDirectory) {
+                    // Server listings carry no sizes, so each row asks for its own while it is on screen.
+                    LaunchedEffect(entry.path) { onLoadEntryDetails(entry) }
+                }
                 val style = entry.entryVisualStyle()
                 DirectoryListRow(
                     title = entry.name,
@@ -1160,18 +1180,20 @@ private fun EntryThumbnail(
     showFolderBadge: Boolean = false,
     modifier: Modifier = Modifier.size(size.dp),
 ) {
+    // A server file's time arrives after its row appears; keying on it would restart the download.
+    val modified = if (MediaPaths.isRemote(entry.path)) 0L else entry.lastModifiedMillis
     val preview by produceState<PreviewResult?>(
         initialValue = null,
         key1 = entry.path,
-        key2 = entry.lastModifiedMillis,
+        key2 = modified,
         key3 = entry.isDirectory,
     ) {
         value = when {
-            entry.isDirectory -> MediaPreviewLoader.loadDirectoryThumbnail(entry.path, entry.lastModifiedMillis, size * 2)
-            entry.mediaType == DirectoryMediaType.Image -> MediaPreviewLoader.loadImage(entry.path, entry.lastModifiedMillis, size * 2)
-            entry.mediaType == DirectoryMediaType.Video -> MediaPreviewLoader.loadVideoFrame(entry.path, entry.lastModifiedMillis, size * 2)
+            entry.isDirectory -> MediaPreviewLoader.loadDirectoryThumbnail(entry.path, modified, size * 2)
+            entry.mediaType == DirectoryMediaType.Image -> MediaPreviewLoader.loadImage(entry.path, modified, size * 2)
+            entry.mediaType == DirectoryMediaType.Video -> MediaPreviewLoader.loadVideoFrame(entry.path, modified, size * 2)
             entry.mediaType == DirectoryMediaType.Archive && MediaTypes.isComicBook(entry.path) ->
-                MediaPreviewLoader.loadComicBookCover(entry.path, entry.lastModifiedMillis, size * 2)
+                MediaPreviewLoader.loadComicBookCover(entry.path, modified, size * 2)
             else -> PreviewResult()
         }
     }
@@ -1356,7 +1378,7 @@ private fun EmptyDirectoryMessage(uiState: DirectoryUiState) {
 private fun DirectoryEntry.supportingText(): String =
     when {
         isDirectory -> stringResource(R.string.folder)
-        // HTTP listings only report sizes when a sort order asked the server for them.
+        // HTTP listings report no sizes; a row shows its type until its own size has loaded.
         sizeBytes < 0 -> typeText()
         mediaType == DirectoryMediaType.Image -> stringResource(R.string.image_with_size, formatBytes(sizeBytes))
         mediaType == DirectoryMediaType.Video -> stringResource(R.string.video_with_size, formatBytes(sizeBytes))
