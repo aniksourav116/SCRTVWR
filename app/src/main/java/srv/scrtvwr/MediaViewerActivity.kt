@@ -690,6 +690,7 @@ private fun MediaViewerScreen(
                             rotation = uiState.rotation,
                             flipped = uiState.flipped,
                             zoomCommand = zoomCommand,
+                            loadVideoFrame = uiState.loadVideoThumbnails,
                             onReady = { readyMedia[item.readinessKey] = true },
                             onZoomChanged = { zoomed ->
                                 if (zoomed) {
@@ -1013,6 +1014,7 @@ private fun MediaPage(
     rotation: Int,
     flipped: Boolean,
     zoomCommand: ZoomCommand?,
+    loadVideoFrame: Boolean,
     onReady: () -> Unit,
     onZoomChanged: (Boolean) -> Unit,
     onContentClick: () -> Unit,
@@ -1020,12 +1022,19 @@ private fun MediaPage(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     if (item.type == MediaViewerType.Video) {
+        // Pages within the preload distance are composed early, so server video frames preload like images.
+        val readsFrame = loadVideoFrame || !MediaPaths.isRemote(item.path)
         val preview by produceState<PreviewResult?>(
             initialValue = null,
             key1 = item.path,
             key2 = item.lastModifiedMillis,
+            key3 = readsFrame,
         ) {
-            value = MediaPreviewLoader.loadVideoFrame(item.path, item.lastModifiedMillis, 1600)
+            value = if (readsFrame) {
+                MediaPreviewLoader.loadVideoFrame(item.path, item.lastModifiedMillis, 1600)
+            } else {
+                PreviewResult()
+            }
         }
 
         LaunchedEffect(preview, item.path, item.lastModifiedMillis) {

@@ -99,10 +99,9 @@ object MediaPreviewLoader {
     /**
      * First frame of a server video, read with Range requests so it costs a few blocks rather than
      * the whole file. Servers without Range support (python -m http.server) keep the placeholder
-     * icon, and so do large previews: they skip the disk cache, and the player shows the frame itself.
+     * icon. Viewer-sized frames cost the same reads as thumbnails but stay in memory only.
      */
     private suspend fun loadRemoteVideoFrame(url: String, modified: Long, maxDimension: Int): PreviewResult {
-        if (maxDimension > MAX_DISK_CACHE_DIMENSION) return PreviewResult()
         val key = "video:$url:$modified:$maxDimension"
         return loadCached(key, maxDimension) {
             if (!HttpRangeReader.supportsRanges(url) || unreadableRemoteVideos.get(key) != null) {

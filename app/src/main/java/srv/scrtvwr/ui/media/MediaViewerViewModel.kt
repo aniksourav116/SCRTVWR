@@ -37,6 +37,7 @@ class MediaViewerViewModel(
             slideShowDirection = preferences.getSlideShowDirection(),
             holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
             imagePreloadDistance = preferences.getImagePreloadDistance(),
+            loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
             edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
             sortOrder = preferences.getDirectorySortOrder(),
         ),
@@ -149,6 +150,7 @@ class MediaViewerViewModel(
                 slideShowDirection = preferences.getSlideShowDirection(),
                 holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
                 imagePreloadDistance = preferences.getImagePreloadDistance(),
+                loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
                 edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
                 sortOrder = sortOrder,
                 jumpHistory = jumpHistory,
@@ -307,6 +309,8 @@ data class MediaViewerUiState(
     val slideShowDirection: SlideShowDirection = SlideShowDirection.Next,
     val holdSlideShowEnabled: Boolean = false,
     val imagePreloadDistance: Int = 5,
+    /** Whether server video pages show their first frame; local videos always do. */
+    val loadVideoThumbnails: Boolean = true,
     val edgeDialogStyle: MediaEdgeDialogStyle = MediaEdgeDialogStyle.Bottom,
     val sortOrder: DirectorySortOrder = DirectorySortOrder.NameAscending,
     /** Page indexes are only valid for [items]; it is kept only when the same source is reopened. */
