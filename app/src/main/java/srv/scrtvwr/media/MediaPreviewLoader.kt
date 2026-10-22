@@ -44,13 +44,15 @@ object MediaPreviewLoader {
     private const val MAX_DISK_CACHE_BYTES = 64L * 1024L * 1024L
     private const val MAX_DISK_CACHE_DIMENSION = 256
     private const val DISK_WRITES_PER_TRIM = 32
-    private const val REMOTE_VIDEO_MAX_BYTES = 8L * 1024L * 1024L
+    // Servers are expected on the local network. Long videos keep a large frame index, at the end
+    // for many camera files and every AVI, so the cap only stops files that are clearly broken.
+    private const val REMOTE_VIDEO_MAX_BYTES = 32L * 1024L * 1024L
     private const val REMOTE_VIDEO_TIMEOUT_MILLIS = 30_000L
     private const val REMOTE_VIDEO_SETTLE_MILLIS = 200L
     private val directoryThumbnailSemaphore = Semaphore(2)
     private val comicBookCoverSemaphore = Semaphore(2)
     private val remoteImageSemaphore = Semaphore(4)
-    private val remoteVideoSemaphore = Semaphore(2)
+    private val remoteVideoSemaphore = Semaphore(3)
     private val unreadableRemoteVideos = LruCache<String, Boolean>(256)
     private val diskCacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val diskWritesSinceTrim = AtomicInteger()

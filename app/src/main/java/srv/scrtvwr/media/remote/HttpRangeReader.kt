@@ -160,7 +160,9 @@ class HttpRangeReader(
     companion object {
         const val UNKNOWN_SIZE = -1L
         const val END_OF_FILE = -1
-        private const val BLOCK_BYTES = 256 * 1024
+        // tools/media_http_server.py answers over HTTP/1.0, so each block costs a new connection;
+        // on a home network that is cheap, but larger blocks keep long index reads to fewer requests.
+        private const val BLOCK_BYTES = 512 * 1024
         private const val MAX_CACHED_BLOCKS = 8
         private const val CONNECT_TIMEOUT_MILLIS = 10_000
         private const val READ_TIMEOUT_MILLIS = 15_000
