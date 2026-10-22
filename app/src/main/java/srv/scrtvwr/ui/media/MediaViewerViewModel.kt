@@ -280,7 +280,7 @@ data class MediaViewerUiState(
     val bookmarked: Boolean = false,
     val isChromeHidden: Boolean = false,
     val isSlideShowRunning: Boolean = false,
-    val slideShowStayMillis: Long = 3_000L,
+    val slideShowStayMillis: Long = 100L,
     val slideShowDirection: SlideShowDirection = SlideShowDirection.Next,
     val holdSlideShowEnabled: Boolean = false,
     val imagePreloadDistance: Int = 5,

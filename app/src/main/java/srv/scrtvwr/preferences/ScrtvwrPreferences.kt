@@ -291,7 +291,7 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_LAST_MEDIA_DIRECTORY = "last_media_directory"
         const val KEY_LAST_MEDIA_PATH = "last_media_path"
         const val KEY_HTTP_SERVERS = "http_servers"
-        const val DEFAULT_SLIDE_SHOW_STAY_MILLIS = 3_000L
+        const val DEFAULT_SLIDE_SHOW_STAY_MILLIS = 100L
         const val DEFAULT_IMAGE_PRELOAD_DISTANCE = 5
         const val DEFAULT_VIDEO_PRELOAD_DISTANCE = 0
         const val MAX_RECENT_DIRECTORIES = 100

@@ -753,7 +753,7 @@ private fun MediaViewerScreen(
             onDirectionChange = { slideShowDirection = it },
             onDismiss = { slideShowDialogVisible = false },
             onStart = {
-                onSlideShowStart(slideShowStayText.toLongOrNull() ?: 3_000L, slideShowDirection)
+                onSlideShowStart(slideShowStayText.toLongOrNull() ?: 100L, slideShowDirection)
                 slideShowDialogVisible = false
             },
         )
