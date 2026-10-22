@@ -58,21 +58,14 @@ object MediaCatalog {
      * [listDirectory], an unreachable server throws so the viewer can say why nothing loaded.
      */
     @Throws(IOException::class)
-    suspend fun listRemoteDirectory(directoryUrl: String, sortOrder: DirectorySortOrder): List<MediaViewerItem> =
-        listRemoteEntries(directoryUrl, sortOrder).asSequence()
-            .filterNot(RemoteEntry::isDirectory)
+    suspend fun listRemoteDirectory(directoryUrl: String, sortOrder: DirectorySortOrder): List<MediaViewerItem> {
+        // Sizes and times cost a request per file, so only the files the viewer shows ask for them.
+        val media = HttpDirectoryClient.list(directoryUrl).filter { toRemoteItem(it) != null }
+        val entries = if (sortOrder.needsFileMetadata) HttpDirectoryClient.withMetadata(media) else media
+        return entries
             .sortedWith(sortOrder.remoteEntryComparator(directoriesFirst = false))
             .mapNotNull(::toRemoteItem)
-            .toList()
-
-    /** Entries of [directoryUrl], with sizes and times only when [sortOrder] needs them. */
-    @Throws(IOException::class)
-    private suspend fun listRemoteEntries(directoryUrl: String, sortOrder: DirectorySortOrder): List<RemoteEntry> =
-        if (sortOrder.needsFileMetadata) {
-            HttpDirectoryClient.listWithMetadata(directoryUrl)
-        } else {
-            HttpDirectoryClient.list(directoryUrl)
-        }
+    }
 
     fun toRemoteItem(entry: RemoteEntry): MediaViewerItem? {
         if (entry.isDirectory) return null
