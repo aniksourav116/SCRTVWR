@@ -22,6 +22,7 @@ import srv.scrtvwr.media.remote.RemotePaths
 import srv.scrtvwr.media.remote.serverFor
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import java.io.File
+import kotlin.math.abs
 
 class MediaViewerViewModel(
     application: Application,
@@ -122,10 +123,14 @@ class MediaViewerViewModel(
 
         val sourceKey = "${directoryPath.orEmpty()}|${selectedPath.orEmpty()}"
         val pageCount = items.size
+        // Reopening the same source (a rotation recreates the screen) keeps the jump history;
+        // anything else renumbers the pages, so it starts empty.
+        var jumpHistory = JumpHistory()
         if (!force && savedStateHandle.get<String>(STATE_SOURCE) == sourceKey) {
             initialPage = savedStateHandle.get<Int>(STATE_SELECTED_PAGE)
                 ?.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
                 ?: initialPage
+            jumpHistory = _uiState.value.jumpHistory
         } else {
             savedStateHandle[STATE_SOURCE] = sourceKey
             savedStateHandle[STATE_SELECTED_PAGE] = initialPage
@@ -146,7 +151,8 @@ class MediaViewerViewModel(
                 imagePreloadDistance = preferences.getImagePreloadDistance(),
                 edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
                 sortOrder = sortOrder,
-                bookmarked = preferences.isMediaBookmarked(items.getOrNull(initialPage)?.path ?: selectedPath),
+                jumpHistory = jumpHistory,
+                bookmarked =preferences.isMediaBookmarked(items.getOrNull(initialPage)?.path ?: selectedPath),
                 isLoading = false,
             )
         }
@@ -169,6 +175,23 @@ class MediaViewerViewModel(
                 bookmarked = preferences.isMediaBookmarked(selectedPath),
             )
         }
+    }
+
+    /** Remembers a jump over several pages so it can be undone; page-by-page browsing is ignored. */
+    fun recordJump(fromPage: Int, toPage: Int) {
+        _uiState.update { it.copy(jumpHistory = it.jumpHistory.record(fromPage, toPage)) }
+    }
+
+    fun jumpBack(currentPage: Int) {
+        val (page, history) = _uiState.value.jumpHistory.stepBack(currentPage) ?: return
+        _uiState.update { it.copy(jumpHistory = history) }
+        selectPage(page)
+    }
+
+    fun jumpForward(currentPage: Int) {
+        val (page, history) = _uiState.value.jumpHistory.stepForward(currentPage) ?: return
+        _uiState.update { it.copy(jumpHistory = history) }
+        selectPage(page)
     }
 
     fun loadPreviousSource() {
@@ -286,6 +309,8 @@ data class MediaViewerUiState(
     val imagePreloadDistance: Int = 5,
     val edgeDialogStyle: MediaEdgeDialogStyle = MediaEdgeDialogStyle.Bottom,
     val sortOrder: DirectorySortOrder = DirectorySortOrder.NameAscending,
+    /** Page indexes are only valid for [items]; it is kept only when the same source is reopened. */
+    val jumpHistory: JumpHistory = JumpHistory(),
     val isLoading: Boolean = false,
     /** Set while an archive on a server downloads before it can be opened. */
     val downloadProgress: DownloadProgress? = null,
@@ -299,6 +324,46 @@ data class MediaViewerUiState(
 
     fun itemForPage(page: Int): MediaViewerItem? =
         items.getOrNull(page)
+}
+
+/**
+ * Back/forward stacks of page indexes, kept in memory only, for undoing accidental jumps
+ * such as a stray tap on the timeline.
+ */
+data class JumpHistory(
+    val back: List<Int> = emptyList(),
+    val forward: List<Int> = emptyList(),
+) {
+    fun record(fromPage: Int, toPage: Int): JumpHistory =
+        if (abs(toPage - fromPage) <= 1) {
+            this
+        } else {
+            JumpHistory(back = back.pushed(fromPage), forward = emptyList())
+        }
+
+    fun backTarget(currentPage: Int): Int? = back.dropLastWhile { it == currentPage }.lastOrNull()
+
+    fun forwardTarget(currentPage: Int): Int? = forward.dropLastWhile { it == currentPage }.lastOrNull()
+
+    /** Leaves for the newest back entry and remembers the page being left, wherever browsing took it since. */
+    fun stepBack(currentPage: Int): Pair<Int, JumpHistory>? {
+        val remaining = back.dropLastWhile { it == currentPage }
+        val target = remaining.lastOrNull() ?: return null
+        return target to JumpHistory(back = remaining.dropLast(1), forward = forward.pushed(currentPage))
+    }
+
+    fun stepForward(currentPage: Int): Pair<Int, JumpHistory>? {
+        val remaining = forward.dropLastWhile { it == currentPage }
+        val target = remaining.lastOrNull() ?: return null
+        return target to JumpHistory(back = back.pushed(currentPage), forward = remaining.dropLast(1))
+    }
+
+    private fun List<Int>.pushed(page: Int): List<Int> =
+        if (lastOrNull() == page) this else (this + page).takeLast(MAX_JUMP_HISTORY)
+
+    private companion object {
+        const val MAX_JUMP_HISTORY = 20
+    }
 }
 
 data class MediaViewerSource(
