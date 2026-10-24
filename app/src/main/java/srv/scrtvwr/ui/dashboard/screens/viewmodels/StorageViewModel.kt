@@ -163,7 +163,7 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
         serverChecks[server.id] = viewModelScope.launch {
             val status = withContext(Dispatchers.IO) {
                 try {
-                    HttpServerStatus.Online(itemCount = HttpDirectoryClient.list(server.baseUrl, refresh = true).size)
+                    HttpServerStatus.Online(itemCount = HttpDirectoryClient.listForDisplay(server.baseUrl, refresh = true).size)
                 } catch (_: HttpAuthenticationException) {
                     // Not retried: the same credentials would fail again until the user changes them.
                     HttpServerStatus.AuthenticationFailed

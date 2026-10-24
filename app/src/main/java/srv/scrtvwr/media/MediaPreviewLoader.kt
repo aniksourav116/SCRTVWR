@@ -170,7 +170,14 @@ object MediaPreviewLoader {
         loadCached("directory:$path:$modified:$maxDimension", maxDimension) {
             directoryThumbnailSemaphore.withPermit {
                 if (MediaPaths.isRemote(path)) {
-                    val image = runCatching { HttpDirectoryClient.list(path) }.getOrNull()?.firstOrNull { entry ->
+                    val entries = try {
+                        HttpDirectoryClient.listForDisplay(path)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: IOException) {
+                        return@withPermit PreviewResult()
+                    }
+                    val image = entries.firstOrNull { entry ->
                         !entry.isDirectory && MediaTypes.isImage(entry.name)
                     } ?: return@withPermit PreviewResult()
                     return@withPermit remoteImageSemaphore.withPermit { decodeRemoteImage(image.url, maxDimension) }

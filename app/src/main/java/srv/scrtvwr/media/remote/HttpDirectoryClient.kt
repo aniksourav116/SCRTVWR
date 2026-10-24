@@ -43,7 +43,7 @@ object HttpDirectoryClient {
     private const val METADATA_REQUEST_PARALLELISM = 6
     private const val METADATA_FILL_WORKERS = 4
     private const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
-    private const val VIEWER_LISTING_TIMEOUT_MILLIS = 20_000L
+    private const val DISPLAY_LISTING_TIMEOUT_MILLIS = 20_000L
     private const val VIEWER_METADATA_TIMEOUT_MILLIS = 5_000L
 
     private val listings = lruMap<String, CachedListing>(MAX_CACHED_LISTINGS)
@@ -97,10 +97,14 @@ object HttpDirectoryClient {
         return entries
     }
 
-    /** A whole listing has a deadline, including a server that keeps trickling response bytes. */
-    suspend fun listForViewer(directoryUrl: String): List<RemoteEntry> = withContext(Dispatchers.IO) {
-        withTimeoutOrNull(VIEWER_LISTING_TIMEOUT_MILLIS) {
-            list(directoryUrl, requestContext = currentCoroutineContext())
+    /**
+     * A screen owns its listing request instead of waiting on a background caller's FutureTask.
+     * Navigation cancels the connection, and the whole response has a deadline, including a
+     * server that keeps trickling bytes. Completed listings still share the short-lived cache.
+     */
+    suspend fun listForDisplay(directoryUrl: String, refresh: Boolean = false): List<RemoteEntry> = withContext(Dispatchers.IO) {
+        withTimeoutOrNull(DISPLAY_LISTING_TIMEOUT_MILLIS) {
+            list(directoryUrl, refresh = refresh, requestContext = currentCoroutineContext())
         } ?: throw IOException("Timed out loading the media directory")
     }
 

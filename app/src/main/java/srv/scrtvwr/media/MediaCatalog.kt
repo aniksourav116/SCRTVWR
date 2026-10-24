@@ -73,7 +73,7 @@ object MediaCatalog {
         sortOrder: DirectorySortOrder,
         include: (RemoteEntry) -> Boolean,
     ): List<RemoteEntry> {
-        val entries = HttpDirectoryClient.listForViewer(directoryUrl).filter(include)
+        val entries = HttpDirectoryClient.listForDisplay(directoryUrl).filter(include)
         return if (sortOrder.needsFileMetadata) HttpDirectoryClient.withViewerMetadata(entries) else entries
     }
 

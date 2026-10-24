@@ -563,7 +563,7 @@ private suspend fun File.fileExplorerEntries(
  * times fetched earlier filled in. Makes no request per file.
  */
 @Throws(IOException::class)
-private fun remoteExplorerEntries(
+private suspend fun remoteExplorerEntries(
     directoryUrl: String,
     searchQuery: String,
     showHiddenFiles: Boolean,
@@ -571,7 +571,7 @@ private fun remoteExplorerEntries(
     reload: Boolean,
 ): List<RemoteEntry> {
     val normalizedQuery = searchQuery.trim()
-    val entries = HttpDirectoryClient.list(directoryUrl, refresh = reload)
+    val entries = HttpDirectoryClient.listForDisplay(directoryUrl, refresh = reload)
         .asSequence()
         .filter { showHiddenFiles || !it.isHidden }
         .filter { entry ->
