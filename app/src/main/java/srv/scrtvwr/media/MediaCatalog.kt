@@ -73,8 +73,8 @@ object MediaCatalog {
         sortOrder: DirectorySortOrder,
         include: (RemoteEntry) -> Boolean,
     ): List<RemoteEntry> {
-        val entries = HttpDirectoryClient.list(directoryUrl).filter(include)
-        return if (sortOrder.needsFileMetadata) HttpDirectoryClient.withMetadata(entries) else entries
+        val entries = HttpDirectoryClient.listForViewer(directoryUrl).filter(include)
+        return if (sortOrder.needsFileMetadata) HttpDirectoryClient.withViewerMetadata(entries) else entries
     }
 
     fun toRemoteItem(entry: RemoteEntry): MediaViewerItem? {
@@ -98,42 +98,45 @@ object MediaCatalog {
         directoryUrl: String,
         sortOrder: DirectorySortOrder,
         root: String?,
-    ): MediaViewerSource? = firstRemoteDirectoryWithMedia(
-        from = directoryUrl,
-        candidates = DirectoryTraversal.forward(
-            tree = RemoteDirectoryTree,
-            start = directoryUrl,
-            root = RemotePaths.resolveRoot(directoryUrl, root),
-            sortOrder = sortOrder,
-        ),
-    )
+    ): MediaViewerSource? = RemoteDirectoryTree.search { tree ->
+        firstRemoteDirectoryWithMedia(
+            from = directoryUrl,
+            candidates = DirectoryTraversal.forward(
+                tree = tree,
+                start = directoryUrl,
+                root = RemotePaths.resolveRoot(directoryUrl, root),
+                sortOrder = sortOrder,
+            ),
+            tree = tree,
+        )
+    }
 
     /** [previousDirectory] for a folder on an HTTP server, never leaving [root]. */
     suspend fun previousRemoteDirectory(
         directoryUrl: String,
         sortOrder: DirectorySortOrder,
         root: String?,
-    ): MediaViewerSource? = firstRemoteDirectoryWithMedia(
-        from = directoryUrl,
-        candidates = DirectoryTraversal.backward(
-            tree = RemoteDirectoryTree,
-            start = directoryUrl,
-            root = RemotePaths.resolveRoot(directoryUrl, root),
-            sortOrder = sortOrder,
-        ),
-    )
+    ): MediaViewerSource? = RemoteDirectoryTree.search { tree ->
+        firstRemoteDirectoryWithMedia(
+            from = directoryUrl,
+            candidates = DirectoryTraversal.backward(
+                tree = tree,
+                start = directoryUrl,
+                root = RemotePaths.resolveRoot(directoryUrl, root),
+                sortOrder = sortOrder,
+            ),
+            tree = tree,
+        )
+    }
 
     private suspend fun firstRemoteDirectoryWithMedia(
         from: String,
         candidates: Sequence<String>,
+        tree: RemoteDirectoryTree.Search,
     ): MediaViewerSource? {
         for (candidate in candidates) {
             currentCoroutineContext().ensureActive()
-            val hasMedia = try {
-                HttpDirectoryClient.list(candidate).any { toRemoteItem(it) != null }
-            } catch (_: IOException) {
-                false
-            }
+            val hasMedia = tree.list(candidate).any { toRemoteItem(it) != null }
             if (hasMedia) {
                 return MediaViewerSource(DirectoryTraversal.displayName(RemoteDirectoryTree, from, candidate), candidate)
             }

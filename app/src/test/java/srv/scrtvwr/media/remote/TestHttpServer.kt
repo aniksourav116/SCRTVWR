@@ -27,12 +27,16 @@ class TestHttpServer(
 ) : Closeable {
     private val serverSocket = ServerSocket(0, 50, InetAddress.getLoopbackAddress())
     private val fileRequestCount = AtomicInteger()
+    private val directoryRequestCount = AtomicInteger()
 
     val baseUrl: String = "http://127.0.0.1:${serverSocket.localPort}/"
 
     /** Requests for files, as opposed to folder listings. */
     val fileRequests: Int
         get() = fileRequestCount.get()
+
+    val directoryRequests: Int
+        get() = directoryRequestCount.get()
 
     init {
         thread(isDaemon = true, name = "test-http-server") {
@@ -78,8 +82,10 @@ class TestHttpServer(
         val (status, contentType, body) = when {
             requiredAuthorization != null && authorization != requiredAuthorization ->
                 Triple("401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"media\"", "text/plain", ByteArray(0))
-            path.isEmpty() || path.endsWith("/") ->
+            path.isEmpty() || path.endsWith("/") -> {
+                directoryRequestCount.incrementAndGet()
                 Triple("200 OK", "text/html; charset=utf-8", listing(path).toByteArray(Charsets.UTF_8))
+            }
             file != null && supportsRanges && range != null -> {
                 fileRequestCount.incrementAndGet()
                 partial(file, range)
