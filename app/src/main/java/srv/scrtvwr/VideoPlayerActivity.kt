@@ -112,6 +112,7 @@ import androidx.media3.ui.PlayerView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -129,6 +130,8 @@ import srv.scrtvwr.media.MediaCatalog
 import srv.scrtvwr.media.MediaPaths
 import srv.scrtvwr.media.MediaTypes
 import srv.scrtvwr.media.remote.RemoteDirectoryTree
+import srv.scrtvwr.media.remote.HttpDirectoryClient
+import srv.scrtvwr.media.remote.remoteEntryComparator
 import srv.scrtvwr.media.remote.RemotePaths
 import srv.scrtvwr.media.remote.serverFor
 import srv.scrtvwr.preferences.ScrtvwrPreferences
@@ -227,24 +230,46 @@ private fun VideoPagerScreen(
     var selectedVideoPath by rememberSaveable(directoryPath, selectedPath) {
         mutableStateOf(selectedPath)
     }
+    var directoryError by remember(currentDirectoryPath) { mutableStateOf<String?>(null) }
     val loadedDirectory by produceState<VideoDirectory?>(initialValue = null, currentDirectoryPath, selectedPath) {
-        value = withContext(Dispatchers.IO) {
-            val requestedSelection = selectedPath.takeIf { currentDirectoryPath == directoryPath }
-            if (MediaPaths.isRemote(currentDirectoryPath ?: requestedSelection)) {
-                loadRemoteVideoDirectory(
-                    directoryPath = currentDirectoryPath,
-                    selectedPath = requestedSelection,
-                    sortOrder = sortOrder,
-                    preferences = preferences,
-                )
-            } else {
-                loadVideoDirectory(
-                    directoryPath = currentDirectoryPath,
-                    selectedPath = requestedSelection,
-                    sortOrder = sortOrder,
-                    traversalRoot = traversalRoot,
-                )
+        value = null
+        directoryError = null
+        val directory = try {
+            withContext(Dispatchers.IO) {
+                val requestedSelection = selectedVideoPath
+                if (MediaPaths.isRemote(currentDirectoryPath ?: requestedSelection)) {
+                    loadRemoteVideoDirectory(
+                        directoryPath = currentDirectoryPath,
+                        selectedPath = requestedSelection,
+                        sortOrder = sortOrder,
+                    )
+                } else {
+                    loadVideoDirectory(
+                        directoryPath = currentDirectoryPath,
+                        selectedPath = requestedSelection,
+                        sortOrder = sortOrder,
+                        traversalRoot = traversalRoot,
+                    )
+                }
             }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            directoryError = error.message ?: "Unable to load media."
+            return@produceState
+        }
+        value = directory
+        val remoteDirectory = currentDirectoryPath?.takeIf(MediaPaths::isRemote) ?: return@produceState
+        // Publish playable items before either optional navigation search starts.
+        launch {
+            val previous = loadRemoteVideoNeighbor(remoteDirectory, sortOrder, preferences, previous = true)
+            currentCoroutineContext().ensureActive()
+            value = value?.copy(previousDirectory = previous)
+        }
+        launch {
+            val next = loadRemoteVideoNeighbor(remoteDirectory, sortOrder, preferences, previous = false)
+            currentCoroutineContext().ensureActive()
+            value = value?.copy(nextDirectory = next)
         }
     }
     val videos = loadedDirectory?.videos.orEmpty()
@@ -266,20 +291,21 @@ private fun VideoPagerScreen(
     )
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(loadedDirectory, selectedVideoPath) {
+    LaunchedEffect(videos, currentDirectoryPath) {
         if (videos.isNotEmpty() && pagerState.currentPage != initialPage) {
             pagerState.scrollToPage(initialPage)
         }
     }
 
     LaunchedEffect(pagerState, videos) {
-        snapshotFlow { pagerState.currentPage }
-            .collect { page ->
-                videos.getOrNull(page - firstVideoPageIndex)?.let { video ->
-                    selectedVideoPath = video.path
-                    currentDirectoryPath?.let { preferences.saveLastMediaSession(it, video.path) }
-                }
+        snapshotFlow {
+            pagerState.layoutInfo.visiblePagesInfo.firstOrNull { it.index == pagerState.currentPage }?.key
+        }.collect { key ->
+            videos.firstOrNull { it.path == key }?.let { video ->
+                selectedVideoPath = video.path
+                currentDirectoryPath?.let { preferences.saveLastMediaSession(it, video.path) }
             }
+        }
     }
 
     Box(
@@ -288,6 +314,11 @@ private fun VideoPagerScreen(
             .background(Color.Black),
     ) {
         when {
+            directoryError != null -> Text(
+                text = directoryError.orEmpty(),
+                color = Color.White,
+                modifier = Modifier.align(Alignment.Center).padding(24.dp),
+            )
             loadedDirectory?.videos?.isEmpty() == true -> {
                 Text(
                     stringResource(R.string.no_videos_found),
@@ -300,6 +331,10 @@ private fun VideoPagerScreen(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
                 beyondViewportPageCount = minOf(videoPreloadDistance, pagerState.pageCount - 1),
+                key = { page ->
+                    videos.getOrNull(page - firstVideoPageIndex)?.path
+                        ?: if (page == 0) "previous:${previousDirectory?.path}" else "next:${nextDirectory?.path}"
+                },
                 userScrollEnabled = !controlsLocked,
             ) { page ->
                 val videoIndex = page - firstVideoPageIndex
@@ -1293,28 +1328,43 @@ private suspend fun loadRemoteVideoDirectory(
     directoryPath: String?,
     selectedPath: String?,
     sortOrder: DirectorySortOrder,
-    preferences: ScrtvwrPreferences,
 ): VideoDirectory {
     val directory = directoryPath?.takeIf(MediaPaths::isRemote)?.let(RemotePaths::directoryUrl)
         ?: selectedPath?.let(RemotePaths::parent)
         ?: return VideoDirectory(videos = emptyList(), previousDirectory = null, nextDirectory = null)
-    val videos = remoteMedia(directory, sortOrder).videos()
+    val videos = try {
+        MediaCatalog.listRemoteDirectory(directory, sortOrder).videos()
+    } catch (error: IOException) {
+        currentCoroutineContext().ensureActive()
+        if (selectedPath == null) throw error
+        emptyList()
+    }
     val fallbackVideos = videos.ifEmpty {
         selectedPath?.let { listOf(VideoItem(RemotePaths.name(it), it)) }.orEmpty()
     }
-    val root = RemotePaths.resolveRoot(directory, preferences.getHttpServers().serverFor(directory)?.baseUrl)
     return VideoDirectory(
         videos = fallbackVideos,
-        previousDirectory = firstRemoteMediaDirectory(
-            from = directory,
-            candidates = DirectoryTraversal.backward(RemoteDirectoryTree, directory, root, sortOrder),
-            sortOrder = sortOrder,
-        ),
-        nextDirectory = firstRemoteMediaDirectory(
-            from = directory,
-            candidates = DirectoryTraversal.forward(RemoteDirectoryTree, directory, root, sortOrder),
-            sortOrder = sortOrder,
-        ),
+        previousDirectory = null,
+        nextDirectory = null,
+    )
+}
+
+private suspend fun loadRemoteVideoNeighbor(
+    directory: String,
+    sortOrder: DirectorySortOrder,
+    preferences: ScrtvwrPreferences,
+    previous: Boolean,
+): VideoDirectoryTarget? = RemoteDirectoryTree.search { tree ->
+    val root = RemotePaths.resolveRoot(directory, preferences.getHttpServers().serverFor(directory)?.baseUrl)
+    firstRemoteMediaDirectory(
+        from = directory,
+        candidates = if (previous) {
+            DirectoryTraversal.backward(tree, directory, root, sortOrder)
+        } else {
+            DirectoryTraversal.forward(tree, directory, root, sortOrder)
+        },
+        sortOrder = sortOrder,
+        tree = tree,
     )
 }
 
@@ -1323,10 +1373,14 @@ private suspend fun firstRemoteMediaDirectory(
     from: String,
     candidates: Sequence<String>,
     sortOrder: DirectorySortOrder,
+    tree: RemoteDirectoryTree.Search,
 ): VideoDirectoryTarget? {
     for (candidate in candidates) {
         currentCoroutineContext().ensureActive()
-        val media = remoteMedia(candidate, sortOrder)
+        // Finding a navigation target must not issue a HEAD request for every file it passes.
+        val media = HttpDirectoryClient.withCachedMetadata(tree.list(candidate))
+            .sortedWith(sortOrder.remoteEntryComparator(directoriesFirst = false))
+            .mapNotNull(MediaCatalog::toRemoteItem)
         val name = DirectoryTraversal.displayName(RemoteDirectoryTree, from, candidate)
         media.videos().firstOrNull()?.let { video ->
             return VideoDirectoryTarget(name, candidate, VideoDirectoryType.Video, video.path)
@@ -1337,13 +1391,6 @@ private suspend fun firstRemoteMediaDirectory(
     }
     return null
 }
-
-private suspend fun remoteMedia(directoryUrl: String, sortOrder: DirectorySortOrder): List<MediaViewerItem> =
-    try {
-        MediaCatalog.listRemoteDirectory(directoryUrl, sortOrder)
-    } catch (_: IOException) {
-        emptyList()
-    }
 
 private fun List<MediaViewerItem>.videos(): List<VideoItem> =
     filter { it.type == MediaViewerType.Video }.map { VideoItem(it.name, it.path) }
