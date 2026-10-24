@@ -7,6 +7,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,6 +23,7 @@ import srv.scrtvwr.media.remote.RemotePaths
 import srv.scrtvwr.media.remote.serverFor
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import java.io.File
+import java.io.IOException
 import kotlin.math.abs
 
 class MediaViewerViewModel(
@@ -92,16 +94,21 @@ class MediaViewerViewModel(
             } else {
                 0
             }
-            previousSource = MediaCatalog.previousArchive(archivePath, sortOrder)
-            nextSource = MediaCatalog.nextArchive(archivePath, sortOrder)
+            previousSource = null
+            nextSource = null
         } else if (remoteDirectory != null) {
-            items = MediaCatalog.listRemoteDirectory(remoteDirectory, sortOrder)
+            items = try {
+                MediaCatalog.listRemoteDirectory(remoteDirectory, sortOrder)
+            } catch (error: IOException) {
+                currentCoroutineContext().ensureActive()
+                if (selectedPath?.let(MediaCatalog::remoteItem) == null) throw error
+                emptyList()
+            }
                 .ifEmpty { selectedPath?.let(MediaCatalog::remoteItem)?.let(::listOf).orEmpty() }
             sourceDirectoryPath = remoteDirectory
             initialPage = items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0)
-            val serverRoot = preferences.getHttpServers().serverFor(remoteDirectory)?.baseUrl
-            previousSource = MediaCatalog.previousRemoteDirectory(remoteDirectory, sortOrder, serverRoot)
-            nextSource = MediaCatalog.nextRemoteDirectory(remoteDirectory, sortOrder, serverRoot)
+            previousSource = null
+            nextSource = null
         } else {
             val directory = directoryPath?.let(::File)
             val sourceDirectory = when {
@@ -158,6 +165,31 @@ class MediaViewerViewModel(
         }
         items.getOrNull(initialPage)?.path?.let { mediaPath ->
             rememberMediaSession(sourceDirectoryPath, mediaPath)
+        }
+        if (isArchive) coroutineScope {
+            val archivePath = MediaPaths.archivePath(requireNotNull(selectedPath))
+            launch {
+                val source = MediaCatalog.previousArchive(archivePath, sortOrder)
+                currentCoroutineContext().ensureActive()
+                _uiState.update { it.copy(previousSource = source) }
+            }
+            launch {
+                val source = MediaCatalog.nextArchive(archivePath, sortOrder)
+                currentCoroutineContext().ensureActive()
+                _uiState.update { it.copy(nextSource = source) }
+            }
+        } else if (remoteDirectory != null) coroutineScope {
+            val serverRoot = preferences.getHttpServers().serverFor(remoteDirectory)?.baseUrl
+            launch {
+                val source = MediaCatalog.previousRemoteDirectory(remoteDirectory, sortOrder, serverRoot)
+                currentCoroutineContext().ensureActive()
+                _uiState.update { it.copy(previousSource = source) }
+            }
+            launch {
+                val source = MediaCatalog.nextRemoteDirectory(remoteDirectory, sortOrder, serverRoot)
+                currentCoroutineContext().ensureActive()
+                _uiState.update { it.copy(nextSource = source) }
+            }
         }
     }
 
