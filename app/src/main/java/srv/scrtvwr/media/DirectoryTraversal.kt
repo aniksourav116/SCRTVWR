@@ -51,29 +51,52 @@ object DirectoryTraversal {
     fun displayName(from: File, to: File): String = displayName(LocalTree, from, to)
 
     fun <T> forward(tree: Tree<T>, start: T, root: T, sortOrder: DirectorySortOrder): Sequence<T> = sequence {
+        var scanned = 1
+        val visited = hashSetOf(tree.key(start))
+        val ancestors = hashSetOf(tree.key(start))
         val pending = ArrayDeque<T>()
         pending.addAll(tree.subDirectories(start, sortOrder))
         var node = start
         while (!tree.isSame(node, root)) {
             val parent = tree.parent(node) ?: break
+            if (!ancestors.add(tree.key(parent)) || scanned++ >= MAX_SCANNED_DIRECTORIES) return@sequence
             pending.addAll(tree.subDirectories(parent, sortOrder).after(tree, node))
             node = parent
         }
         while (pending.isNotEmpty()) {
             val directory = pending.removeFirst()
+            if (!visited.add(tree.key(directory))) continue
             yield(directory)
+            if (scanned++ >= MAX_SCANNED_DIRECTORIES) return@sequence
             pending.addAll(0, tree.subDirectories(directory, sortOrder))
         }
     }.take(MAX_SCANNED_DIRECTORIES)
 
     fun <T> backward(tree: Tree<T>, start: T, root: T, sortOrder: DirectorySortOrder): Sequence<T> = sequence {
+        var scanned = 0
+        val visited = hashSetOf(tree.key(start))
+        val ancestors = hashSetOf(tree.key(start))
         var node = start
         while (!tree.isSame(node, root)) {
             val parent = tree.parent(node) ?: break
+            if (!ancestors.add(tree.key(parent)) || scanned++ >= MAX_SCANNED_DIRECTORIES) return@sequence
             for (sibling in tree.subDirectories(parent, sortOrder).before(tree, node).asReversed()) {
-                yieldAll(subtreeReversed(tree, sibling, sortOrder))
+                // Count expansions before yielding, and use an explicit stack for deep trees.
+                val pending = ArrayDeque<Pair<T, Boolean>>()
+                pending.addLast(sibling to false)
+                while (pending.isNotEmpty()) {
+                    val (directory, expanded) = pending.removeLast()
+                    if (expanded) {
+                        yield(directory)
+                        continue
+                    }
+                    if (!visited.add(tree.key(directory))) continue
+                    if (scanned++ >= MAX_SCANNED_DIRECTORIES) return@sequence
+                    pending.addLast(directory to true)
+                    tree.subDirectories(directory, sortOrder).forEach { child -> pending.addLast(child to false) }
+                }
             }
-            yield(parent)
+            if (visited.add(tree.key(parent))) yield(parent)
             node = parent
         }
     }.take(MAX_SCANNED_DIRECTORIES)
@@ -85,14 +108,6 @@ object DirectoryTraversal {
         return toSegments.drop(shared)
             .joinToString("/")
             .ifBlank { tree.name(to) }
-    }
-
-    /** [directory] and its subtree in reverse depth-first order, so the directory itself comes last. */
-    private fun <T> subtreeReversed(tree: Tree<T>, directory: T, sortOrder: DirectorySortOrder): Sequence<T> = sequence {
-        for (child in tree.subDirectories(directory, sortOrder).asReversed()) {
-            yieldAll(subtreeReversed(tree, child, sortOrder))
-        }
-        yield(directory)
     }
 
     private fun <T> Tree<T>.isSame(left: T, right: T): Boolean = key(left) == key(right)
