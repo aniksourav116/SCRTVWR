@@ -47,6 +47,7 @@ object MediaPreviewLoader {
     private const val REMOTE_VIDEO_MAX_BYTES = 8L * 1024L * 1024L
     private const val REMOTE_VIDEO_TIMEOUT_MILLIS = 30_000L
     private const val REMOTE_VIDEO_SETTLE_MILLIS = 200L
+    private const val REMOTE_IMAGE_TIMEOUT_MILLIS = 60_000L
     private val directoryThumbnailSemaphore = Semaphore(2)
     private val comicBookCoverSemaphore = Semaphore(2)
     private val remoteImageSemaphore = Semaphore(4)
@@ -78,7 +79,9 @@ object MediaPreviewLoader {
             if (entryName != null) {
                 loadArchiveImage(MediaPaths.archivePath(path), entryName, maxDimension, downloadArchive)
             } else if (MediaPaths.isRemote(path)) {
-                remoteImageSemaphore.withPermit { decodeRemoteImage(path, maxDimension) }
+                withTimeoutOrNull(REMOTE_IMAGE_TIMEOUT_MILLIS) {
+                    remoteImageSemaphore.withPermit { decodeRemoteImage(path, maxDimension) }
+                } ?: PreviewResult(error = "Timed out loading image")
             } else {
                 decodeFile(path, maxDimension)
             }

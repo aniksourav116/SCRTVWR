@@ -1,14 +1,17 @@
 package srv.scrtvwr.media.remote
 
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
@@ -20,13 +23,14 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.FutureTask
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.CoroutineContext
 
 /**
  * Reads directory listings and files from HTTP storage servers.
  *
  * Listings are cached briefly so a traversal that revisits folders, or a screen that refreshes
- * on resume, does not hit the server each time, and callers asking for the same folder at once
- * share one request. Sizes and modification times come from one HEAD request per file, so they
+ * on resume, does not hit the server each time. Blocking callers share in-flight requests;
+ * cancellable callers own their connections. Sizes and times come from one HEAD per file, so they
  * are only fetched for the files a caller asks about.
  */
 object HttpDirectoryClient {
@@ -39,6 +43,8 @@ object HttpDirectoryClient {
     private const val METADATA_REQUEST_PARALLELISM = 6
     private const val METADATA_FILL_WORKERS = 4
     private const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
+    private const val VIEWER_LISTING_TIMEOUT_MILLIS = 20_000L
+    private const val VIEWER_METADATA_TIMEOUT_MILLIS = 5_000L
 
     private val listings = lruMap<String, CachedListing>(MAX_CACHED_LISTINGS)
     private val listingRequests = ConcurrentHashMap<String, FutureTask<List<RemoteEntry>>>()
@@ -50,12 +56,25 @@ object HttpDirectoryClient {
     /**
      * Entries [directoryUrl] lists, in server order, without sizes or times. Blocks on the network,
      * so call it off the main thread. [refresh] skips the cache and forgets the folder's sizes and
-     * times. A call made while the same folder is already downloading waits for that download.
+     * times. Without [requestContext], concurrent calls for a folder share one download. With a
+     * context, cancellation closes this call's own connection, including while awaiting headers.
      */
     @Throws(IOException::class)
-    fun list(directoryUrl: String, refresh: Boolean = false): List<RemoteEntry> {
+    fun list(
+        directoryUrl: String,
+        refresh: Boolean = false,
+        requestContext: CoroutineContext? = null,
+    ): List<RemoteEntry> {
+        requestContext?.ensureActive()
         val url = RemotePaths.directoryUrl(directoryUrl)
         if (!refresh) cachedListing(url)?.let { return it }
+        // Cancellable callers own their connection; cancelling one must not fail other callers
+        // waiting on a shared FutureTask.
+        if (requestContext != null) {
+            val entries = fetchListing(url, requestContext)
+            if (refresh) synchronized(metadata) { metadata.remove(url) }
+            return entries
+        }
         // The cache is checked again inside the task, in case a request finished since the check above.
         val task = FutureTask { (if (refresh) null else cachedListing(url)) ?: fetchListing(url) }
         val running = listingRequests.putIfAbsent(url, task)
@@ -78,6 +97,18 @@ object HttpDirectoryClient {
         return entries
     }
 
+    /** A whole listing has a deadline, including a server that keeps trickling response bytes. */
+    suspend fun listForViewer(directoryUrl: String): List<RemoteEntry> = withContext(Dispatchers.IO) {
+        withTimeoutOrNull(VIEWER_LISTING_TIMEOUT_MILLIS) {
+            list(directoryUrl, requestContext = currentCoroutineContext())
+        } ?: throw IOException("Timed out loading the media directory")
+    }
+
+    /** Keep partial metadata cached when a large folder cannot be described promptly. */
+    suspend fun withViewerMetadata(entries: List<RemoteEntry>): List<RemoteEntry> =
+        withTimeoutOrNull(VIEWER_METADATA_TIMEOUT_MILLIS) { withMetadata(entries) }
+            ?: withCachedMetadata(entries)
+
     /** Whether [entry] needs no HEAD request: a folder, or a file whose size and time are cached. */
     fun hasMetadata(entry: RemoteEntry): Boolean = entry.isDirectory || cachedMetadata(entry.url) != null
 
@@ -97,7 +128,7 @@ object HttpDirectoryClient {
             ?: withContext(Dispatchers.IO) {
                 metadataRequests.withPermit {
                     ensureActive()
-                    fetchMetadata(entry.url)
+                    fetchMetadata(entry.url, currentCoroutineContext())
                 }
             }
             ?: return entry
@@ -137,40 +168,24 @@ object HttpDirectoryClient {
         target: File,
         onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> },
     ): Unit = withContext(Dispatchers.IO) {
-        request<Unit>(url, method = "GET") { connection ->
-            // Blocking socket reads ignore thread interrupts; closing the connection ends them.
-            val disconnectOnCancel = launch(start = CoroutineStart.UNDISPATCHED) {
-                try {
-                    awaitCancellation()
-                } finally {
-                    connection.disconnect()
-                }
-            }
-            try {
-                val totalBytes = connection.contentLengthLong
-                onProgress(0L, totalBytes)
-                var downloadedBytes = 0L
-                connection.inputStream.use { input ->
-                    target.outputStream().use { output ->
-                        val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
-                        while (true) {
-                            ensureActive()
-                            val read = input.read(buffer)
-                            if (read < 0) break
-                            downloadedBytes += read
-                            output.write(buffer, 0, read)
-                            onProgress(downloadedBytes, totalBytes)
-                        }
+        request<Unit>(url, method = "GET", requestContext = currentCoroutineContext()) { connection ->
+            val totalBytes = connection.contentLengthLong
+            onProgress(0L, totalBytes)
+            var downloadedBytes = 0L
+            connection.inputStream.use { input ->
+                target.outputStream().use { output ->
+                    val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
+                    while (true) {
+                        ensureActive()
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        downloadedBytes += read
+                        output.write(buffer, 0, read)
+                        onProgress(downloadedBytes, totalBytes)
                     }
                 }
-                if (totalBytes >= 0 && downloadedBytes != totalBytes) throw IOException("Download ended early")
-            } catch (error: IOException) {
-                // A read failing because cancellation closed the connection is a cancellation.
-                ensureActive()
-                throw error
-            } finally {
-                disconnectOnCancel.cancel()
             }
+            if (totalBytes >= 0 && downloadedBytes != totalBytes) throw IOException("Download ended early")
         }
     }
 
@@ -179,13 +194,13 @@ object HttpDirectoryClient {
             ?.takeIf { System.currentTimeMillis() - it.fetchedAtMillis < LISTING_CACHE_MILLIS }
             ?.entries
 
-    private fun fetchListing(url: String): List<RemoteEntry> {
-        val entries = request(url, method = "GET") { connection ->
+    private fun fetchListing(url: String, requestContext: CoroutineContext? = null): List<RemoteEntry> {
+        val entries = request(url, method = "GET", requestContext = requestContext) { connection ->
             val contentType = connection.contentType.orEmpty()
             if (!contentType.contains("html", ignoreCase = true)) {
                 throw IOException("$url is not a directory listing")
             }
-            val body = connection.inputStream.use { it.readLimited(MAX_LISTING_BYTES) }
+            val body = connection.inputStream.use { it.readLimited(MAX_LISTING_BYTES, requestContext) }
             // Redirects (for example "/folder" to "/folder/") change the base links resolve against.
             HttpDirectoryListingParser.parse(
                 html = String(body, contentType.charset()),
@@ -201,27 +216,46 @@ object HttpDirectoryClient {
         return synchronized(metadata) { metadata[directory]?.get(url) }
     }
 
-    private fun fetchMetadata(url: String): RemoteFileMetadata? {
+    private fun fetchMetadata(url: String, requestContext: CoroutineContext): RemoteFileMetadata? {
         cachedMetadata(url)?.let { return it }
-        val value = runCatching {
-            request(url, method = "HEAD") { connection ->
+        val value = try {
+            request(url, method = "HEAD", requestContext = requestContext) { connection ->
                 RemoteFileMetadata(
                     sizeBytes = connection.contentLengthLong.takeIf { it >= 0 } ?: RemoteEntry.UNKNOWN_SIZE,
                     lastModifiedMillis = connection.lastModified,
                 )
             }
-        }.getOrNull() ?: return null
+        } catch (_: IOException) {
+            requestContext.ensureActive()
+            return null
+        }
         RemotePaths.parent(url)?.let { directory ->
             synchronized(metadata) { metadata.getOrPut(directory) { HashMap() }[url] = value }
         }
         return value
     }
 
-    private fun <T> request(url: String, method: String, read: (HttpURLConnection) -> T): T {
+    private fun <T> request(
+        url: String,
+        method: String,
+        requestContext: CoroutineContext? = null,
+        read: (HttpURLConnection) -> T,
+    ): T {
+        requestContext?.ensureActive()
         val connection = try {
             URL(url).openConnection() as HttpURLConnection
         } catch (error: IllegalArgumentException) {
             throw IOException("Invalid server address: $url", error)
+        }
+        // Install this before responseCode: a server can stall before sending any headers.
+        val disconnectOnCancel = requestContext?.let { context ->
+            CoroutineScope(context).launch(Dispatchers.IO, start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    awaitCancellation()
+                } finally {
+                    connection.disconnect()
+                }
+            }
         }
         try {
             connection.requestMethod = method
@@ -234,17 +268,22 @@ object HttpDirectoryClient {
             if (status !in 200..299) {
                 throw IOException("HTTP $status ${connection.responseMessage.orEmpty()}".trim())
             }
-            return read(connection)
+            return read(connection).also { requestContext?.ensureActive() }
+        } catch (error: IOException) {
+            requestContext?.ensureActive()
+            throw error
         } finally {
+            disconnectOnCancel?.cancel()
             connection.disconnect()
         }
     }
 
-    private fun InputStream.readLimited(maxBytes: Long): ByteArray {
+    private fun InputStream.readLimited(maxBytes: Long, requestContext: CoroutineContext?): ByteArray {
         val output = ByteArrayOutputStream()
         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
         var total = 0L
         while (true) {
+            requestContext?.ensureActive()
             val read = read(buffer)
             if (read < 0) break
             total += read
