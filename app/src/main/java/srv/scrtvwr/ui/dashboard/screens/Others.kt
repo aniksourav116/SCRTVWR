@@ -54,6 +54,7 @@ fun Others(
         uiState = uiState,
         onShowHiddenFilesChange = viewModel::setShowHiddenFiles,
         onShowDirectoryFileActionsChange = viewModel::setShowDirectoryFileActions,
+        onLoadHttpVideoThumbnailsChange = viewModel::setLoadHttpVideoThumbnails,
         onSlideShowStayMillisChange = viewModel::setSlideShowStayMillis,
         onHoldSlideShowEnabledChange = viewModel::setHoldSlideShowEnabled,
         onSlideShowDirectionChange = viewModel::setSlideShowDirection,
@@ -69,6 +70,7 @@ fun OthersScreen(
     uiState: OthersUiState,
     onShowHiddenFilesChange: (Boolean) -> Unit,
     onShowDirectoryFileActionsChange: (Boolean) -> Unit,
+    onLoadHttpVideoThumbnailsChange: (Boolean) -> Unit,
     onSlideShowStayMillisChange: (Long) -> Unit,
     onHoldSlideShowEnabledChange: (Boolean) -> Unit,
     onSlideShowDirectionChange: (SlideShowDirection) -> Unit,
@@ -201,6 +203,20 @@ fun OthersScreen(
             )
         }
         item {
+            ListItem(
+                modifier = Modifier.fillMaxWidth(),
+                headlineContent = { Text(stringResource(R.string.load_http_video_thumbnails)) },
+                supportingContent = { Text(stringResource(R.string.load_http_video_thumbnails_summary)) },
+                leadingContent = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
+                trailingContent = {
+                    Switch(
+                        checked = uiState.loadHttpVideoThumbnails,
+                        onCheckedChange = onLoadHttpVideoThumbnailsChange,
+                    )
+                },
+            )
+        }
+        item {
             NumericPreferenceListItem(
                 headline = stringResource(R.string.video_preload_distance),
                 supporting = stringResource(R.string.video_preload_summary),
@@ -317,6 +333,7 @@ fun OthersPreview() {
             uiState = OthersUiState(
                 showHiddenFiles = true,
                 showDirectoryFileActions = false,
+                loadHttpVideoThumbnails = true,
                 slideShowStayMillis = 100L,
                 holdSlideShowEnabled = true,
                 slideShowDirection = SlideShowDirection.Next,
@@ -326,6 +343,7 @@ fun OthersPreview() {
             ),
             onShowHiddenFilesChange = {},
             onShowDirectoryFileActionsChange = {},
+            onLoadHttpVideoThumbnailsChange = {},
             onSlideShowStayMillisChange = {},
             onHoldSlideShowEnabledChange = {},
             onSlideShowDirectionChange = {},

@@ -58,6 +58,7 @@ class HistoryViewModel(
         val servers = preferences.getConnectedHttpServers()
         return HistoryUiState(
             selectedFilter = filter,
+            loadHttpVideoThumbnails = preferences.getLoadHttpVideoThumbnails(),
             directories = preferences.getMediaHistory().mediaHistoryItems(servers),
             favoriteDirectories = preferences.getBookmarkedMedia()
                 .mapNotNull(String::bookmarkSession)
@@ -75,6 +76,7 @@ data class HistoryUiState(
     val selectedFilter: HistoryFilter = HistoryFilter.ALL,
     val directories: List<HistoryDirectoryItem> = emptyList(),
     val favoriteDirectories: List<HistoryDirectoryItem> = emptyList(),
+    val loadHttpVideoThumbnails: Boolean = true,
 ) {
     val visibleDirectories: List<HistoryDirectoryItem>
         get() = when (selectedFilter) {

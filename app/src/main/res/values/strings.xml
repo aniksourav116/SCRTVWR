@@ -72,6 +72,8 @@
     <string name="show_hidden_files_summary">Include hidden items in directory listings.</string>
     <string name="show_directory_file_actions">Show file actions</string>
     <string name="show_directory_file_actions_summary">Show copy, move, and delete controls in directory listings.</string>
+    <string name="load_http_video_thumbnails">Load HTTP video thumbnails</string>
+    <string name="load_http_video_thumbnails_summary">Show video previews from HTTP servers in directory listings and history. Turn off to reduce network use.</string>
     <string name="slideshow_speed">Slide show speed</string>
     <string name="slideshow_speed_summary">Milliseconds each image stays on screen.</string>
     <string name="slideshow_direction">Slide show direction</string>

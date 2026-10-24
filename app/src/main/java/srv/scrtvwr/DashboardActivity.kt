@@ -140,7 +140,10 @@ fun ScrtvwrApp(viewModel: DashboardViewModel = viewModel()) {
                     title = stringResource(AppDestination.HISTORY.topBarLabel()),
                     showBackButton = false,
                 ) { modifier ->
-                    History(modifier)
+                    History(
+                        modifier = modifier,
+                        isVisible = visibleDestination == AppDestination.HISTORY,
+                    )
                 }
                 AppDestination.OTHERS -> BaseScaffold(
                     title = stringResource(AppDestination.OTHERS.topBarLabel()),

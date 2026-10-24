@@ -62,15 +62,16 @@ import java.io.File
 @Composable
 fun History(
     modifier: Modifier = Modifier,
+    isVisible: Boolean = true,
     viewModel: HistoryViewModel = viewModel(),
 ) {
-    LaunchedEffect(Unit) {
-        viewModel.refresh()
+    LaunchedEffect(isVisible) {
+        if (isVisible) viewModel.refresh()
     }
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner, isVisible) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) viewModel.refresh()
+            if (event == Lifecycle.Event.ON_RESUME && isVisible) viewModel.refresh()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -150,7 +151,9 @@ fun HistoryScreen(
                     ListItem(
                         headlineContent = { Text(directory.name) },
                         supportingContent = { Text(directory.path) },
-                        leadingContent = { HistoryThumbnail(directory) },
+                        leadingContent = {
+                            HistoryThumbnail(directory, loadHttpVideoThumbnails = uiState.loadHttpVideoThumbnails)
+                        },
                         trailingContent = {
                             IconButton(onClick = { onRemoveDirectory(directory) }) {
                                 Icon(
@@ -172,6 +175,7 @@ fun HistoryScreen(
 @Composable
 private fun HistoryThumbnail(
     item: HistoryDirectoryItem,
+    loadHttpVideoThumbnails: Boolean,
     modifier: Modifier = Modifier.size(56.dp),
 ) {
     val mediaPath = item.mediaPath
@@ -180,13 +184,16 @@ private fun HistoryThumbnail(
     val sourceFile = sourcePath?.takeUnless(MediaPaths::isRemote)?.let(::File)
     val sourceModified = sourceFile?.lastModified() ?: 0L
     val isVideo = sourcePath?.let(MediaTypes::isVideo) == true
+    val skipVideoThumbnail = !loadHttpVideoThumbnails && isVideo &&
+        sourcePath?.let(MediaPaths::isRemote) == true
     val preview by produceState<PreviewResult?>(
         initialValue = null,
         key1 = mediaPath,
         key2 = sourceModified,
+        key3 = skipVideoThumbnail,
     ) {
         value = when {
-            mediaPath == null -> PreviewResult()
+            mediaPath == null || skipVideoThumbnail -> PreviewResult()
             isVideo -> MediaPreviewLoader.loadVideoFrame(mediaPath, sourceModified, 112)
             // A server archive is only read here once the viewer has downloaded it.
             else -> MediaPreviewLoader.loadImage(mediaPath, sourceModified, 112, downloadArchive = false)

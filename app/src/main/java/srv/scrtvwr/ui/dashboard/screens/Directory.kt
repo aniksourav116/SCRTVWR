@@ -852,7 +852,14 @@ private fun DirectoryList(
                 DirectoryListRow(
                     title = entry.name,
                     subtitle = entry.supportingText(),
-                    thumbnail = { EntryThumbnail(entry, size = 48, style = style) },
+                    thumbnail = {
+                        EntryThumbnail(
+                            entry = entry,
+                            size = 48,
+                            style = style,
+                            loadHttpVideoThumbnails = uiState.loadHttpVideoThumbnails,
+                        )
+                    },
                     style = style,
                     onClick = {
                         when {
@@ -1032,6 +1039,7 @@ private fun DirectoryGrid(
                             entry = entry,
                             size = 128,
                             style = style,
+                            loadHttpVideoThumbnails = uiState.loadHttpVideoThumbnails,
                             showFolderBadge = entry.isDirectory,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1177,18 +1185,22 @@ private fun EntryThumbnail(
     entry: DirectoryEntry,
     size: Int,
     style: EntryVisualStyle,
+    loadHttpVideoThumbnails: Boolean,
     showFolderBadge: Boolean = false,
     modifier: Modifier = Modifier.size(size.dp),
 ) {
     // A server file's time arrives after its row appears; keying on it would restart the download.
     val modified = if (MediaPaths.isRemote(entry.path)) 0L else entry.lastModifiedMillis
+    val skipVideoThumbnail = !loadHttpVideoThumbnails &&
+        MediaPaths.isRemote(entry.path) && entry.mediaType == DirectoryMediaType.Video
     val preview by produceState<PreviewResult?>(
         initialValue = null,
         key1 = entry.path,
         key2 = modified,
-        key3 = entry.isDirectory,
+        key3 = entry.isDirectory to skipVideoThumbnail,
     ) {
         value = when {
+            skipVideoThumbnail -> PreviewResult()
             entry.isDirectory -> MediaPreviewLoader.loadDirectoryThumbnail(entry.path, modified, size * 2)
             entry.mediaType == DirectoryMediaType.Image -> MediaPreviewLoader.loadImage(entry.path, modified, size * 2)
             entry.mediaType == DirectoryMediaType.Video -> MediaPreviewLoader.loadVideoFrame(entry.path, modified, size * 2)
