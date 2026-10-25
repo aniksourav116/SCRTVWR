@@ -244,10 +244,13 @@ private fun VideoPagerScreen(
         }
     }
 
-    LaunchedEffect(pagerState, videos) {
+    // Not restarted by a re-sort: a restart would read the page index from before the pager moved
+    // to the video's new place, and select whatever video now sits there.
+    val latestVideos by rememberUpdatedState(videos)
+    LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.currentPage }
             .collect { page ->
-                val video = videos.getOrNull(page - firstVideoPageIndex)
+                val video = latestVideos.getOrNull(page - firstVideoPageIndex)
                 if (video != null) {
                     viewModel.selectVideo(video.path)
                 } else {
@@ -355,6 +358,26 @@ private fun VideoPagerScreen(
                         },
                     )
                 }
+            }
+        }
+
+        if (uiState.isSorting && !uiState.isLoading) {
+            // Below the title bar, which the page's controls draw at the top.
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 88.dp)
+                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
+                Text(
+                    stringResource(R.string.sorting_media),
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelMedium,
+                )
             }
         }
     }

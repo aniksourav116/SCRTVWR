@@ -23,6 +23,7 @@ import srv.scrtvwr.media.remote.serverFor
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.sort.fileComparator
+import srv.scrtvwr.ui.sort.needsFileMetadata
 import java.io.File
 import java.io.IOException
 
@@ -38,6 +39,7 @@ class VideoPlayerViewModel(
     private val traversalRoot = runCatching { Environment.getExternalStorageDirectory() }.getOrNull()
     private var loadJob: Job? = null
     private var neighbourJob: Job? = null
+    @Volatile private var sortJob: Job? = null
     private var neighbourSearchLoadId = -1
     // The folder the current list was read from, for finding the folders around it.
     @Volatile private var loadedFolder: LoadedFolder? = null
@@ -105,6 +107,7 @@ class VideoPlayerViewModel(
     private fun load(directoryPath: String?, selectedPath: String?) {
         loadJob?.cancel()
         neighbourJob?.cancel()
+        sortJob?.cancel()
         neighbourSearchLoadId = -1
         savedStateHandle[STATE_DIRECTORY] = directoryPath
         savedStateHandle[STATE_SELECTED] = selectedPath
@@ -132,7 +135,37 @@ class VideoPlayerViewModel(
                     isPreviousDirectoryKnown = hasNoFolder,
                     isNextDirectoryKnown = hasNoFolder,
                     isLoading = false,
+                    isSorting = folder.needsSorting,
                 )
+            }
+            if (folder.needsSorting) sortInPlace(sortOrder)
+        }
+    }
+
+    /**
+     * Fetches the sizes and times [sortOrder] compares for the server videos on screen, then puts
+     * them in that order. The video playing keeps playing: pages follow their video, not their index.
+     */
+    private fun sortInPlace(sortOrder: DirectorySortOrder) {
+        sortJob?.cancel()
+        val state = _uiState.value
+        val loadId = state.loadId
+        sortJob = viewModelScope.launch(Dispatchers.IO) {
+            val sorted = try {
+                MediaCatalog.sorted(MediaCatalog.withRemoteMetadata(state.videos), sortOrder)
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // The list stays in name order.
+                null
+            }
+            ensureActive()
+            _uiState.update {
+                when {
+                    it.loadId != loadId -> it
+                    sorted == null -> it.copy(isSorting = false)
+                    else -> it.copy(videos = sorted, isSorting = false)
+                }
             }
         }
     }
@@ -192,6 +225,8 @@ data class VideoPlayerUiState(
     /** Whether [nextDirectory] is the search's answer, rather than null because it has not finished. */
     val isNextDirectoryKnown: Boolean = false,
     val isLoading: Boolean = true,
+    /** Set while the list waits for the file sizes and times its sort order compares. */
+    val isSorting: Boolean = false,
 )
 
 /** A folder next to the player's, opened at [selectedMediaPath]: in the player, or in the viewer for images. */
@@ -207,7 +242,12 @@ enum class VideoDirectoryType { Video, Image }
 /** What a list was read from: an absolute folder path, or a folder URL on a server. */
 private class LoadedFolder(val path: String, val isRemote: Boolean, val sortOrder: DirectorySortOrder)
 
-private class VideoFolder(val path: String?, val videos: List<MediaViewerItem>)
+private class VideoFolder(
+    val path: String?,
+    val videos: List<MediaViewerItem>,
+    /** Whether [videos] are in name order only because their sizes and times were not known yet. */
+    val needsSorting: Boolean = false,
+)
 
 private fun loadVideoFolder(directoryPath: String?, selectedPath: String?, sortOrder: DirectorySortOrder): VideoFolder {
     val directory = directoryPath?.let(::File)?.takeIf(File::isDirectory)
@@ -228,11 +268,19 @@ private suspend fun loadRemoteVideoFolder(
     val directory = directoryPath?.takeIf(MediaPaths::isRemote)?.let(RemotePaths::directoryUrl)
         ?: selectedPath?.let(RemotePaths::parent)
         ?: return VideoFolder(path = null, videos = emptyList())
-    val videos = remoteMedia(directory, sortOrder).videos()
+    val listed = try {
+        MediaCatalog.listRemoteDirectoryUnsorted(directory).videos()
+    } catch (_: IOException) {
+        emptyList()
+    }
+    // Sizes and times cost a request per file. Until they arrive the list shows in name order, the
+    // order most folders are browsed in, and sortInPlace sorts it afterwards.
+    val needsSorting = sortOrder.needsFileMetadata && !MediaCatalog.hasRemoteMetadata(listed)
+    val videos = MediaCatalog.sorted(listed, if (needsSorting) DirectorySortOrder.NameAscending else sortOrder)
     val fallbackVideos = videos.ifEmpty {
         selectedPath?.let(MediaCatalog::remoteItem)?.let(::listOf).orEmpty()
     }
-    return VideoFolder(path = directory, videos = fallbackVideos)
+    return VideoFolder(path = directory, videos = fallbackVideos, needsSorting = needsSorting && videos.isNotEmpty())
 }
 
 private fun File?.listVideos(sortOrder: DirectorySortOrder): List<MediaViewerItem> = this?.listFiles()
