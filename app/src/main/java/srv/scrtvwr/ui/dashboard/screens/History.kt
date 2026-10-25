@@ -25,6 +25,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
@@ -33,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +54,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HistoryFilter
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HistoryUiState
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.HistoryUndoMessage
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.HistoryViewModel
 import srv.scrtvwr.R
 import srv.scrtvwr.MediaViewerActivity
@@ -83,6 +89,8 @@ fun History(
         onFilterSelected = viewModel::selectFilter,
         onRemoveDirectory = viewModel::removeItem,
         onClearVisible = viewModel::clearVisibleItems,
+        onUndo = viewModel::undo,
+        onUndoDismissed = viewModel::dismissUndo,
         onOpenDirectory = { directoryPath, mediaPath ->
             context.startActivity(Intent(context, MediaViewerActivity::class.java).apply {
                 putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, directoryPath)
@@ -101,71 +109,93 @@ fun HistoryScreen(
     onClearVisible: () -> Unit,
     onOpenDirectory: (String, String?) -> Unit,
     modifier: Modifier = Modifier,
+    onUndo: (Long) -> Unit = {},
+    onUndoDismissed: (Long) -> Unit = {},
 ) {
-    Column(
-        modifier = modifier.fillMaxSize().padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    val snackbarHostState = remember { SnackbarHostState() }
+    val undo = uiState.undo
+    val undoMessage = undo?.message?.let { stringResource(it.labelResource()) }
+    val undoLabel = stringResource(R.string.undo)
+    LaunchedEffect(undo?.id) {
+        if (undo == null || undoMessage == null) return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = undoMessage,
+            actionLabel = undoLabel,
+            duration = SnackbarDuration.Short,
+        )
+        if (result == SnackbarResult.ActionPerformed) onUndo(undo.id) else onUndoDismissed(undo.id)
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(
-                modifier = Modifier.weight(1f),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                HistoryFilter.entries.forEach { filter ->
-                    FilterChip(
-                        selected = filter == uiState.selectedFilter,
-                        onClick = { onFilterSelected(filter) },
-                        label = { Text(stringResource(filter.labelResource())) },
-                    )
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    HistoryFilter.entries.forEach { filter ->
+                        FilterChip(
+                            selected = filter == uiState.selectedFilter,
+                            onClick = { onFilterSelected(filter) },
+                            label = { Text(stringResource(filter.labelResource())) },
+                        )
+                    }
+                }
+                if (uiState.visibleDirectories.isNotEmpty()) {
+                    TextButton(onClick = onClearVisible) {
+                        Icon(Icons.Default.DeleteSweep, contentDescription = null)
+                        Text(stringResource(uiState.selectedFilter.clearLabelResource()))
+                    }
                 }
             }
-            if (uiState.visibleDirectories.isNotEmpty()) {
-                TextButton(onClick = onClearVisible) {
-                    Icon(Icons.Default.DeleteSweep, contentDescription = null)
-                    Text(stringResource(uiState.selectedFilter.clearLabelResource()))
+            if (uiState.visibleDirectories.isEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Icon(Icons.Default.History, contentDescription = null)
+                    Text(
+                        stringResource(
+                            if (uiState.selectedFilter == HistoryFilter.FAVORITES) R.string.no_favorites else R.string.no_history,
+                        ),
+                        modifier = Modifier.padding(top = 8.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    items(uiState.visibleDirectories, key = { it.mediaPath ?: it.path }) { directory ->
+                        ListItem(
+                            headlineContent = { Text(directory.name) },
+                            supportingContent = { Text(directory.path) },
+                            leadingContent = { HistoryThumbnail(directory, loadVideoFrame = uiState.loadVideoThumbnails) },
+                            trailingContent = {
+                                IconButton(onClick = { onRemoveDirectory(directory) }) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = stringResource(R.string.remove_history_item),
+                                    )
+                                }
+                            },
+                            modifier = Modifier.clickable(role = Role.Button) {
+                                onOpenDirectory(directory.path, directory.mediaPath)
+                            },
+                        )
+                    }
                 }
             }
         }
-        if (uiState.visibleDirectories.isEmpty()) {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Icon(Icons.Default.History, contentDescription = null)
-                Text(
-                    stringResource(
-                        if (uiState.selectedFilter == HistoryFilter.FAVORITES) R.string.no_favorites else R.string.no_history,
-                    ),
-                    modifier = Modifier.padding(top = 8.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        } else {
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(uiState.visibleDirectories, key = { it.mediaPath ?: it.path }) { directory ->
-                    ListItem(
-                        headlineContent = { Text(directory.name) },
-                        supportingContent = { Text(directory.path) },
-                        leadingContent = { HistoryThumbnail(directory, loadVideoFrame = uiState.loadVideoThumbnails) },
-                        trailingContent = {
-                            IconButton(onClick = { onRemoveDirectory(directory) }) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = stringResource(R.string.remove_history_item),
-                                )
-                            }
-                        },
-                        modifier = Modifier.clickable(role = Role.Button) {
-                            onOpenDirectory(directory.path, directory.mediaPath)
-                        },
-                    )
-                }
-            }
-        }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
     }
 }
 
@@ -220,6 +250,13 @@ private fun HistoryThumbnail(
             Icon(Icons.Default.ImageNotSupported, contentDescription = null)
         }
     }
+}
+
+private fun HistoryUndoMessage.labelResource(): Int = when (this) {
+    HistoryUndoMessage.HistoryItemRemoved -> R.string.history_item_removed
+    HistoryUndoMessage.FavoriteRemoved -> R.string.favorite_removed
+    HistoryUndoMessage.HistoryCleared -> R.string.history_cleared
+    HistoryUndoMessage.FavoritesCleared -> R.string.favorites_cleared
 }
 
 private fun HistoryFilter.labelResource(): Int = when (this) {

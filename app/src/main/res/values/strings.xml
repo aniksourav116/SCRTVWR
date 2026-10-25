@@ -66,6 +66,11 @@
     <string name="no_history">No viewed directories yet.</string>
     <string name="clear_history">Clear history</string>
     <string name="clear_favorites">Clear favorites</string>
+    <string name="undo">Undo</string>
+    <string name="history_item_removed">Removed from history</string>
+    <string name="favorite_removed">Removed from favorites</string>
+    <string name="history_cleared">History cleared</string>
+    <string name="favorites_cleared">Favorites cleared</string>
     <string name="remove_history_item">Remove item</string>
     <string name="other_options">Other options</string>
     <string name="show_hidden_files">Show hidden files</string>

@@ -234,6 +234,24 @@ class ScrtvwrPreferences(context: Context) {
             .apply()
     }
 
+    /** Everything the history screen can remove, so a removal can be undone. */
+    fun getMediaHistorySnapshot(): MediaHistorySnapshot =
+        MediaHistorySnapshot(
+            mediaHistory = preferences.getString(KEY_MEDIA_HISTORY, null),
+            lastMediaDirectory = preferences.getString(KEY_LAST_MEDIA_DIRECTORY, null),
+            lastMediaPath = preferences.getString(KEY_LAST_MEDIA_PATH, null),
+            bookmarkedMedia = getBookmarkedMedia(),
+        )
+
+    fun restoreMediaHistorySnapshot(snapshot: MediaHistorySnapshot) {
+        preferences.edit()
+            .putString(KEY_MEDIA_HISTORY, snapshot.mediaHistory)
+            .putString(KEY_LAST_MEDIA_DIRECTORY, snapshot.lastMediaDirectory)
+            .putString(KEY_LAST_MEDIA_PATH, snapshot.lastMediaPath)
+            .putStringSet(KEY_BOOKMARKED_MEDIA, snapshot.bookmarkedMedia)
+            .apply()
+    }
+
     private fun encodeMediaHistory(values: List<LastMediaSession>): String {
         val json = JSONArray()
         values.forEach { session ->
@@ -335,4 +353,12 @@ class ScrtvwrPreferences(context: Context) {
 data class LastMediaSession(
     val directoryPath: String,
     val mediaPath: String?,
+)
+
+/** Saved history and favorites as stored, see [ScrtvwrPreferences.getMediaHistorySnapshot]. */
+data class MediaHistorySnapshot(
+    val mediaHistory: String?,
+    val lastMediaDirectory: String?,
+    val lastMediaPath: String?,
+    val bookmarkedMedia: Set<String>,
 )
