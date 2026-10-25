@@ -50,7 +50,9 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FirstPage
 import androidx.compose.material.icons.filled.FitScreen
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.ImageNotSupported
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayCircle
@@ -58,6 +60,9 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
 import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -512,6 +517,12 @@ private fun MediaViewerScreen(
                             ) {
                                 DropdownMenuItem(
                                     text = { Text(stringResource(if (uiState.fillFrame) R.string.fit_screen else R.string.fill_screen)) },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (uiState.fillFrame) Icons.Default.FitScreen else Icons.Default.Fullscreen,
+                                            contentDescription = null,
+                                        )
+                                    },
                                     onClick = {
                                         onFitClick()
                                         menuExpanded = false
@@ -519,6 +530,7 @@ private fun MediaViewerScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.details)) },
+                                    leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
                                     onClick = {
                                         detailsDialogVisible = true
                                         menuExpanded = false
@@ -526,6 +538,7 @@ private fun MediaViewerScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.rotate_90)) },
+                                    leadingIcon = { Icon(Icons.Default.Rotate90DegreesCcw, contentDescription = null) },
                                     onClick = {
                                         onRotateClick()
                                         menuExpanded = false
@@ -546,6 +559,12 @@ private fun MediaViewerScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text(stringResource(if (isCurrentMediaZoomed) R.string.reset_zoom else R.string.zoom_in)) },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (isCurrentMediaZoomed) Icons.Default.ZoomOut else Icons.Default.ZoomIn,
+                                            contentDescription = null,
+                                        )
+                                    },
                                     enabled = selectedItem?.type == MediaViewerType.Image,
                                     onClick = {
                                         toggleCurrentImageZoom()
@@ -554,6 +573,7 @@ private fun MediaViewerScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.slideshow_skips_videos)) },
+                                    leadingIcon = { Icon(Icons.Default.Slideshow, contentDescription = null) },
                                     trailingIcon = { Checkbox(checked = uiState.slideShowSkipsVideos, onCheckedChange = null) },
                                     onClick = {
                                         onSlideShowSkipsVideosToggle()
@@ -562,6 +582,7 @@ private fun MediaViewerScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.hold_slideshow_skips_videos)) },
+                                    leadingIcon = { Icon(Icons.Default.TouchApp, contentDescription = null) },
                                     trailingIcon = { Checkbox(checked = uiState.holdSlideShowSkipsVideos, onCheckedChange = null) },
                                     onClick = {
                                         onHoldSlideShowSkipsVideosToggle()

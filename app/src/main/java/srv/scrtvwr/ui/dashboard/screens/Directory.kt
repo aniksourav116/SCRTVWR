@@ -44,6 +44,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.filled.ViewList
@@ -51,6 +52,7 @@ import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.GridView
@@ -826,6 +828,7 @@ private fun DirectoryEntryActionMenu(
             if (showFileActions) {
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.copy)) },
+                    leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
                     onClick = {
                         onCopyEntry(entry)
                         expanded = false
@@ -833,6 +836,7 @@ private fun DirectoryEntryActionMenu(
                 )
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.move)) },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = null) },
                     onClick = {
                         onMoveEntry(entry)
                         expanded = false
