@@ -12,6 +12,7 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.shape.CircleShape
@@ -38,6 +39,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -111,6 +113,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -157,7 +160,9 @@ import srv.scrtvwr.ui.components.BaseScaffold
 import srv.scrtvwr.ui.components.copyLink
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import srv.scrtvwr.util.time.TimeUtil
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -1090,7 +1095,7 @@ private fun DirectoryList(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = 4.dp, bottom = uiState.listBottomPadding, end = 28.dp),
+            contentPadding = PaddingValues(top = 4.dp, bottom = uiState.listBottomPadding),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (uiState.canNavigateUp) {
@@ -1158,9 +1163,11 @@ private fun DirectoryList(
             totalItems = listState.layoutInfo.totalItemsCount,
             visibleItems = listState.layoutInfo.visibleItemsInfo.size,
             firstVisibleItemIndex = listState.firstVisibleItemIndex,
+            isScrolling = listState.isScrollInProgress,
             onScrollToItem = { index ->
                 coroutineScope.launch { listState.scrollToItem(index) }
             },
+            labelForItem = uiState::fastScrollLabel,
             modifier = Modifier.align(Alignment.CenterEnd),
         )
     }
@@ -1267,7 +1274,7 @@ private fun DirectoryGrid(
             state = gridState,
             columns = GridCells.Adaptive(112.dp),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = 4.dp, end = 28.dp, bottom = uiState.listBottomPadding),
+            contentPadding = PaddingValues(top = 4.dp, bottom = uiState.listBottomPadding),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
@@ -1356,9 +1363,11 @@ private fun DirectoryGrid(
             totalItems = gridState.layoutInfo.totalItemsCount,
             visibleItems = gridState.layoutInfo.visibleItemsInfo.size,
             firstVisibleItemIndex = gridState.firstVisibleItemIndex,
+            isScrolling = gridState.isScrollInProgress,
             onScrollToItem = { index ->
                 coroutineScope.launch { gridState.scrollToItem(index) }
             },
+            labelForItem = uiState::fastScrollLabel,
             modifier = Modifier.align(Alignment.CenterEnd),
         )
     }
@@ -1369,12 +1378,26 @@ private fun DirectoryFastScroller(
     totalItems: Int,
     visibleItems: Int,
     firstVisibleItemIndex: Int,
+    isScrolling: Boolean,
     onScrollToItem: (Int) -> Unit,
+    labelForItem: (Int) -> String?,
     modifier: Modifier = Modifier,
 ) {
     val maxIndex = (totalItems - visibleItems).coerceAtLeast(0)
     if (totalItems <= 0 || maxIndex == 0) return
 
+    var isDragging by remember { mutableStateOf(false) }
+    var isShown by remember { mutableStateOf(false) }
+    // Shown while the list moves, then fades so it covers nothing while reading.
+    LaunchedEffect(isScrolling, isDragging) {
+        if (isScrolling || isDragging) {
+            isShown = true
+        } else {
+            delay(FAST_SCROLLER_HIDE_DELAY_MILLIS)
+            isShown = false
+        }
+    }
+    val alpha by animateFloatAsState(targetValue = if (isShown) 1f else 0f, label = "fastScrollerAlpha")
     var trackHeightPx by remember { mutableStateOf(0) }
     val density = LocalDensity.current
     val handleHeight = 52.dp
@@ -1394,12 +1417,25 @@ private fun DirectoryFastScroller(
             .width(28.dp)
             .padding(vertical = 8.dp)
             .onSizeChanged { trackHeightPx = it.height }
-            .pointerInput(totalItems, visibleItems, trackHeightPx) {
-                detectDragGestures(
-                    onDragStart = { offset -> scrollToOffset(offset.y) },
-                    onDrag = { change, _ -> scrollToOffset(change.position.y) },
-                )
-            },
+            .graphicsLayer { this.alpha = alpha }
+            // A hidden scroller lets touches reach the entries beneath it.
+            .then(
+                if (isShown) {
+                    Modifier.pointerInput(totalItems, visibleItems, trackHeightPx) {
+                        detectDragGestures(
+                            onDragStart = { offset ->
+                                isDragging = true
+                                scrollToOffset(offset.y)
+                            },
+                            onDragEnd = { isDragging = false },
+                            onDragCancel = { isDragging = false },
+                            onDrag = { change, _ -> scrollToOffset(change.position.y) },
+                        )
+                    }
+                } else {
+                    Modifier
+                },
+            ),
         contentAlignment = Alignment.TopCenter,
     ) {
         Box(
@@ -1420,8 +1456,48 @@ private fun DirectoryFastScroller(
             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.72f),
             contentColor = MaterialTheme.colorScheme.onPrimary,
         ) {}
+        if (isDragging) {
+            labelForItem(firstVisibleItemIndex)?.let { label ->
+                // Beside the handle, outside the narrow track.
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset { IntOffset(-(28.dp + 8.dp).roundToPx(), handleOffset) }
+                        .wrapContentSize(Alignment.TopEnd, unbounded = true),
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    shadowElevation = 2.dp,
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    )
+                }
+            }
+        }
     }
 }
+
+/**
+ * What the fast scroller bubble shows for list item [index]: the part of the entry its sort order
+ * goes by, or null when the entry has none (the parent row, a folder's size, an unknown date).
+ */
+private fun DirectoryUiState.fastScrollLabel(index: Int): String? {
+    val entry = entries.getOrNull(index - if (canNavigateUp) 1 else 0) ?: return null
+    return when (sortOrder) {
+        DirectorySortOrder.NameAscending,
+        DirectorySortOrder.NameDescending -> entry.name.firstOrNull()?.uppercaseChar()?.toString()
+        DirectorySortOrder.NewestFirst,
+        DirectorySortOrder.OldestFirst -> entry.lastModifiedMillis.takeIf { it > 0L }?.let(TimeUtil::formatDisplayDate)
+        DirectorySortOrder.LargestFirst,
+        DirectorySortOrder.SmallestFirst -> entry.sizeBytes.takeIf { !entry.isDirectory && it >= 0L }?.let(::formatBytes)
+    }
+}
+
+private const val FAST_SCROLLER_HIDE_DELAY_MILLIS = 1_500L
 
 @Composable
 private fun DirectoryGridCard(
