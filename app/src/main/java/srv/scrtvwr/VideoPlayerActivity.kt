@@ -435,6 +435,8 @@ private fun VideoPage(
     var reloadWhenActive by remember { mutableStateOf(false) }
     var activeReloadAttempts by remember(item.path) { mutableStateOf(0) }
     val latestIsActive by rememberUpdatedState(isActive)
+    // The listener lives as long as the player, but the completion action can change meanwhile.
+    val latestOnEnded by rememberUpdatedState(onEnded)
 
     fun saveCurrentPosition() {
         if (prepareRequested || player.playbackState != Player.STATE_IDLE) {
@@ -485,7 +487,7 @@ private fun VideoPage(
                         player.seekTo(0L)
                         prepareRequested = false
                     }
-                    onEnded()
+                    latestOnEnded()
                 }
             }
 
