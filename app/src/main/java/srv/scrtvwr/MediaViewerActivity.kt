@@ -203,6 +203,7 @@ private fun MediaViewerRoute(
         onBookmarkClick = viewModel::toggleBookmark,
         onBookmarkAdd = viewModel::addBookmark,
         onChromeToggle = viewModel::toggleChrome,
+        onFindSources = viewModel::findNeighbourSources,
         onPreviousSourceClick = viewModel::loadPreviousSource,
         onNextSourceClick = viewModel::loadNextSource,
         onSlideShowStart = viewModel::startSlideShow,
@@ -226,6 +227,7 @@ private fun MediaViewerScreen(
     onBookmarkClick: () -> Unit,
     onBookmarkAdd: (String) -> Unit,
     onChromeToggle: () -> Unit,
+    onFindSources: () -> Unit,
     onPreviousSourceClick: () -> Unit,
     onNextSourceClick: () -> Unit,
     onSlideShowStart: (Long, SlideShowDirection) -> Unit,
@@ -260,6 +262,8 @@ private fun MediaViewerScreen(
     var pseudoSlideShowPageOffset by remember { mutableStateOf(1) }
     var pseudoSlideShowStartPage by remember { mutableStateOf<Int?>(null) }
     val readyMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
+    // Pages whose load has finished, with or without a picture.
+    val settledMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
     val zoomedMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
     var zoomCommand by remember { mutableStateOf<ZoomCommand?>(null) }
     var bookmarkFlashId by remember { mutableIntStateOf(0) }
@@ -375,6 +379,14 @@ private fun MediaViewerScreen(
     val selectedItem = uiState.itemForPage(pagerState.currentPage)
     val selectedMediaKey = selectedItem?.readinessKey
     val isCurrentMediaZoomed = selectedMediaKey?.let { zoomedMedia[it] == true } == true
+
+    // Neighbouring sources are looked for only once the media on screen is done, so walking other
+    // folders never competes with it.
+    LaunchedEffect(uiState.loadId, selectedMediaKey) {
+        val mediaKey = selectedMediaKey ?: return@LaunchedEffect
+        snapshotFlow { settledMedia[mediaKey] == true }.first { it }
+        onFindSources()
+    }
     fun toggleCurrentImageZoom() {
         val mediaKey = selectedMediaKey ?: return
         zoomCommand = ZoomCommand(
@@ -708,6 +720,7 @@ private fun MediaViewerScreen(
                             zoomCommand = zoomCommand,
                             loadVideoFrame = uiState.loadVideoThumbnails,
                             onReady = { readyMedia[item.readinessKey] = true },
+                            onSettled = { settledMedia[item.readinessKey] = true },
                             onZoomChanged = { zoomed ->
                                 if (zoomed) {
                                     zoomedMedia[item.readinessKey] = true
@@ -1032,6 +1045,7 @@ private fun MediaPage(
     zoomCommand: ZoomCommand?,
     loadVideoFrame: Boolean,
     onReady: () -> Unit,
+    onSettled: () -> Unit,
     onZoomChanged: (Boolean) -> Unit,
     onContentClick: () -> Unit,
     onBookmark: () -> Unit,
@@ -1054,7 +1068,10 @@ private fun MediaPage(
         }
 
         LaunchedEffect(preview, item.path, item.lastModifiedMillis) {
-            if (preview != null) onReady()
+            if (preview != null) {
+                onSettled()
+                onReady()
+            }
         }
 
         Box(
@@ -1114,8 +1131,10 @@ private fun MediaPage(
         value = MediaPreviewLoader.loadImage(item.path, item.lastModifiedMillis, 1600)
     }
 
-    LaunchedEffect(preview?.bitmap, item.path, item.lastModifiedMillis) {
-        if (preview?.bitmap != null) onReady()
+    LaunchedEffect(preview, item.path, item.lastModifiedMillis) {
+        val result = preview ?: return@LaunchedEffect
+        onSettled()
+        if (result.bitmap != null) onReady()
     }
 
     var imageScale by remember(item.path, item.lastModifiedMillis) { mutableFloatStateOf(MIN_IMAGE_ZOOM) }
@@ -1839,6 +1858,7 @@ private fun MediaViewerScreenPreview() {
             onBookmarkClick = {},
             onBookmarkAdd = {},
             onChromeToggle = {},
+            onFindSources = {},
             onPreviousSourceClick = {},
             onNextSourceClick = {},
             onSlideShowStart = { _, _ -> },
