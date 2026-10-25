@@ -35,6 +35,7 @@ class MediaViewerViewModel(
     private var neighbourSearchLoadId = -1
     // What the current list was read from, for finding the sources around it.
     @Volatile private var loadedSource: ResolvedSource? = null
+    @Volatile private var preparedSource: PreparedSource? = null
     private val _uiState = MutableStateFlow(
         MediaViewerUiState(
             slideShowStayMillis = preferences.getSlideShowStayMillis(),
@@ -94,9 +95,13 @@ class MediaViewerViewModel(
 
     private suspend fun loadMedia(directoryPath: String?, selectedPath: String?, force: Boolean = false) {
         val sortOrder = preferences.getDirectorySortOrder()
-        val source = resolveSource(directoryPath, selectedPath, sortOrder) { progress ->
-            _uiState.update { it.copy(downloadProgress = progress) }
-        }
+        // Moving to the next source finds its list already read; any other load drops it.
+        val prepared = preparedSource
+        preparedSource = null
+        val source = prepared?.takeIf { it.matches(directoryPath, selectedPath, sortOrder) }?.source
+            ?: resolveSource(directoryPath, selectedPath, sortOrder) { progress ->
+                _uiState.update { it.copy(downloadProgress = progress) }
+            }
         val items = source.items
         val sourceDirectoryPath = source.sourceDirectoryPath
         var initialPage = source.initialPage
@@ -235,12 +240,30 @@ class MediaViewerViewModel(
             _uiState.update {
                 if (it.loadId == loadId) it.copy(nextSource = nextSource, isNextSourceKnown = true) else it
             }
+            nextSource?.let { prepareSource(it, sortOrder) }
             val previousSource = findNeighbour(source, next = false, sortOrder)
             ensureActive()
             _uiState.update {
                 if (it.loadId == loadId) it.copy(previousSource = previousSource, isPreviousSourceKnown = true) else it
             }
         }
+    }
+
+    /** Reads the list of [source] ahead, for [loadMedia] to use when the viewer moves to it. */
+    private suspend fun prepareSource(source: MediaViewerSource, sortOrder: DirectorySortOrder) {
+        // A server archive would have to be downloaded whole just to be listed.
+        if (source.isArchive && MediaPaths.isRemote(source.path)) return
+        val (directoryPath, selectedPath) = source.loadPaths
+        val resolved = try {
+            resolveSource(directoryPath, selectedPath, sortOrder) {}
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // Moving there reads it again, and reports what went wrong.
+            return
+        }
+        currentCoroutineContext().ensureActive()
+        preparedSource = PreparedSource(directoryPath, selectedPath, sortOrder, resolved)
     }
 
     private suspend fun findNeighbour(
@@ -291,21 +314,13 @@ class MediaViewerViewModel(
     }
 
     fun loadPreviousSource() {
-        val previousSource = _uiState.value.previousSource ?: return
-        if (previousSource.isArchive) {
-            load(MediaPaths.parent(previousSource.path), previousSource.path)
-        } else {
-            load(previousSource.path, null)
-        }
+        val (directoryPath, selectedPath) = _uiState.value.previousSource?.loadPaths ?: return
+        load(directoryPath, selectedPath)
     }
 
     fun loadNextSource() {
-        val nextSource = _uiState.value.nextSource ?: return
-        if (nextSource.isArchive) {
-            load(MediaPaths.parent(nextSource.path), nextSource.path)
-        } else {
-            load(nextSource.path, null)
-        }
+        val (directoryPath, selectedPath) = _uiState.value.nextSource?.loadPaths ?: return
+        load(directoryPath, selectedPath)
     }
 
     fun setSortOrder(sortOrder: DirectorySortOrder) {
@@ -479,6 +494,21 @@ private class ResolvedSource(
     val initialPage: Int,
     val findNeighbour: suspend (next: Boolean, sortOrder: DirectorySortOrder) -> MediaViewerSource?,
 )
+
+/** A neighbouring source read ahead, for the [load] that asks for the same paths and order. */
+private class PreparedSource(
+    val directoryPath: String?,
+    val selectedPath: String?,
+    val sortOrder: DirectorySortOrder,
+    val source: ResolvedSource,
+) {
+    fun matches(directoryPath: String?, selectedPath: String?, sortOrder: DirectorySortOrder): Boolean =
+        directoryPath == this.directoryPath && selectedPath == this.selectedPath && sortOrder == this.sortOrder
+}
+
+/** What [MediaViewerViewModel.load] is called with to open this source: its folder, or an archive. */
+private val MediaViewerSource.loadPaths: Pair<String?, String?>
+    get() = if (isArchive) MediaPaths.parent(path) to path else path to null
 
 data class MediaViewerSource(
     val name: String,
