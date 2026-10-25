@@ -296,6 +296,23 @@
     <string name="sort_smallest">Smallest first</string>
     <string name="sort_order">Sort order</string>
     <string name="version">Version</string>
+    <string name="gesture_tips_title">Gestures</string>
+    <string name="got_it">Got it</string>
+    <string name="gesture_tips_setting">Gesture tips</string>
+    <string name="gesture_tips_setting_summary">Show the gesture guide again the next time the viewer or player opens.</string>
+    <string name="show_again">Show again</string>
+    <string name="gesture_tips_reset">Gesture tips will show next time.</string>
+    <string name="tip_viewer_tap">Tap to show or hide the controls.</string>
+    <string name="tip_viewer_swipe">Swipe left, right, up, or down for the previous or next item.</string>
+    <string name="tip_viewer_edges">Swipe past the first or last item to open the previous or next folder or archive.</string>
+    <string name="tip_viewer_double_tap">Double-tap to bookmark an item. Bookmarks are listed under Favorites in History.</string>
+    <string name="tip_viewer_hidden_buttons">With the controls hidden, tap the bottom left or right of the screen to step back or forward. Hold to keep going.</string>
+    <string name="tip_viewer_hold_slide">With the controls hidden, long-press the lower middle of the screen and drag left or right to slide through faster or slower.</string>
+    <string name="tip_player_tap">Tap to show or hide the controls.</string>
+    <string name="tip_player_swipe">Swipe up or down for the next or previous video.</string>
+    <string name="tip_player_seek">Drag left or right to seek.</string>
+    <string name="tip_player_double_tap">Double-tap the left or right side to skip 10 seconds. Double-tap the middle to bookmark.</string>
+    <string name="tip_player_sides">Drag up or down along the left edge for brightness, or the right edge for volume.</string>
     <string name="notification_channel_general_id" translatable="false">scrtvwr_general</string>
     <string name="notification_channel_general_name">General</string>
     <string name="notification_channel_general_description">Announcements and updates about SCRTVWR.</string>

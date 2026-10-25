@@ -1,5 +1,6 @@
 package srv.scrtvwr.ui.dashboard.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Slideshow
@@ -21,6 +23,7 @@ import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
@@ -62,6 +65,7 @@ fun Others(
         onImagePreloadDistanceChange = viewModel::setImagePreloadDistance,
         onVideoPreloadDistanceChange = viewModel::setVideoPreloadDistance,
         onMediaEdgeDialogStyleChange = viewModel::setMediaEdgeDialogStyle,
+        onShowGestureTipsAgain = viewModel::showGestureTipsAgain,
         modifier = modifier,
     )
 }
@@ -79,6 +83,7 @@ fun OthersScreen(
     onVideoPreloadDistanceChange: (Int) -> Unit,
     onMediaEdgeDialogStyleChange: (MediaEdgeDialogStyle) -> Unit,
     modifier: Modifier = Modifier,
+    onShowGestureTipsAgain: () -> Unit = {},
 ) {
     var slideShowStayMillisText by rememberSaveable { mutableStateOf(uiState.slideShowStayMillis.toString()) }
     var imagePreloadDistanceText by rememberSaveable { mutableStateOf(uiState.imagePreloadDistance.toString()) }
@@ -266,6 +271,25 @@ fun OthersScreen(
                             }
                         },
                     )
+                },
+            )
+        }
+        item {
+            val context = LocalContext.current
+            ListItem(
+                modifier = Modifier.fillMaxWidth(),
+                headlineContent = { Text(stringResource(R.string.gesture_tips_setting)) },
+                supportingContent = { Text(stringResource(R.string.gesture_tips_setting_summary)) },
+                leadingContent = { Icon(Icons.Default.TouchApp, contentDescription = null) },
+                trailingContent = {
+                    TextButton(
+                        onClick = {
+                            onShowGestureTipsAgain()
+                            Toast.makeText(context, R.string.gesture_tips_reset, Toast.LENGTH_SHORT).show()
+                        },
+                    ) {
+                        Text(stringResource(R.string.show_again))
+                    }
                 },
             )
         }

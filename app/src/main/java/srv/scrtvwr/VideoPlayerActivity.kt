@@ -39,6 +39,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Brightness6
+import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.Swipe
+import androidx.compose.material.icons.filled.SwipeVertical
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.AspectRatio
@@ -125,6 +130,9 @@ import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import srv.scrtvwr.media.remote.RemoteVideoPlayback
+import srv.scrtvwr.ui.components.FirstRunGestureTips
+import srv.scrtvwr.ui.components.GestureTip
+import srv.scrtvwr.ui.components.GestureTipsScreen
 import srv.scrtvwr.ui.components.BookmarkFlash
 import srv.scrtvwr.ui.components.TapeTransportButton
 import srv.scrtvwr.ui.components.VideoSideGestures
@@ -175,30 +183,36 @@ class VideoPlayerActivity : ComponentActivity() {
 
         setContent {
             SCRTVWRTheme {
-                VideoPagerScreen(
-                    directoryPath = intent.getStringExtra(EXTRA_DIRECTORY_PATH),
-                    selectedPath = intent.getStringExtra(EXTRA_VIDEO_PATH),
-                    onBack = ::finish,
-                    onDirectoryChanged = { path ->
-                        setResult(
-                            Activity.RESULT_OK,
-                            Intent().putExtra(RESULT_DIRECTORY_PATH, path),
-                        )
-                    },
-                    onOpenImageDirectory = { directory, imagePath ->
-                        pendingImageDirectory = directory
-                        setResult(
-                            Activity.RESULT_OK,
-                            Intent().putExtra(RESULT_DIRECTORY_PATH, directory),
-                        )
-                        imageViewerLauncher.launch(
-                            Intent(this, MediaViewerActivity::class.java).apply {
-                                putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, directory)
-                                putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, imagePath)
-                            },
-                        )
-                    },
-                )
+                Box(modifier = Modifier.fillMaxSize()) {
+                    VideoPagerScreen(
+                        directoryPath = intent.getStringExtra(EXTRA_DIRECTORY_PATH),
+                        selectedPath = intent.getStringExtra(EXTRA_VIDEO_PATH),
+                        onBack = ::finish,
+                        onDirectoryChanged = { path ->
+                            setResult(
+                                Activity.RESULT_OK,
+                                Intent().putExtra(RESULT_DIRECTORY_PATH, path),
+                            )
+                        },
+                        onOpenImageDirectory = { directory, imagePath ->
+                            pendingImageDirectory = directory
+                            setResult(
+                                Activity.RESULT_OK,
+                                Intent().putExtra(RESULT_DIRECTORY_PATH, directory),
+                            )
+                            imageViewerLauncher.launch(
+                                Intent(this, MediaViewerActivity::class.java).apply {
+                                    putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, directory)
+                                    putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, imagePath)
+                                },
+                            )
+                        },
+                    )
+                    FirstRunGestureTips(
+                        screen = GestureTipsScreen.Player,
+                        tips = playerGestureTips(),
+                    )
+                }
             }
         }
     }
@@ -209,6 +223,15 @@ class VideoPlayerActivity : ComponentActivity() {
         const val RESULT_DIRECTORY_PATH = MediaViewerActivity.RESULT_DIRECTORY_PATH
     }
 }
+
+@Composable
+private fun playerGestureTips(): List<GestureTip> = listOf(
+    GestureTip(Icons.Default.TouchApp, stringResource(R.string.tip_player_tap)),
+    GestureTip(Icons.Default.SwipeVertical, stringResource(R.string.tip_player_swipe)),
+    GestureTip(Icons.Default.Swipe, stringResource(R.string.tip_player_seek)),
+    GestureTip(Icons.Default.Forward10, stringResource(R.string.tip_player_double_tap)),
+    GestureTip(Icons.Default.Brightness6, stringResource(R.string.tip_player_sides)),
+)
 
 @Composable
 private fun VideoPagerScreen(

@@ -72,6 +72,10 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(videoPreloadDistance = boundedDistance) }
     }
 
+    fun showGestureTipsAgain() {
+        preferences.resetGestureTips()
+    }
+
     fun setMediaEdgeDialogStyle(style: MediaEdgeDialogStyle) {
         preferences.saveMediaEdgeDialogStyle(style)
         _uiState.update { it.copy(mediaEdgeDialogStyle = style) }

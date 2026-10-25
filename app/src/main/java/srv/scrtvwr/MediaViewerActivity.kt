@@ -48,6 +48,7 @@ import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FirstPage
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Fullscreen
@@ -58,8 +59,10 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
+import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Swipe
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
@@ -127,6 +130,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import srv.scrtvwr.media.MediaPaths
+import srv.scrtvwr.ui.components.FirstRunGestureTips
+import srv.scrtvwr.ui.components.GestureTip
+import srv.scrtvwr.ui.components.GestureTipsScreen
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.remote.DownloadProgress
 import srv.scrtvwr.media.PreviewResult
@@ -207,30 +213,46 @@ private fun MediaViewerRoute(
             Toast.makeText(context, R.string.video_frame_load_warning_viewer, Toast.LENGTH_LONG).show()
         }
     }
-    MediaViewerScreen(
-        uiState = uiState,
-        onPageChanged = viewModel::selectPage,
-        onFitClick = viewModel::toggleFillFrame,
-        onRotateClick = viewModel::rotateClockwise,
-        onFlipClick = viewModel::toggleFlip,
-        onBookmarkClick = viewModel::toggleBookmark,
-        onBookmarkAdd = viewModel::addBookmark,
-        onChromeToggle = viewModel::toggleChrome,
-        onFindSources = viewModel::findNeighbourSources,
-        onPreviousSourceClick = viewModel::loadPreviousSource,
-        onNextSourceClick = viewModel::loadNextSource,
-        onSlideShowStart = viewModel::startSlideShow,
-        onSlideShowStop = viewModel::stopSlideShow,
-        onSlideShowSkipsVideosToggle = viewModel::toggleSlideShowSkipsVideos,
-        onHoldSlideShowSkipsVideosToggle = viewModel::toggleHoldSlideShowSkipsVideos,
-        onSortOrderChange = viewModel::setSortOrder,
-        onJumpRecorded = viewModel::recordJump,
-        onJumpBack = viewModel::jumpBack,
-        onJumpForward = viewModel::jumpForward,
-        onBack = onBack,
-        onRetry = viewModel::retry,
-    )
+    Box(modifier = Modifier.fillMaxSize()) {
+        MediaViewerScreen(
+            uiState = uiState,
+            onPageChanged = viewModel::selectPage,
+            onFitClick = viewModel::toggleFillFrame,
+            onRotateClick = viewModel::rotateClockwise,
+            onFlipClick = viewModel::toggleFlip,
+            onBookmarkClick = viewModel::toggleBookmark,
+            onBookmarkAdd = viewModel::addBookmark,
+            onChromeToggle = viewModel::toggleChrome,
+            onFindSources = viewModel::findNeighbourSources,
+            onPreviousSourceClick = viewModel::loadPreviousSource,
+            onNextSourceClick = viewModel::loadNextSource,
+            onSlideShowStart = viewModel::startSlideShow,
+            onSlideShowStop = viewModel::stopSlideShow,
+            onSlideShowSkipsVideosToggle = viewModel::toggleSlideShowSkipsVideos,
+            onHoldSlideShowSkipsVideosToggle = viewModel::toggleHoldSlideShowSkipsVideos,
+            onSortOrderChange = viewModel::setSortOrder,
+            onJumpRecorded = viewModel::recordJump,
+            onJumpBack = viewModel::jumpBack,
+            onJumpForward = viewModel::jumpForward,
+            onBack = onBack,
+            onRetry = viewModel::retry,
+        )
+        FirstRunGestureTips(
+            screen = GestureTipsScreen.Viewer,
+            tips = viewerGestureTips(holdSlideShowEnabled = uiState.holdSlideShowEnabled),
+        )
+    }
 }
+
+@Composable
+private fun viewerGestureTips(holdSlideShowEnabled: Boolean): List<GestureTip> = listOfNotNull(
+    GestureTip(Icons.Default.TouchApp, stringResource(R.string.tip_viewer_tap)),
+    GestureTip(Icons.Default.Swipe, stringResource(R.string.tip_viewer_swipe)),
+    GestureTip(Icons.Default.Folder, stringResource(R.string.tip_viewer_edges)),
+    GestureTip(Icons.Default.Favorite, stringResource(R.string.tip_viewer_double_tap)),
+    GestureTip(Icons.Default.SkipNext, stringResource(R.string.tip_viewer_hidden_buttons)),
+    if (holdSlideShowEnabled) GestureTip(Icons.Default.Slideshow, stringResource(R.string.tip_viewer_hold_slide)) else null,
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

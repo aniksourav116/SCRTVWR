@@ -8,6 +8,7 @@ import srv.scrtvwr.media.remote.HttpCredentials
 import srv.scrtvwr.media.remote.HttpServer
 import srv.scrtvwr.media.remote.HttpServerAuth
 import srv.scrtvwr.media.remote.HttpServerConnections
+import srv.scrtvwr.ui.components.GestureTipsScreen
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
 import srv.scrtvwr.ui.media.VideoCompletionAction
@@ -125,6 +126,25 @@ class ScrtvwrPreferences(context: Context) {
 
     fun saveLoadVideoThumbnails(enabled: Boolean) {
         preferences.edit().putBoolean(KEY_LOAD_VIDEO_THUMBNAILS, enabled).apply()
+    }
+
+    fun hasSeenGestureTips(screen: GestureTipsScreen): Boolean =
+        preferences.getBoolean(screen.preferenceKey(), false)
+
+    fun saveGestureTipsSeen(screen: GestureTipsScreen) {
+        preferences.edit().putBoolean(screen.preferenceKey(), true).apply()
+    }
+
+    /** Shows every gesture guide again the next time its screen opens. */
+    fun resetGestureTips() {
+        val editor = preferences.edit()
+        GestureTipsScreen.entries.forEach { editor.remove(it.preferenceKey()) }
+        editor.apply()
+    }
+
+    private fun GestureTipsScreen.preferenceKey(): String = when (this) {
+        GestureTipsScreen.Viewer -> KEY_GESTURE_TIPS_VIEWER_SEEN
+        GestureTipsScreen.Player -> KEY_GESTURE_TIPS_PLAYER_SEEN
     }
 
     fun getBookmarkedMedia(): Set<String> =
@@ -339,6 +359,8 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
         const val KEY_SHOW_DIRECTORY_FILE_ACTIONS = "show_directory_file_actions"
         const val KEY_LOAD_VIDEO_THUMBNAILS = "load_video_thumbnails"
+        const val KEY_GESTURE_TIPS_VIEWER_SEEN = "gesture_tips_viewer_seen"
+        const val KEY_GESTURE_TIPS_PLAYER_SEEN = "gesture_tips_player_seen"
         const val KEY_BOOKMARKED_MEDIA = "bookmarked_media"
         const val KEY_MEDIA_HISTORY = "media_history"
         const val KEY_LAST_DIRECTORY = "last_directory"
