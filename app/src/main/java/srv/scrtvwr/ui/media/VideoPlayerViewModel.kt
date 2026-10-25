@@ -43,6 +43,7 @@ class VideoPlayerViewModel(
     private var neighbourSearchLoadId = -1
     // The folder the current list was read from, for finding the folders around it.
     @Volatile private var loadedFolder: LoadedFolder? = null
+    @Volatile private var preparedFolder: PreparedFolder? = null
     private val _uiState = MutableStateFlow(VideoPlayerUiState())
     val uiState = _uiState.asStateFlow()
 
@@ -97,6 +98,8 @@ class VideoPlayerViewModel(
             _uiState.update {
                 if (it.loadId == loadId) it.copy(nextDirectory = nextDirectory, isNextDirectoryKnown = true) else it
             }
+            // Image folders open in the viewer, which reads its own list.
+            if (nextDirectory?.type == VideoDirectoryType.Video) prepareFolder(nextDirectory, folder.sortOrder)
             val previousDirectory = findNeighbour(folder, next = false)
             ensureActive()
             _uiState.update {
@@ -120,11 +123,11 @@ class VideoPlayerViewModel(
         val sortOrder = preferences.getDirectorySortOrder()
         loadJob = viewModelScope.launch(Dispatchers.IO) {
             val isRemote = MediaPaths.isRemote(directoryPath ?: selectedPath)
-            val folder = if (isRemote) {
-                loadRemoteVideoFolder(directoryPath, selectedPath, sortOrder)
-            } else {
-                loadVideoFolder(directoryPath, selectedPath, sortOrder)
-            }
+            // Moving to the next folder finds its list already read; any other load drops it.
+            val prepared = preparedFolder
+            preparedFolder = null
+            val folder = prepared?.takeIf { it.matches(directoryPath, selectedPath, sortOrder) }?.folder
+                ?: readFolder(directoryPath, selectedPath, sortOrder)
             ensureActive()
             loadedFolder = folder.path?.let { LoadedFolder(it, isRemote, sortOrder) }
             // The neighbouring folders are left unknown: findNeighbourDirectories looks for them
@@ -174,6 +177,28 @@ class VideoPlayerViewModel(
                 }
             }
         }
+    }
+
+    private suspend fun readFolder(directoryPath: String?, selectedPath: String?, sortOrder: DirectorySortOrder): VideoFolder =
+        if (MediaPaths.isRemote(directoryPath ?: selectedPath)) {
+            loadRemoteVideoFolder(directoryPath, selectedPath, sortOrder)
+        } else {
+            loadVideoFolder(directoryPath, selectedPath, sortOrder)
+        }
+
+    /** Reads the list of [target] ahead, for [load] to use when the player moves to it. */
+    private suspend fun prepareFolder(target: VideoDirectoryTarget, sortOrder: DirectorySortOrder) {
+        val folder = try {
+            readFolder(target.path, target.selectedMediaPath, sortOrder)
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            return
+        }
+        // Moving there reads it again, and reports what went wrong.
+        if (folder.listingError != null) return
+        currentCoroutineContext().ensureActive()
+        preparedFolder = PreparedFolder(target.path, target.selectedMediaPath, sortOrder, folder)
     }
 
     private suspend fun findNeighbour(folder: LoadedFolder, next: Boolean): VideoDirectoryTarget? =
@@ -249,6 +274,17 @@ enum class VideoDirectoryType { Video, Image }
 
 /** What a list was read from: an absolute folder path, or a folder URL on a server. */
 private class LoadedFolder(val path: String, val isRemote: Boolean, val sortOrder: DirectorySortOrder)
+
+/** The next folder's list, read ahead for the load that asks for the same paths and order. */
+private class PreparedFolder(
+    val directoryPath: String?,
+    val selectedPath: String?,
+    val sortOrder: DirectorySortOrder,
+    val folder: VideoFolder,
+) {
+    fun matches(directoryPath: String?, selectedPath: String?, sortOrder: DirectorySortOrder): Boolean =
+        directoryPath == this.directoryPath && selectedPath == this.selectedPath && sortOrder == this.sortOrder
+}
 
 private class VideoFolder(
     val path: String?,
