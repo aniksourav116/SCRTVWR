@@ -42,6 +42,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.LastPage
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.filled.Undo
@@ -131,6 +132,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import srv.scrtvwr.media.MediaPaths
 import srv.scrtvwr.ui.components.FirstRunGestureTips
+import srv.scrtvwr.ui.components.canOpenWithOtherApp
+import srv.scrtvwr.ui.components.openWithOtherApp
 import srv.scrtvwr.ui.components.GestureTip
 import srv.scrtvwr.ui.components.GestureTipsScreen
 import srv.scrtvwr.media.MediaPreviewLoader
@@ -611,6 +614,16 @@ private fun MediaViewerScreen(
                                         menuExpanded = false
                                     },
                                 )
+                                selectedItem?.takeIf { canOpenWithOtherApp(it.path) }?.let { item ->
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.open_with)) },
+                                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null) },
+                                        onClick = {
+                                            context.openWithOtherApp(item.path, item.name)
+                                            menuExpanded = false
+                                        },
+                                    )
+                                }
                                 MediaPaths.link(selectedItem?.path)?.let { link ->
                                     DropdownMenuItem(
                                         text = { Text(stringResource(R.string.copy_link)) },

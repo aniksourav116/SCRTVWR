@@ -39,6 +39,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Swipe
@@ -131,6 +132,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import srv.scrtvwr.media.remote.RemoteVideoPlayback
 import srv.scrtvwr.ui.components.FirstRunGestureTips
+import srv.scrtvwr.ui.components.canOpenWithOtherApp
+import srv.scrtvwr.ui.components.openWithOtherApp
 import srv.scrtvwr.ui.components.GestureTip
 import srv.scrtvwr.ui.components.GestureTipsScreen
 import srv.scrtvwr.ui.components.BookmarkFlash
@@ -994,6 +997,11 @@ private fun BoxScope.VideoControls(
                 canMoveToLast = pageCount > 0 && page != pageCount - 1,
                 onMoveToLast = onMoveToLast,
                 onCopyLink = MediaPaths.link(item.path)?.let { link -> { context.copyLink(link) } },
+                onOpenWith = if (canOpenWithOtherApp(item.path)) {
+                    { context.openWithOtherApp(item.path, item.name) }
+                } else {
+                    null
+                },
             )
         }
     }
@@ -1185,6 +1193,7 @@ private fun PlayerOptionsRow(
     canMoveToLast: Boolean,
     onMoveToLast: () -> Unit,
     onCopyLink: (() -> Unit)?,
+    onOpenWith: (() -> Unit)?,
 ) {
     Row(
         modifier = Modifier
@@ -1235,6 +1244,14 @@ private fun PlayerOptionsRow(
             onClick = onMoveToLast,
             contentDescription = stringResource(R.string.move_last_item),
         )
+        onOpenWith?.let {
+            PlayerOption(
+                icon = Icons.AutoMirrored.Filled.OpenInNew,
+                label = stringResource(R.string.open_with),
+                active = false,
+                onClick = it,
+            )
+        }
         onCopyLink?.let {
             PlayerOption(
                 icon = Icons.Default.Link,

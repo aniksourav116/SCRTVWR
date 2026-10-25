@@ -1,14 +1,9 @@
 package srv.scrtvwr.ui.dashboard.screens
 
-import android.content.ActivityNotFoundException
-import android.content.Context
 import android.content.res.Configuration
 import android.content.Intent
-import android.net.Uri
 import android.text.TextPaint
 import android.text.TextUtils
-import android.webkit.MimeTypeMap
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -131,7 +126,6 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
@@ -158,12 +152,12 @@ import srv.scrtvwr.ui.dashboard.screens.viewmodels.PendingDirectoryFileOperation
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.pathSegments
 import srv.scrtvwr.ui.components.BaseScaffold
 import srv.scrtvwr.ui.components.copyLink
+import srv.scrtvwr.ui.components.openWithOtherApp
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import srv.scrtvwr.util.time.TimeUtil
-import java.io.File
 import kotlin.math.roundToInt
 
 @Composable
@@ -237,7 +231,7 @@ fun Directory(
                 }
             mediaLauncher.launch(intent)
         },
-        onOpenWithOtherApp = { entry -> context.openWithOtherApp(entry) },
+        onOpenWithOtherApp = { entry -> context.openWithOtherApp(entry.path, entry.name) },
         onResumeMedia = {
             uiState.lastMediaSession?.let { session ->
                 val isVideo = session.mediaPath?.let(MediaTypes::isVideo) == true
@@ -1879,29 +1873,6 @@ private fun formatBytes(bytes: Long): String {
     return "%.1f %s".format(value, units[unitIndex])
 }
 
-private const val FILE_PROVIDER_AUTHORITY = "srv.scrtvwr.fileprovider"
-
-private fun Context.openWithOtherApp(entry: DirectoryEntry) {
-    val mimeType = MimeTypeMap.getSingleton()
-        .getMimeTypeFromExtension(MediaPaths.extension(entry.path))
-        ?: "*/*"
-
-    val intent = if (MediaPaths.isRemote(entry.path)) {
-        // Other apps can stream or download a server file from its URL directly.
-        Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(entry.path), mimeType)
-    } else {
-        val uri = FileProvider.getUriForFile(this, FILE_PROVIDER_AUTHORITY, File(entry.path))
-        Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, mimeType)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    }
-
-    try {
-        startActivity(Intent.createChooser(intent, entry.name))
-    } catch (_: ActivityNotFoundException) {
-        Toast.makeText(this, getString(R.string.no_app_found_to_open_file), Toast.LENGTH_SHORT).show()
-    }
-}
 
 @Preview(showBackground = true)
 @Composable
