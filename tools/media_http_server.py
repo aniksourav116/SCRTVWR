@@ -9,6 +9,7 @@ from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import os
 import re
+import socket
 
 PASSWORD_ENVIRONMENT_VARIABLE = "MEDIA_HTTP_PASSWORD"
 
@@ -179,6 +180,20 @@ def read_password(password, path):
     return os.environ.get(PASSWORD_ENVIRONMENT_VARIABLE)
 
 
+def server_urls(host, port):
+    """URLs that reach the server, listing this computer's addresses when it listens on all of them."""
+    if host not in ("", "0.0.0.0"):
+        return [f"http://{host}:{port}/"]
+    addresses = set()
+    try:
+        addresses.update(info[4][0] for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET))
+    except OSError:
+        pass
+    # Network addresses first, since other devices such as a phone need one of those.
+    addresses.discard("127.0.0.1")
+    return [f"http://{address}:{port}/" for address in sorted(addresses)] + [f"http://127.0.0.1:{port}/"]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("port", nargs="?", type=int, default=8000)
@@ -206,9 +221,13 @@ def main():
     if args.user and not password:
         parser.error(f"--user needs a password from --password, --password-file or {PASSWORD_ENVIRONMENT_VARIABLE}")
     credentials = BasicCredentials(password, args.user) if password else None
-    handler = partial(MediaRequestHandler, directory=os.path.abspath(args.directory), credentials=credentials)
+    directory = os.path.abspath(args.directory)
+    handler = partial(MediaRequestHandler, directory=directory, credentials=credentials)
     with ThreadingHTTPServer((args.bind, args.port), handler) as server:
-        print(f"Serving {os.path.abspath(args.directory)} on {args.bind}:{args.port} with byte ranges", flush=True)
+        print(f"Serving {directory} with byte ranges at:", flush=True)
+        # The bound port, which differs from args.port when that is 0.
+        for url in server_urls(args.bind, server.server_address[1]):
+            print(f"  {url}", flush=True)
         if credentials:
             # Basic auth only encodes the password, so anyone watching plain HTTP traffic can read it.
             print("Requiring a password; it travels unencrypted over plain HTTP", flush=True)
