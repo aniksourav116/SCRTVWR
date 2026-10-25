@@ -496,6 +496,10 @@ private fun VideoPage(
     var reloadWhenActive by remember { mutableStateOf(false) }
     var activeReloadAttempts by remember(item.path) { mutableStateOf(0) }
     val latestIsActive by rememberUpdatedState(isActive)
+    val latestPreBuffer by rememberUpdatedState(preBuffer)
+    // Whether leaving the app stopped this player, and whether it was playing then.
+    var stoppedInBackground by remember(item.path) { mutableStateOf(false) }
+    var resumePlaying by remember(item.path) { mutableStateOf(false) }
     // The listener lives as long as the player, but the completion action can change meanwhile.
     val latestOnEnded by rememberUpdatedState(onEnded)
     val latestOnPlaybackStarted by rememberUpdatedState(onPlaybackStarted)
@@ -594,11 +598,30 @@ private fun VideoPage(
     }
 
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        resumePlaying = latestIsActive && player.playWhenReady && player.playbackState != Player.STATE_ENDED
+        stoppedInBackground = prepareRequested || player.playbackState != Player.STATE_IDLE
         saveCurrentPosition()
         player.pause()
         player.stop()
         prepareRequested = false
         firstFrameRendered = false
+    }
+
+    // Coming back restores what leaving stopped: the video on screen at its position, playing only
+    // if it was, and a pre-buffered video paused. ON_START also arrives when the effect first
+    // registers, which the flag tells apart.
+    LifecycleEventEffect(Lifecycle.Event.ON_START) {
+        if (!stoppedInBackground) return@LifecycleEventEffect
+        stoppedInBackground = false
+        if (latestIsActive) {
+            preBufferControl.preBuffering = false
+            preparePlayerForActivePlayback()
+            player.playWhenReady = resumePlaying
+        } else if (latestPreBuffer) {
+            preBufferControl.preBuffering = true
+            player.playWhenReady = false
+            preparePlayerForActivePlayback()
+        }
     }
 
     LaunchedEffect(isActive, preBuffer, reloadWhenActive, player) {
