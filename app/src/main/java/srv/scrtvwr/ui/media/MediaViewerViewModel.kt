@@ -56,6 +56,9 @@ class MediaViewerViewModel(
             runCatching { loadMedia(directoryPath, selectedPath, force) }
                 .onFailure { error ->
                     if (error is kotlinx.coroutines.CancellationException) throw error
+                    // A blocking server read ignores cancellation and can fail after a newer load
+                    // replaced this one; its error must not end that load's spinner.
+                    ensureActive()
                     _uiState.update {
                         it.copy(
                             isLoading = false,
