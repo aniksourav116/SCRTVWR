@@ -14,6 +14,7 @@ import srv.scrtvwr.ui.media.MediaViewerSource
 import srv.scrtvwr.ui.media.MediaViewerItem
 import srv.scrtvwr.ui.media.MediaViewerType
 import srv.scrtvwr.ui.sort.DirectorySortOrder
+import srv.scrtvwr.ui.sort.entryComparator
 import srv.scrtvwr.ui.sort.fileComparator
 import srv.scrtvwr.ui.sort.needsFileMetadata
 import java.io.File
@@ -76,6 +77,46 @@ object MediaCatalog {
         val entries = HttpDirectoryClient.list(directoryUrl).filter(include)
         return if (sortOrder.needsFileMetadata) HttpDirectoryClient.withMetadata(entries) else entries
     }
+
+    /**
+     * Images and videos [directoryUrl] lists, in server order, with the sizes and times already
+     * cached and no requests for the rest. [withRemoteMetadata] fetches those when a sort needs them.
+     */
+    @Throws(IOException::class)
+    fun listRemoteDirectoryUnsorted(directoryUrl: String): List<MediaViewerItem> =
+        HttpDirectoryClient.withCachedMetadata(HttpDirectoryClient.list(directoryUrl)).mapNotNull(::toRemoteItem)
+
+    /** Whether every server item in [items] has its size and time, so sorting them needs no request. */
+    fun hasRemoteMetadata(items: List<MediaViewerItem>): Boolean =
+        items.all { HttpDirectoryClient.hasMetadata(it.toRemoteEntry()) }
+
+    /** Server [items], in the same order, with sizes and times fetched for those not cached yet. */
+    suspend fun withRemoteMetadata(items: List<MediaViewerItem>): List<MediaViewerItem> =
+        HttpDirectoryClient.withMetadata(items.map { it.toRemoteEntry() }).zip(items) { entry, item ->
+            item.copy(sizeBytes = entry.sizeBytes, lastModifiedMillis = entry.lastModifiedMillis)
+        }
+
+    /** [items] in [sortOrder], by the names, sizes and times they carry; the same order as their listings. */
+    fun sorted(items: List<MediaViewerItem>, sortOrder: DirectorySortOrder): List<MediaViewerItem> =
+        items.sortedWith(
+            sortOrder.entryComparator(
+                directoriesFirst = false,
+                isDirectory = { false },
+                name = MediaViewerItem::name,
+                lastModified = MediaViewerItem::lastModifiedMillis,
+                size = MediaViewerItem::sizeBytes,
+                path = MediaViewerItem::path,
+            ),
+        )
+
+    private fun MediaViewerItem.toRemoteEntry(): RemoteEntry =
+        RemoteEntry(
+            name = name,
+            url = path,
+            isDirectory = false,
+            sizeBytes = sizeBytes,
+            lastModifiedMillis = lastModifiedMillis,
+        )
 
     fun toRemoteItem(entry: RemoteEntry): MediaViewerItem? {
         if (entry.isDirectory) return null

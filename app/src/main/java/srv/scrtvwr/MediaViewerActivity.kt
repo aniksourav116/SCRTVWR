@@ -272,10 +272,11 @@ private fun MediaViewerScreen(
     var pseudoSlideShowHorizontalFraction by remember { mutableFloatStateOf(0f) }
     var pseudoSlideShowPageOffset by remember { mutableStateOf(1) }
     var pseudoSlideShowStartPage by remember { mutableStateOf<Int?>(null) }
-    val readyMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
+    // Keyed by load, not by list: sorting the list again keeps its pages and what they loaded.
+    val readyMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
     // Pages whose load has finished, with or without a picture.
     val settledMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
-    val zoomedMedia = remember(uiState.items) { mutableStateMapOf<String, Boolean>() }
+    val zoomedMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
     var zoomCommand by remember { mutableStateOf<ZoomCommand?>(null) }
     var bookmarkFlashId by remember { mutableIntStateOf(0) }
     val isAnySlideShowRunning = uiState.isSlideShowRunning || isPseudoSlideShowRunning
@@ -789,6 +790,14 @@ private fun MediaViewerScreen(
                     flashId = bookmarkFlashId,
                     modifier = Modifier.align(Alignment.Center),
                 )
+
+                if (uiState.isSorting && !uiState.isLoading) {
+                    SortingIndicator(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 12.dp),
+                    )
+                }
             }
 
             if (!uiState.isChromeHidden) {
@@ -1076,17 +1085,17 @@ private fun MediaPage(
         val preview by produceState<PreviewResult?>(
             initialValue = null,
             key1 = item.path,
-            key2 = item.lastModifiedMillis,
+            key2 = item.contentStamp,
             key3 = readsFrame,
         ) {
             value = if (readsFrame) {
-                MediaPreviewLoader.loadVideoFrame(item.path, item.lastModifiedMillis, 1600)
+                MediaPreviewLoader.loadVideoFrame(item.path, item.contentStamp, 1600)
             } else {
                 PreviewResult()
             }
         }
 
-        LaunchedEffect(preview, item.path, item.lastModifiedMillis) {
+        LaunchedEffect(preview, item.path, item.contentStamp) {
             if (preview != null) {
                 onSettled()
                 onReady()
@@ -1096,7 +1105,7 @@ private fun MediaPage(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(item.path, item.lastModifiedMillis) {
+                .pointerInput(item.path, item.contentStamp) {
                     detectTapGestures(
                         onTap = { onContentClick() },
                         onDoubleTap = { onBookmark() },
@@ -1146,19 +1155,19 @@ private fun MediaPage(
         }
         return
     }
-    val preview by produceState<PreviewResult?>(initialValue = null, key1 = item.path, key2 = item.lastModifiedMillis) {
-        value = MediaPreviewLoader.loadImage(item.path, item.lastModifiedMillis, 1600)
+    val preview by produceState<PreviewResult?>(initialValue = null, key1 = item.path, key2 = item.contentStamp) {
+        value = MediaPreviewLoader.loadImage(item.path, item.contentStamp, 1600)
     }
 
-    LaunchedEffect(preview, item.path, item.lastModifiedMillis) {
+    LaunchedEffect(preview, item.path, item.contentStamp) {
         val result = preview ?: return@LaunchedEffect
         onSettled()
         if (result.bitmap != null) onReady()
     }
 
-    var imageScale by remember(item.path, item.lastModifiedMillis) { mutableFloatStateOf(MIN_IMAGE_ZOOM) }
-    var imageOffsetX by remember(item.path, item.lastModifiedMillis) { mutableFloatStateOf(0f) }
-    var imageOffsetY by remember(item.path, item.lastModifiedMillis) { mutableFloatStateOf(0f) }
+    var imageScale by remember(item.path, item.contentStamp) { mutableFloatStateOf(MIN_IMAGE_ZOOM) }
+    var imageOffsetX by remember(item.path, item.contentStamp) { mutableFloatStateOf(0f) }
+    var imageOffsetY by remember(item.path, item.contentStamp) { mutableFloatStateOf(0f) }
     var handledZoomCommandId by remember(item.readinessKey) { mutableStateOf(zoomCommand?.id ?: 0) }
     val isZoomed = imageScale > MIN_IMAGE_ZOOM
 
@@ -1174,7 +1183,7 @@ private fun MediaPage(
         imageOffsetY = 0f
     }
 
-    LaunchedEffect(item.path, item.lastModifiedMillis, fillFrame, rotation, flipped) {
+    LaunchedEffect(item.path, item.contentStamp, fillFrame, rotation, flipped) {
         resetImageZoom()
     }
 
@@ -1207,14 +1216,14 @@ private fun MediaPage(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(item.path, item.lastModifiedMillis) {
+            .pointerInput(item.path, item.contentStamp) {
                 detectTapGestures(
                     onTap = { onContentClick() },
                     // Double tap is the instant "like"; zooming stays on pinch and the options menu.
                     onDoubleTap = { onBookmark() },
                 )
             }
-            .pointerInput(item.path, item.lastModifiedMillis) {
+            .pointerInput(item.path, item.contentStamp) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
                     do {
@@ -1290,7 +1299,14 @@ private fun MediaPage(
 }
 
 private val MediaViewerItem.readinessKey: String
-    get() = "$path:$lastModifiedMillis"
+    get() = "$path:$contentStamp"
+
+/**
+ * Version of the file a page loads and caches its picture by. A server file's time only arrives
+ * once a sort asks for it, which would reload a page already showing, so server files use none.
+ */
+private val MediaViewerItem.contentStamp: Long
+    get() = if (MediaPaths.isRemote(path)) 0L else lastModifiedMillis
 
 private fun adjustedPseudoStayMillis(baseStayMillis: Long, horizontalFraction: Float): Long {
     val speedMultiplier = 4.0.pow(horizontalFraction.toDouble())
@@ -1361,6 +1377,25 @@ private fun formatMediaBytes(bytes: Long): String {
     var unit = 0
     while (value >= 1024 && unit < units.lastIndex) { value /= 1024; unit++ }
     return "%.1f %s".format(value, units[unit])
+}
+
+/** Shown over the pages while the list waits for the file details its sort order compares. */
+@Composable
+private fun SortingIndicator(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
+        Text(
+            text = stringResource(R.string.sorting_media),
+            color = Color.White,
+            style = MaterialTheme.typography.labelMedium,
+        )
+    }
 }
 
 /** Spinner while media loads; while a server archive downloads, how much of it has arrived. */

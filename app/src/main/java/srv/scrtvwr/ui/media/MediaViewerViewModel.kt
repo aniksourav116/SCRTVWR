@@ -21,6 +21,7 @@ import srv.scrtvwr.media.remote.DownloadProgress
 import srv.scrtvwr.media.remote.RemotePaths
 import srv.scrtvwr.media.remote.serverFor
 import srv.scrtvwr.ui.sort.DirectorySortOrder
+import srv.scrtvwr.ui.sort.needsFileMetadata
 import java.io.File
 import kotlin.math.abs
 
@@ -36,6 +37,7 @@ class MediaViewerViewModel(
     // What the current list was read from, for finding the sources around it.
     @Volatile private var loadedSource: ResolvedSource? = null
     @Volatile private var preparedSource: PreparedSource? = null
+    @Volatile private var sortJob: Job? = null
     private val _uiState = MutableStateFlow(
         MediaViewerUiState(
             slideShowStayMillis = preferences.getSlideShowStayMillis(),
@@ -71,6 +73,7 @@ class MediaViewerViewModel(
 
         loadJob?.cancel()
         neighbourJob?.cancel()
+        sortJob?.cancel()
         neighbourSearchLoadId = -1
         savedStateHandle[STATE_REQUESTED_DIRECTORY] = directoryPath
         savedStateHandle[STATE_REQUESTED_SELECTED] = selectedPath
@@ -112,13 +115,18 @@ class MediaViewerViewModel(
         // anything else renumbers the pages, so it starts empty.
         var jumpHistory = JumpHistory()
         if (!force && savedStateHandle.get<String>(STATE_SOURCE) == sourceKey) {
-            initialPage = savedStateHandle.get<Int>(STATE_SELECTED_PAGE)
-                ?.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
+            // By path first: a list still waiting to be sorted is not in the order the page was saved in.
+            initialPage = savedStateHandle.get<String>(STATE_SELECTED_ITEM)
+                ?.let { path -> items.indexOfFirst { it.path == path } }
+                ?.takeIf { it >= 0 }
+                ?: savedStateHandle.get<Int>(STATE_SELECTED_PAGE)
+                    ?.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
                 ?: initialPage
             jumpHistory = _uiState.value.jumpHistory
         } else {
             savedStateHandle[STATE_SOURCE] = sourceKey
             savedStateHandle[STATE_SELECTED_PAGE] = initialPage
+            savedStateHandle[STATE_SELECTED_ITEM] = items.getOrNull(initialPage)?.path
         }
         currentCoroutineContext().ensureActive()
         loadedSource = source
@@ -147,6 +155,7 @@ class MediaViewerViewModel(
         items.getOrNull(initialPage)?.path?.let { mediaPath ->
             rememberMediaSession(sourceDirectoryPath, mediaPath)
         }
+        if (source.needsSorting) sortInPlace(sortOrder)
     }
 
     /** Reads the list for [directoryPath] and [selectedPath], without looking at other sources. */
@@ -176,15 +185,22 @@ class MediaViewerViewModel(
                 findNeighbour = { next, order ->
                     if (next) MediaCatalog.nextArchive(archivePath, order) else MediaCatalog.previousArchive(archivePath, order)
                 },
+                isArchive = true,
             )
         }
         if (remoteDirectory != null) {
-            val items = MediaCatalog.listRemoteDirectory(remoteDirectory, sortOrder)
+            val listed = MediaCatalog.listRemoteDirectoryUnsorted(remoteDirectory)
+            // Sizes and times cost a request per file. Until they arrive the list shows in name
+            // order, the order most folders are browsed in, and sortInPlace sorts it afterwards.
+            val needsSorting = sortOrder.needsFileMetadata && !MediaCatalog.hasRemoteMetadata(listed)
+            val items = MediaCatalog.sorted(listed, if (needsSorting) DirectorySortOrder.NameAscending else sortOrder)
                 .ifEmpty { selectedPath?.let(MediaCatalog::remoteItem)?.let(::listOf).orEmpty() }
             return ResolvedSource(
                 items = items,
                 sourceDirectoryPath = remoteDirectory,
                 initialPage = items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0),
+                isRemote = true,
+                needsSorting = needsSorting,
                 findNeighbour = { next, order ->
                     val serverRoot = preferences.getHttpServers().serverFor(remoteDirectory)?.baseUrl
                     if (next) {
@@ -286,11 +302,14 @@ class MediaViewerViewModel(
             val selectedPath = state.itemForPage(boundedPage)?.path
             rememberMediaSession(state.sourceDirectoryPath, selectedPath)
             savedStateHandle[STATE_SELECTED_PAGE] = boundedPage
+            savedStateHandle[STATE_SELECTED_ITEM] = selectedPath
+            // A sort moves the media on screen to another index; it is still the same picture.
+            val samePicture = selectedPath != null && selectedPath == state.itemForPage(state.selectedPage)?.path
             state.copy(
                 selectedPage = boundedPage,
                 selectedPath = selectedPath ?: state.selectedPath,
-                rotation = 0,
-                flipped = false,
+                rotation = if (samePicture) state.rotation else 0,
+                flipped = samePicture && state.flipped,
                 bookmarked = preferences.isMediaBookmarked(selectedPath),
             )
         }
@@ -323,11 +342,72 @@ class MediaViewerViewModel(
         load(directoryPath, selectedPath)
     }
 
+    /**
+     * Applies [sortOrder] to the list on screen without reloading it. A load still under way, or
+     * one that found nothing, is started again instead, since it read the previous order.
+     */
     fun setSortOrder(sortOrder: DirectorySortOrder) {
         preferences.saveDirectorySortOrder(sortOrder)
         _uiState.update { it.copy(sortOrder = sortOrder) }
         val state = _uiState.value
-        load(state.sourceDirectoryPath, null, force = true)
+        if (state.isLoading || state.items.isEmpty()) {
+            load(savedStateHandle[STATE_REQUESTED_DIRECTORY], savedStateHandle[STATE_REQUESTED_SELECTED], force = true)
+            return
+        }
+        sortInPlace(sortOrder)
+        // Which folder or archive comes next depends on the order too, so the search starts over.
+        neighbourJob?.cancel()
+        preparedSource = null
+        _uiState.update {
+            it.copy(
+                previousSource = null,
+                nextSource = null,
+                isPreviousSourceKnown = false,
+                isNextSourceKnown = false,
+            )
+        }
+        if (neighbourSearchLoadId == state.loadId) {
+            neighbourSearchLoadId = -1
+            findNeighbourSources()
+        }
+    }
+
+    /**
+     * Puts the current list in [sortOrder] while it stays on screen, keeping the media shown. Server
+     * files first get the sizes and times the order compares, with the sorting indicator up
+     * meanwhile. Archive pages keep their name order.
+     */
+    private fun sortInPlace(sortOrder: DirectorySortOrder) {
+        sortJob?.cancel()
+        val source = loadedSource ?: return
+        val state = _uiState.value
+        if (source.isArchive || state.items.isEmpty()) return
+        val loadId = state.loadId
+        val fetchesDetails = source.isRemote && sortOrder.needsFileMetadata
+        if (fetchesDetails && !MediaCatalog.hasRemoteMetadata(state.items)) {
+            _uiState.update { if (it.loadId == loadId) it.copy(isSorting = true) else it }
+        }
+        sortJob = viewModelScope.launch(Dispatchers.IO) {
+            val sorted = try {
+                val items = if (fetchesDetails) MediaCatalog.withRemoteMetadata(state.items) else state.items
+                MediaCatalog.sorted(items, sortOrder)
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // The list stays in the order it is in.
+                null
+            }
+            ensureActive()
+            var selectedPage = -1
+            _uiState.update { current ->
+                when {
+                    current.loadId != loadId -> current
+                    sorted == null -> current.copy(isSorting = false)
+                    else -> current.resorted(sorted).also { selectedPage = it.selectedPage }
+                }
+            }
+            if (selectedPage >= 0) savedStateHandle[STATE_SELECTED_PAGE] = selectedPage
+        }
     }
 
     fun toggleFillFrame() {
@@ -396,6 +476,7 @@ class MediaViewerViewModel(
 
     private companion object {
         const val STATE_SELECTED_PAGE = "media_selected_page"
+        const val STATE_SELECTED_ITEM = "media_selected_item"
         const val STATE_SOURCE = "media_source"
         const val STATE_REQUESTED_DIRECTORY = "media_requested_directory"
         const val STATE_REQUESTED_SELECTED = "media_requested_selected"
@@ -433,6 +514,8 @@ data class MediaViewerUiState(
     /** Page indexes are only valid for [items]; it is kept only when the same source is reopened. */
     val jumpHistory: JumpHistory = JumpHistory(),
     val isLoading: Boolean = false,
+    /** Set while the list waits for the file sizes and times its sort order compares. */
+    val isSorting: Boolean = false,
     /** Set while an archive on a server downloads before it can be opened. */
     val downloadProgress: DownloadProgress? = null,
     val errorMessage: String? = null,
@@ -445,6 +528,20 @@ data class MediaViewerUiState(
 
     fun itemForPage(page: Int): MediaViewerItem? =
         items.getOrNull(page)
+
+    /** This state with [sorted], its items in a new order, staying on the media shown. */
+    fun resorted(sorted: List<MediaViewerItem>): MediaViewerUiState {
+        val shownPath = itemForPage(selectedPage)?.path
+        val page = sorted.indexOfFirst { it.path == shownPath }.coerceAtLeast(0)
+        return copy(
+            items = sorted,
+            selectedPage = page,
+            initialPage = page,
+            // Its page indexes point into the old order.
+            jumpHistory = JumpHistory(),
+            isSorting = false,
+        )
+    }
 }
 
 /**
@@ -493,6 +590,11 @@ private class ResolvedSource(
     val sourceDirectoryPath: String?,
     val initialPage: Int,
     val findNeighbour: suspend (next: Boolean, sortOrder: DirectorySortOrder) -> MediaViewerSource?,
+    /** Archive pages stay in name order, their reading order, whatever the sort order. */
+    val isArchive: Boolean = false,
+    val isRemote: Boolean = false,
+    /** Whether [items] are in name order only because their sizes and times were not known yet. */
+    val needsSorting: Boolean = false,
 )
 
 /** A neighbouring source read ahead, for the [load] that asks for the same paths and order. */
