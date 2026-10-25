@@ -134,6 +134,8 @@ data class HistoryDirectoryItem(
     val name: String,
     val path: String,
     val mediaPath: String? = null,
+    /** When the media was last viewed, or 0 when that is not known. */
+    val viewedAtMillis: Long = 0L,
 )
 
 data class HistoryUndo(
@@ -166,6 +168,7 @@ private fun List<srv.scrtvwr.preferences.LastMediaSession>.mediaHistoryItems(
                 name = RemotePaths.name(session.directoryPath),
                 path = session.directoryPath,
                 mediaPath = mediaPath,
+                viewedAtMillis = session.viewedAtMillis,
             )
         }
         val directory = File(session.directoryPath)
@@ -181,6 +184,7 @@ private fun List<srv.scrtvwr.preferences.LastMediaSession>.mediaHistoryItems(
                 },
                 path = directory.absolutePath,
                 mediaPath = mediaPath,
+                viewedAtMillis = session.viewedAtMillis,
             )
     }
 

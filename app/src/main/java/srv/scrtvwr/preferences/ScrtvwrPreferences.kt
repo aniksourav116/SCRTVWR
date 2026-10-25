@@ -199,7 +199,8 @@ class ScrtvwrPreferences(context: Context) {
     }
 
     fun saveLastMediaSession(directoryPath: String, mediaPath: String?) {
-        val history = (listOf(LastMediaSession(directoryPath, mediaPath)) +
+        val session = LastMediaSession(directoryPath, mediaPath, viewedAtMillis = System.currentTimeMillis())
+        val history = (listOf(session) +
             getMediaHistory().filterNot { it.directoryPath == directoryPath })
             .take(MAX_RECENT_DIRECTORIES)
         preferences.edit()
@@ -255,7 +256,7 @@ class ScrtvwrPreferences(context: Context) {
     private fun encodeMediaHistory(values: List<LastMediaSession>): String {
         val json = JSONArray()
         values.forEach { session ->
-            json.put(JSONArray().put(session.directoryPath).put(session.mediaPath))
+            json.put(JSONArray().put(session.directoryPath).put(session.mediaPath).put(session.viewedAtMillis))
         }
         return json.toString()
     }
@@ -268,6 +269,8 @@ class ScrtvwrPreferences(context: Context) {
                     LastMediaSession(
                         directoryPath = session.optString(0),
                         mediaPath = session.optString(1).takeIf(String::isNotBlank),
+                        // Entries saved before view times were kept have none.
+                        viewedAtMillis = session.optLong(2, 0L),
                     )
                 }
             }.filterNotNull().filter { it.directoryPath.isNotBlank() }
@@ -353,6 +356,8 @@ class ScrtvwrPreferences(context: Context) {
 data class LastMediaSession(
     val directoryPath: String,
     val mediaPath: String?,
+    /** When the media was last viewed, or 0 when that is not known. */
+    val viewedAtMillis: Long = 0L,
 )
 
 /** Saved history and favorites as stored, see [ScrtvwrPreferences.getMediaHistorySnapshot]. */

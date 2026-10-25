@@ -1,6 +1,7 @@
 package srv.scrtvwr.ui.dashboard.screens
 
 import android.content.Intent
+import android.text.format.DateUtils
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -45,6 +46,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
@@ -174,7 +176,7 @@ fun HistoryScreen(
                     items(uiState.visibleDirectories, key = { it.mediaPath ?: it.path }) { directory ->
                         ListItem(
                             headlineContent = { Text(directory.name) },
-                            supportingContent = { Text(directory.path) },
+                            supportingContent = { HistoryItemDetails(directory) },
                             leadingContent = { HistoryThumbnail(directory, loadVideoFrame = uiState.loadVideoThumbnails) },
                             trailingContent = {
                                 IconButton(onClick = { onRemoveDirectory(directory) }) {
@@ -196,6 +198,40 @@ fun HistoryScreen(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+    }
+}
+
+@Composable
+private fun HistoryItemDetails(item: HistoryDirectoryItem) {
+    val viewed = item.viewedAtMillis.takeIf { it > 0L }?.let { viewedAt ->
+        stringResource(
+            R.string.history_viewed,
+            DateUtils.getRelativeTimeSpanString(
+                viewedAt,
+                System.currentTimeMillis(),
+                DateUtils.MINUTE_IN_MILLIS,
+            ).toString(),
+        )
+    }
+    // The file last open there, unless the row is already named after it (an archive entry).
+    val mediaName = item.mediaPath
+        ?.let { MediaPaths.name(it.substringAfterLast("::")) }
+        ?.takeIf { it.isNotBlank() && it != item.name }
+    Column {
+        Text(
+            text = item.path,
+            maxLines = 1,
+            overflow = TextOverflow.MiddleEllipsis,
+        )
+        listOfNotNull(viewed, mediaName).takeIf { it.isNotEmpty() }?.let { details ->
+            Text(
+                text = details.joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
