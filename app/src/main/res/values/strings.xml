@@ -135,8 +135,10 @@
     <string name="edge_dialog_style_bottom">Bottom</string>
     <string name="edge_dialog_style_center">Center</string>
     <string name="invalid_whole_number">Enter a valid whole number.</string>
+    <string name="value_out_of_range">Enter a value from %1$d to %2$d.</string>
+    <string name="decrease_value">Decrease %1$s</string>
+    <string name="increase_value">Increase %1$s</string>
     <string name="short_slideshow_warning">Very short intervals may make controls difficult to use.</string>
-    <string name="long_slideshow_warning">Very long intervals may look like the slideshow has stopped.</string>
     <string name="large_preload_warning">Large values can use substantial memory and may slow the viewer.</string>
     <string name="storage_devices">Storage devices</string>
     <string name="device_storage">Device storage</string>

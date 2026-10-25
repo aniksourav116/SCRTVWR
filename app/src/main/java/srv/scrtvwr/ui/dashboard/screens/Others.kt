@@ -5,10 +5,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
@@ -18,6 +24,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
@@ -33,7 +40,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -43,6 +54,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.OthersUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.OthersViewModel
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.PRELOAD_DISTANCE_RANGE
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.SLIDE_SHOW_STAY_MILLIS_RANGE
 import srv.scrtvwr.ui.components.SimpleDropdown
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
@@ -86,44 +99,9 @@ fun OthersScreen(
     modifier: Modifier = Modifier,
     onShowGestureTipsAgain: () -> Unit = {},
 ) {
-    var slideShowStayMillisText by rememberSaveable { mutableStateOf(uiState.slideShowStayMillis.toString()) }
-    var imagePreloadDistanceText by rememberSaveable { mutableStateOf(uiState.imagePreloadDistance.toString()) }
-    var videoPreloadDistanceText by rememberSaveable { mutableStateOf(uiState.videoPreloadDistance.toString()) }
-    val slideShowWarning = when (slideShowStayMillisText.toLongOrNull()) {
-        null -> stringResource(R.string.invalid_whole_number)
-        in 1L..99L -> stringResource(R.string.short_slideshow_warning)
-        in 600_001L..Long.MAX_VALUE -> stringResource(R.string.long_slideshow_warning)
-        else -> null
-    }
-    val imagePreloadWarning = when (imagePreloadDistanceText.toIntOrNull()) {
-        null -> stringResource(R.string.invalid_whole_number)
-        in 11..Int.MAX_VALUE -> stringResource(R.string.large_preload_warning)
-        else -> null
-    }
-
-    LaunchedEffect(uiState.slideShowStayMillis) {
-        if (slideShowStayMillisText.toLongOrNull() != uiState.slideShowStayMillis) {
-            slideShowStayMillisText = uiState.slideShowStayMillis.toString()
-        }
-    }
-
-    LaunchedEffect(uiState.imagePreloadDistance) {
-        if (imagePreloadDistanceText.toIntOrNull() != uiState.imagePreloadDistance) {
-            imagePreloadDistanceText = uiState.imagePreloadDistance.toString()
-        }
-    }
-
-    val videoPreloadWarning = when (videoPreloadDistanceText.toIntOrNull()) {
-        null -> stringResource(R.string.invalid_whole_number)
-        in 11..Int.MAX_VALUE -> stringResource(R.string.large_preload_warning)
-        else -> null
-    }
-
-    LaunchedEffect(uiState.videoPreloadDistance) {
-        if (videoPreloadDistanceText.toIntOrNull() != uiState.videoPreloadDistance) {
-            videoPreloadDistanceText = uiState.videoPreloadDistance.toString()
-        }
-    }
+    val shortSlideShowWarning = stringResource(R.string.short_slideshow_warning)
+    val largePreloadWarning = stringResource(R.string.large_preload_warning)
+    val preloadDistanceRange = PRELOAD_DISTANCE_RANGE.first.toLong()..PRELOAD_DISTANCE_RANGE.last.toLong()
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(20.dp),
@@ -222,14 +200,14 @@ fun OthersScreen(
             NumericPreferenceListItem(
                 headline = stringResource(R.string.slideshow_speed),
                 supporting = stringResource(R.string.slideshow_speed_summary),
-                value = slideShowStayMillisText,
-                onValueChange = { value ->
-                    slideShowStayMillisText = value.filter(Char::isDigit)
-                    slideShowStayMillisText.toLongOrNull()?.let(onSlideShowStayMillisChange)
-                },
+                value = uiState.slideShowStayMillis,
+                range = SLIDE_SHOW_STAY_MILLIS_RANGE,
+                stepDown = { value -> value.slideShowStep(increasing = false) },
+                stepUp = { value -> value.slideShowStep(increasing = true) },
+                onValueChange = onSlideShowStayMillisChange,
                 leadingContent = { Icon(Icons.Default.Slideshow, contentDescription = null) },
                 suffix = "ms",
-                warning = slideShowWarning,
+                warning = { value -> shortSlideShowWarning.takeIf { value < 100L } },
             )
         }
         item {
@@ -276,26 +254,26 @@ fun OthersScreen(
             NumericPreferenceListItem(
                 headline = stringResource(R.string.image_preload_distance),
                 supporting = stringResource(R.string.image_preload_summary),
-                value = imagePreloadDistanceText,
-                onValueChange = { value ->
-                    imagePreloadDistanceText = value.filter(Char::isDigit)
-                    imagePreloadDistanceText.toIntOrNull()?.let(onImagePreloadDistanceChange)
-                },
+                value = uiState.imagePreloadDistance.toLong(),
+                range = preloadDistanceRange,
+                stepDown = { value -> value - 1 },
+                stepUp = { value -> value + 1 },
+                onValueChange = { value -> onImagePreloadDistanceChange(value.toInt()) },
                 leadingContent = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
-                warning = imagePreloadWarning,
+                warning = { value -> largePreloadWarning.takeIf { value > 10L } },
             )
         }
         item {
             NumericPreferenceListItem(
                 headline = stringResource(R.string.video_preload_distance),
                 supporting = stringResource(R.string.video_preload_summary),
-                value = videoPreloadDistanceText,
-                onValueChange = { value ->
-                    videoPreloadDistanceText = value.filter(Char::isDigit)
-                    videoPreloadDistanceText.toIntOrNull()?.let(onVideoPreloadDistanceChange)
-                },
+                value = uiState.videoPreloadDistance.toLong(),
+                range = preloadDistanceRange,
+                stepDown = { value -> value - 1 },
+                stepUp = { value -> value + 1 },
+                onValueChange = { value -> onVideoPreloadDistanceChange(value.toInt()) },
                 leadingContent = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
-                warning = videoPreloadWarning,
+                warning = { value -> largePreloadWarning.takeIf { value > 10L } },
             )
         }
         item { SettingsSectionHeader(stringResource(R.string.settings_section_about)) }
@@ -333,41 +311,118 @@ private fun SettingsSectionHeader(
     )
 }
 
+/**
+ * A whole number setting that can be typed or stepped with − and +. Typed values inside [range]
+ * save as they are typed; one outside it shows an error and is brought into [range] when the field
+ * loses focus. [stepDown] and [stepUp] give the next value either way.
+ */
 @Composable
 private fun NumericPreferenceListItem(
     headline: String,
     supporting: String,
-    value: String,
-    onValueChange: (String) -> Unit,
+    value: Long,
+    range: LongRange,
+    stepDown: (Long) -> Long,
+    stepUp: (Long) -> Long,
+    onValueChange: (Long) -> Unit,
     leadingContent: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     suffix: String? = null,
-    warning: String? = null,
+    warning: (Long) -> String? = { null },
 ) {
+    var text by rememberSaveable { mutableStateOf(value.toString()) }
+    LaunchedEffect(value) {
+        if (text.toLongOrNull() != value) text = value.toString()
+    }
+    val typed = text.toLongOrNull()
+    val message = when {
+        typed == null -> stringResource(R.string.invalid_whole_number)
+        typed !in range -> stringResource(R.string.value_out_of_range, range.first, range.last)
+        else -> warning(typed)
+    }
+    val isError = typed == null || typed !in range
+    // The buttons step from what is shown when it is valid, otherwise from the saved value.
+    val current = typed?.takeIf { it in range } ?: value.coerceIn(range)
+    val focusManager = LocalFocusManager.current
+
+    fun commit(newValue: Long) {
+        val bounded = newValue.coerceIn(range)
+        text = bounded.toString()
+        onValueChange(bounded)
+    }
+
     ListItem(
         modifier = modifier.fillMaxWidth(),
         headlineContent = { Text(headline) },
         supportingContent = {
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(supporting)
-                warning?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { commit(stepDown(current)) },
+                        enabled = current > range.first,
+                    ) {
+                        Icon(Icons.Default.Remove, contentDescription = stringResource(R.string.decrease_value, headline))
+                    }
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { newText ->
+                            // Long enough for any value in range, short enough never to overflow.
+                            text = newText.filter(Char::isDigit).take(MAX_NUMBER_LENGTH)
+                            text.toLongOrNull()?.takeIf { it in range }?.let(onValueChange)
+                        },
+                        singleLine = true,
+                        isError = isError,
+                        suffix = suffix?.let { { Text(it) } },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number,
+                            imeAction = ImeAction.Done,
+                        ),
+                        keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                        modifier = Modifier
+                            .width(140.dp)
+                            .onFocusChanged { focus ->
+                                if (!focus.isFocused && (typed == null || typed !in range)) {
+                                    commit(typed ?: value)
+                                }
+                            },
+                    )
+                    IconButton(
+                        onClick = { commit(stepUp(current)) },
+                        enabled = current < range.last,
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = stringResource(R.string.increase_value, headline))
+                    }
+                }
+                message?.let {
+                    Text(
+                        text = it,
+                        color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         },
         leadingContent = leadingContent,
-        trailingContent = {
-            OutlinedTextField(
-                value = value,
-                onValueChange = onValueChange,
-                singleLine = true,
-                suffix = suffix?.let { { Text(it) } },
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    keyboardType = KeyboardType.Number,
-                ),
-                modifier = Modifier.fillMaxWidth(0.42f),
-            )
-        },
     )
 }
+
+/**
+ * The next slide show stay time either way. The step grows with the time, and lands on a multiple
+ * of itself, so stepping up and back down retraces the same values.
+ */
+private fun Long.slideShowStep(increasing: Boolean): Long {
+    // Stepping down uses the step of the range it lands in.
+    val reference = if (increasing) this else this - 1
+    val step = when {
+        reference < 100L -> 10L
+        reference < 1_000L -> 50L
+        reference < 5_000L -> 250L
+        else -> 1_000L
+    }
+    return if (increasing) (this / step + 1) * step else ((this - 1) / step) * step
+}
+
+private const val MAX_NUMBER_LENGTH = 9
 
 @Preview(showBackground = true)
 @Composable

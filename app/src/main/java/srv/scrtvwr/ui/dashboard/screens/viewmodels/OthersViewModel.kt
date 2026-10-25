@@ -45,7 +45,7 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setSlideShowStayMillis(stayMillis: Long) {
-        val boundedStayMillis = stayMillis.coerceAtLeast(1L)
+        val boundedStayMillis = stayMillis.coerceIn(SLIDE_SHOW_STAY_MILLIS_RANGE)
         preferences.saveSlideShowStayMillis(boundedStayMillis)
         _uiState.update { it.copy(slideShowStayMillis = boundedStayMillis) }
     }
@@ -61,13 +61,13 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setImagePreloadDistance(distance: Int) {
-        val boundedDistance = distance.coerceAtLeast(0)
+        val boundedDistance = distance.coerceIn(PRELOAD_DISTANCE_RANGE)
         preferences.saveImagePreloadDistance(boundedDistance)
         _uiState.update { it.copy(imagePreloadDistance = boundedDistance) }
     }
 
     fun setVideoPreloadDistance(distance: Int) {
-        val boundedDistance = distance.coerceAtLeast(0)
+        val boundedDistance = distance.coerceIn(PRELOAD_DISTANCE_RANGE)
         preferences.saveVideoPreloadDistance(boundedDistance)
         _uiState.update { it.copy(videoPreloadDistance = boundedDistance) }
     }
@@ -81,6 +81,12 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(mediaEdgeDialogStyle = style) }
     }
 }
+
+/** Slide show stay times the settings accept: up to ten minutes an image. */
+val SLIDE_SHOW_STAY_MILLIS_RANGE = 1L..600_000L
+
+/** Preload distances the settings accept; more pages than this mostly costs memory. */
+val PRELOAD_DISTANCE_RANGE = 0..20
 
 data class OthersUiState(
     val showHiddenFiles: Boolean = false,
