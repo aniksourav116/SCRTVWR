@@ -13,6 +13,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -53,6 +55,7 @@ import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -68,6 +71,7 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -102,6 +106,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -113,6 +118,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -194,6 +200,10 @@ fun Directory(
     BackHandler(enabled = backHandlerEnabled && uiState.canNavigateUp) {
         viewModel.navigateUp()
     }
+    // Declared later, so while selecting, Back ends the selection before leaving the folder.
+    BackHandler(enabled = backHandlerEnabled && uiState.isSelecting) {
+        viewModel.clearSelection()
+    }
 
     DirectoryScreen(
         uiState = uiState,
@@ -249,6 +259,12 @@ fun Directory(
         onClearFileOperationStatus = viewModel::clearFileOperationStatus,
         onCopyLink = context::copyLink,
         onLoadEntryDetails = viewModel::loadEntryDetails,
+        onToggleSelection = viewModel::toggleSelection,
+        onSelectAll = viewModel::selectAll,
+        onClearSelection = viewModel::clearSelection,
+        onCopySelected = viewModel::prepareCopySelected,
+        onMoveSelected = viewModel::prepareMoveSelected,
+        onDeleteSelected = viewModel::deleteSelected,
         // Reads from the viewer count too, so the warning can appear on returning to the folder.
         showVideoFrameLoadWarning = videoFrameLoadWarning && uiState.loadVideoThumbnails && uiState.isRemote,
         onTurnOffVideoThumbnails = viewModel::turnOffVideoThumbnails,
@@ -285,77 +301,101 @@ fun DirectoryScreen(
     showVideoFrameLoadWarning: Boolean = false,
     onTurnOffVideoThumbnails: () -> Unit = {},
     onDismissVideoFrameLoadWarning: () -> Unit = {},
+    onToggleSelection: (DirectoryEntry) -> Unit = {},
+    onSelectAll: () -> Unit = {},
+    onClearSelection: () -> Unit = {},
+    onCopySelected: () -> Unit = {},
+    onMoveSelected: () -> Unit = {},
+    onDeleteSelected: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var moreMenuExpanded by remember { mutableStateOf(false) }
     var sortMenuExpanded by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
     var entryPendingDeletion by remember { mutableStateOf<DirectoryEntry?>(null) }
+    var selectionPendingDeletion by remember { mutableStateOf(false) }
     BaseScaffold(
-        title = uiState.currentName,
-        showBackButton = false,
+        title = if (uiState.isSelecting) {
+            pluralStringResource(R.plurals.selected_count, uiState.selectedPaths.size, uiState.selectedPaths.size)
+        } else {
+            uiState.currentName
+        },
+        showBackButton = uiState.isSelecting,
+        onBackClick = onClearSelection,
+        backIcon = Icons.Default.Close,
+        backContentDescription = stringResource(R.string.clear_selection),
         actions = {
-            Box {
-                IconButton(onClick = { sortMenuExpanded = true }) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Sort,
-                        contentDescription = stringResource(R.string.sort_order),
-                    )
-                }
-                DropdownMenu(
-                    expanded = sortMenuExpanded,
-                    onDismissRequest = { sortMenuExpanded = false },
-                ) {
-                    DirectorySortOrder.entries.forEach { sortOrder ->
-                        DropdownMenuItem(
-                            text = { Text(stringResource(sortOrder.labelResource())) },
-                            onClick = {
-                                onSortOrderChange(sortOrder)
-                                sortMenuExpanded = false
-                            },
-                            trailingIcon = if (sortOrder == uiState.sortOrder) {
-                                { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
-                            } else {
-                                null
-                            },
+            if (uiState.isSelecting) {
+                SelectionActions(
+                    enabled = !uiState.isFileOperationRunning,
+                    onSelectAll = onSelectAll,
+                    onCopy = onCopySelected,
+                    onMove = onMoveSelected,
+                    onDelete = { selectionPendingDeletion = true },
+                )
+            } else {
+                Box {
+                    IconButton(onClick = { sortMenuExpanded = true }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Sort,
+                            contentDescription = stringResource(R.string.sort_order),
                         )
                     }
+                    DropdownMenu(
+                        expanded = sortMenuExpanded,
+                        onDismissRequest = { sortMenuExpanded = false },
+                    ) {
+                        DirectorySortOrder.entries.forEach { sortOrder ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(sortOrder.labelResource())) },
+                                onClick = {
+                                    onSortOrderChange(sortOrder)
+                                    sortMenuExpanded = false
+                                },
+                                trailingIcon = if (sortOrder == uiState.sortOrder) {
+                                    { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                                } else {
+                                    null
+                                },
+                            )
+                        }
+                    }
                 }
-            }
-            IconButton(
-                onClick = {
-                    onViewModeChange(
-                        if (uiState.viewMode == DirectoryViewMode.List) DirectoryViewMode.Grid else DirectoryViewMode.List,
+                IconButton(
+                    onClick = {
+                        onViewModeChange(
+                            if (uiState.viewMode == DirectoryViewMode.List) DirectoryViewMode.Grid else DirectoryViewMode.List,
+                        )
+                    },
+                ) {
+                    Icon(
+                        imageVector = if (uiState.viewMode == DirectoryViewMode.List) Icons.Default.GridView else Icons.AutoMirrored.Filled.ViewList,
+                        contentDescription = stringResource(
+                            if (uiState.viewMode == DirectoryViewMode.List) R.string.grid_view else R.string.list_view,
+                        ),
                     )
-                },
-            ) {
-                Icon(
-                    imageVector = if (uiState.viewMode == DirectoryViewMode.List) Icons.Default.GridView else Icons.AutoMirrored.Filled.ViewList,
-                    contentDescription = stringResource(
-                        if (uiState.viewMode == DirectoryViewMode.List) R.string.grid_view else R.string.list_view,
-                    ),
-                )
-            }
-            IconButton(onClick = { searchVisible = true }) {
-                Icon(Icons.Default.Search, contentDescription = stringResource(R.string.search_files_folders))
-            }
-            Box {
-                IconButton(onClick = { moreMenuExpanded = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_options))
                 }
-                DirectoryOptionsMenu(
-                    expanded = moreMenuExpanded,
-                    onDismissRequest = { moreMenuExpanded = false },
-                    uiState = uiState,
-                    onRefresh = onRefresh,
-                    onResumeMedia = onResumeMedia,
-                    onOpenRecentDirectory = onOpenRecentDirectory,
-                    onCopyLink = onCopyLink,
-                )
+                IconButton(onClick = { searchVisible = true }) {
+                    Icon(Icons.Default.Search, contentDescription = stringResource(R.string.search_files_folders))
+                }
+                Box {
+                    IconButton(onClick = { moreMenuExpanded = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_options))
+                    }
+                    DirectoryOptionsMenu(
+                        expanded = moreMenuExpanded,
+                        onDismissRequest = { moreMenuExpanded = false },
+                        uiState = uiState,
+                        onRefresh = onRefresh,
+                        onResumeMedia = onResumeMedia,
+                        onOpenRecentDirectory = onOpenRecentDirectory,
+                        onCopyLink = onCopyLink,
+                    )
+                }
             }
         },
         floatingActionButton = {
-            uiState.lastMediaSession?.let { session ->
+            uiState.lastMediaSession?.takeUnless { uiState.isSelecting }?.let { session ->
                 ResumeButton(session = session, onClick = onResumeMedia)
             }
         },
@@ -455,6 +495,7 @@ fun DirectoryScreen(
                     onLoadEntryDetails = onLoadEntryDetails,
                     onRetry = onRefresh,
                     onClearSearch = { onSearchQueryChange("") },
+                    onToggleSelection = onToggleSelection,
                 )
 
                 DirectoryViewMode.Grid -> DirectoryGrid(
@@ -472,9 +513,34 @@ fun DirectoryScreen(
                     onCopyLink = onCopyLink,
                     onRetry = onRefresh,
                     onClearSearch = { onSearchQueryChange("") },
+                    onToggleSelection = onToggleSelection,
                 )
             }
         }
+    }
+
+    if (selectionPendingDeletion) {
+        val count = uiState.selectedPaths.size
+        AlertDialog(
+            onDismissRequest = { selectionPendingDeletion = false },
+            title = { Text(stringResource(R.string.delete_items_title)) },
+            text = { Text(pluralStringResource(R.plurals.delete_items_message, count, count)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteSelected()
+                        selectionPendingDeletion = false
+                    },
+                ) {
+                    Text(stringResource(R.string.delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { selectionPendingDeletion = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
     }
 
     entryPendingDeletion?.let { entry ->
@@ -488,6 +554,28 @@ fun DirectoryScreen(
         )
     }
 }
+}
+
+@Composable
+private fun SelectionActions(
+    enabled: Boolean,
+    onSelectAll: () -> Unit,
+    onCopy: () -> Unit,
+    onMove: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    IconButton(onClick = onSelectAll, enabled = enabled) {
+        Icon(Icons.Default.SelectAll, contentDescription = stringResource(R.string.select_all))
+    }
+    IconButton(onClick = onCopy, enabled = enabled) {
+        Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.copy))
+    }
+    IconButton(onClick = onMove, enabled = enabled) {
+        Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = stringResource(R.string.move))
+    }
+    IconButton(onClick = onDelete, enabled = enabled) {
+        Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.delete))
+    }
 }
 
 @Composable
@@ -743,19 +831,29 @@ private fun DirectoryFileOperationPanel(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    val single = operation.items.singleOrNull()
                     Column(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
                         Text(
-                            text = stringResource(operation.operation.pendingLabelResource(), operation.name),
+                            text = if (single != null) {
+                                stringResource(operation.operation.pendingLabelResource(), single.name)
+                            } else {
+                                pluralStringResource(
+                                    operation.operation.pendingPluralResource(),
+                                    operation.items.size,
+                                    operation.items.size,
+                                )
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            text = operation.path,
+                            // Several items come from one folder, so it stands for them all.
+                            text = single?.path ?: MediaPaths.parent(operation.items.first().path).orEmpty(),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f),
                             maxLines = 1,
@@ -962,6 +1060,7 @@ private fun DirectoryList(
     onLoadEntryDetails: suspend (DirectoryEntry) -> Unit,
     onRetry: () -> Unit,
     onClearSearch: () -> Unit,
+    onToggleSelection: (DirectoryEntry) -> Unit,
 ) {
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
@@ -1025,12 +1124,19 @@ private fun DirectoryList(
                     style = style,
                     onClick = {
                         when {
+                            uiState.isSelecting -> onToggleSelection(entry)
                             entry.isDirectory -> onOpenDirectory(entry)
                             entry.mediaType != DirectoryMediaType.Other -> onOpenMedia(entry)
                             else -> onOpenWithOtherApp(entry)
                         }
                     },
-                    actions = if (showFileActions || MediaPaths.link(entry.path) != null) {
+                    onLongClick = if (showFileActions) {
+                        { onToggleSelection(entry) }
+                    } else {
+                        null
+                    },
+                    selected = entry.path in uiState.selectedPaths,
+                    actions = if (!uiState.isSelecting && (showFileActions || MediaPaths.link(entry.path) != null)) {
                         {
                             DirectoryEntryActionMenu(
                                 entry = entry,
@@ -1067,14 +1173,16 @@ private fun DirectoryListRow(
     thumbnail: @Composable () -> Unit,
     style: EntryVisualStyle,
     onClick: (() -> Unit)?,
+    onLongClick: (() -> Unit)? = null,
+    selected: Boolean = false,
     actions: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
-            .background(style.containerColor)
-            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else style.containerColor)
+            .entryClickable(onClick, onLongClick, selected)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1083,6 +1191,7 @@ private fun DirectoryListRow(
             contentAlignment = Alignment.Center,
         ) {
             thumbnail()
+            if (selected) SelectedMark()
         }
         Spacer(modifier = Modifier.width(12.dp))
         Column(
@@ -1127,6 +1236,7 @@ private fun DirectoryGrid(
     onCopyLink: (String) -> Unit,
     onRetry: () -> Unit,
     onClearSearch: () -> Unit,
+    onToggleSelection: (DirectoryEntry) -> Unit,
 ) {
     val gridState = rememberLazyGridState()
     val coroutineScope = rememberCoroutineScope()
@@ -1212,12 +1322,19 @@ private fun DirectoryGrid(
                     },
                     onClick = {
                         when {
+                            uiState.isSelecting -> onToggleSelection(entry)
                             entry.isDirectory -> onOpenDirectory(entry)
                             entry.mediaType != DirectoryMediaType.Other -> onOpenMedia(entry)
                             else -> onOpenWithOtherApp(entry)
                         }
                     },
-                    actions = if (showFileActions || MediaPaths.link(entry.path) != null) {
+                    onLongClick = if (showFileActions) {
+                        { onToggleSelection(entry) }
+                    } else {
+                        null
+                    },
+                    selected = entry.path in uiState.selectedPaths,
+                    actions = if (!uiState.isSelecting && (showFileActions || MediaPaths.link(entry.path) != null)) {
                         {
                             DirectoryEntryActionMenu(
                                 entry = entry,
@@ -1312,18 +1429,22 @@ private fun DirectoryGridCard(
     subtitle: String,
     thumbnail: @Composable () -> Unit,
     onClick: (() -> Unit)?,
+    onLongClick: (() -> Unit)? = null,
+    selected: Boolean = false,
     actions: (@Composable () -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.small)
-            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+            .entryClickable(onClick, onLongClick, selected)
             .padding(4.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box {
             thumbnail()
+            if (selected) SelectedMark()
             actions?.let {
                 Box(modifier = Modifier.align(Alignment.TopEnd)) {
                     it.invoke()
@@ -1421,6 +1542,43 @@ private fun EntryThumbnail(
             )
         }
     }
+}
+
+/** Opens on tap; a long press, when [onLongClick] is set, selects. */
+@Composable
+private fun Modifier.entryClickable(
+    onClick: (() -> Unit)?,
+    onLongClick: (() -> Unit)?,
+    isSelected: Boolean,
+): Modifier {
+    if (onClick == null) return this
+    val selectLabel = stringResource(R.string.select)
+    return semantics { selected = isSelected }
+        .combinedClickable(
+            role = Role.Button,
+            onClick = onClick,
+            onLongClick = onLongClick,
+            onLongClickLabel = if (onLongClick != null) selectLabel else null,
+        )
+}
+
+@Composable
+private fun BoxScope.SelectedMark() {
+    Box(
+        modifier = Modifier
+            .matchParentSize()
+            .clip(MaterialTheme.shapes.small)
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)),
+    )
+    Icon(
+        Icons.Default.CheckCircle,
+        contentDescription = null,
+        tint = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .align(Alignment.TopStart)
+            .padding(4.dp)
+            .background(MaterialTheme.colorScheme.surface, CircleShape),
+    )
 }
 
 @Composable
@@ -1607,6 +1765,11 @@ private val DirectoryUiState.listBottomPadding: Dp
 private fun DirectoryFileOperation.pendingLabelResource(): Int = when (this) {
     DirectoryFileOperation.Copy -> R.string.copy_pending
     DirectoryFileOperation.Move -> R.string.move_pending
+}
+
+private fun DirectoryFileOperation.pendingPluralResource(): Int = when (this) {
+    DirectoryFileOperation.Copy -> R.plurals.copy_pending_multiple
+    DirectoryFileOperation.Move -> R.plurals.move_pending_multiple
 }
 
 private fun DirectorySortOrder.labelResource(): Int = when (this) {

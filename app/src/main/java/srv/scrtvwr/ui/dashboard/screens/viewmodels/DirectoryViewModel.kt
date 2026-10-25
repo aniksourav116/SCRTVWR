@@ -136,6 +136,7 @@ class DirectoryViewModel(
                 rootLabel = rootLabelFor(root),
                 currentPath = directory,
                 searchQuery = "",
+                selectedPaths = emptySet(),
                 canNavigateUp = directory.isDifferentDirectory(root),
                 directoryListing = DirectoryListing(entries = emptyList()),
                 isLoading = true,
@@ -156,6 +157,7 @@ class DirectoryViewModel(
                 it.copy(
                     currentPath = parentDirectory,
                     searchQuery = "",
+                    selectedPaths = emptySet(),
                     canNavigateUp = parentDirectory.isDifferentDirectory(state.rootPath),
                     directoryListing = DirectoryListing(entries = emptyList()),
                     isLoading = true,
@@ -197,6 +199,8 @@ class DirectoryViewModel(
             it.copy(
                 showHiddenFiles = preferences.getShowHiddenFiles(),
                 showDirectoryFileActions = preferences.getShowDirectoryFileActions(),
+                // Turning file actions off ends a selection, which has nothing left to act on.
+                selectedPaths = if (preferences.getShowDirectoryFileActions()) it.selectedPaths else emptySet(),
                 loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
                 recentDirectories = preferences.getRecentDirectories().validDirectories(servers),
                 lastMediaSession = preferences.getLastMediaSession()?.takeIfValid(servers),
@@ -229,11 +233,43 @@ class DirectoryViewModel(
     }
 
     fun prepareCopy(entry: DirectoryEntry) {
-        prepareFileOperation(entry, DirectoryFileOperation.Copy)
+        prepareFileOperation(listOf(entry), DirectoryFileOperation.Copy)
     }
 
     fun prepareMove(entry: DirectoryEntry) {
-        prepareFileOperation(entry, DirectoryFileOperation.Move)
+        prepareFileOperation(listOf(entry), DirectoryFileOperation.Move)
+    }
+
+    fun prepareCopySelected() {
+        prepareFileOperation(_uiState.value.selectedEntries, DirectoryFileOperation.Copy)
+    }
+
+    fun prepareMoveSelected() {
+        prepareFileOperation(_uiState.value.selectedEntries, DirectoryFileOperation.Move)
+    }
+
+    /** Adds [entry] to the selection, or takes it out. Only folders with file actions can select. */
+    fun toggleSelection(entry: DirectoryEntry) {
+        _uiState.update { state ->
+            if (!state.fileActionsAvailable || state.isFileOperationRunning) return@update state
+            state.copy(
+                selectedPaths = if (entry.path in state.selectedPaths) {
+                    state.selectedPaths - entry.path
+                } else {
+                    state.selectedPaths + entry.path
+                },
+            )
+        }
+    }
+
+    fun selectAll() {
+        _uiState.update { state ->
+            if (!state.fileActionsAvailable) state else state.copy(selectedPaths = state.entries.mapTo(mutableSetOf()) { it.path })
+        }
+    }
+
+    fun clearSelection() {
+        _uiState.update { it.copy(selectedPaths = emptySet()) }
     }
 
     fun cancelFileOperation() {
@@ -257,14 +293,17 @@ class DirectoryViewModel(
                     fileOperationStatus = null,
                 )
             }
-            val result = withContext(Dispatchers.IO) {
-                operation.perform(destinationDirectory, app)
+            val results = withContext(Dispatchers.IO) {
+                operation.items.map { item -> item to item.perform(operation.operation, destinationDirectory, app) }
             }
+            // Items that failed stay pending, so they can be pasted again once the problem is fixed.
+            val failed = results.filter { (_, status) -> status.isError }.map { (item, _) -> item }
             _uiState.update { state ->
                 state.copy(
-                    pendingFileOperation = if (result.isError) state.pendingFileOperation else null,
+                    pendingFileOperation = if (failed.isEmpty()) null else operation.copy(items = failed),
                     isFileOperationRunning = false,
-                    fileOperationStatus = result,
+                    fileOperationStatus = results.map { (_, status) -> status }
+                        .summary(app, operation.operation.completeResource()),
                 )
             }
             scanDirectory()
@@ -272,8 +311,16 @@ class DirectoryViewModel(
     }
 
     fun deleteEntry(entry: DirectoryEntry) {
+        deleteEntries(listOf(entry))
+    }
+
+    fun deleteSelected() {
+        deleteEntries(_uiState.value.selectedEntries)
+    }
+
+    private fun deleteEntries(entries: List<DirectoryEntry>) {
         val currentState = _uiState.value
-        if (currentState.isFileOperationRunning || !currentState.fileActionsAvailable) return
+        if (entries.isEmpty() || currentState.isFileOperationRunning || !currentState.fileActionsAvailable) return
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -281,33 +328,43 @@ class DirectoryViewModel(
                     fileOperationStatus = null,
                 )
             }
-            val result = withContext(Dispatchers.IO) {
-                File(entry.path).deleteEntry(entry.name, app)
+            val results = withContext(Dispatchers.IO) {
+                entries.map { entry -> entry to File(entry.path).deleteEntry(entry.name, app) }
             }
-            _uiState.update {
-                it.copy(
-                    pendingFileOperation = if (!result.isError && it.pendingFileOperation?.path == entry.path) {
-                        null
-                    } else {
-                        it.pendingFileOperation
-                    },
+            val deletedPaths = results
+                .filterNot { (_, status) -> status.isError }
+                .mapTo(mutableSetOf()) { (entry, _) -> entry.path }
+            _uiState.update { state ->
+                state.copy(
+                    // A deleted item can no longer be pasted.
+                    pendingFileOperation = state.pendingFileOperation
+                        ?.let { pending -> pending.copy(items = pending.items.filterNot { it.path in deletedPaths }) }
+                        ?.takeIf { it.items.isNotEmpty() },
+                    selectedPaths = emptySet(),
                     isFileOperationRunning = false,
-                    fileOperationStatus = result,
+                    fileOperationStatus = results.map { (_, status) -> status }
+                        .summary(app, R.plurals.delete_complete_multiple),
                 )
             }
             scanDirectory()
         }
     }
 
-    private fun prepareFileOperation(entry: DirectoryEntry, operation: DirectoryFileOperation) {
+    private fun prepareFileOperation(entries: List<DirectoryEntry>, operation: DirectoryFileOperation) {
+        if (entries.isEmpty()) return
         _uiState.update { state ->
             if (state.isFileOperationRunning || !state.fileActionsAvailable) state else state.copy(
                 pendingFileOperation = PendingDirectoryFileOperation(
                     operation = operation,
-                    name = entry.name,
-                    path = entry.path,
-                    isDirectory = entry.isDirectory,
+                    items = entries.map { entry ->
+                        DirectoryFileItem(
+                            name = entry.name,
+                            path = entry.path,
+                            isDirectory = entry.isDirectory,
+                        )
+                    },
                 ),
+                selectedPaths = emptySet(),
                 fileOperationStatus = null,
             )
         }
@@ -399,6 +456,8 @@ class DirectoryViewModel(
                 current.mediaFilter != request.mediaFilter
             ) current else current.copy(
                 directoryListing = listing,
+                // A new listing keeps only the selected entries it still holds.
+                selectedPaths = current.selectedPaths.intersect(listing.entries.mapTo(mutableSetOf()) { it.path }),
                 isLoading = false,
                 isSortPending = isSortPending,
                 errorMessage = listing.errorMessage,
@@ -439,7 +498,15 @@ data class DirectoryUiState(
     val pendingFileOperation: PendingDirectoryFileOperation? = null,
     val fileOperationStatus: DirectoryFileOperationStatus? = null,
     val errorMessage: String? = null,
+    /** Entries picked for copy, move, or delete; empty when not selecting. */
+    val selectedPaths: Set<String> = emptySet(),
 ) {
+    val isSelecting: Boolean
+        get() = selectedPaths.isNotEmpty()
+
+    val selectedEntries: List<DirectoryEntry>
+        get() = entries.filter { it.path in selectedPaths }
+
     val entries: List<DirectoryEntry>
         get() = directoryListing.entries
 
@@ -502,6 +569,10 @@ data class DirectoryEntry(
 
 data class PendingDirectoryFileOperation(
     val operation: DirectoryFileOperation,
+    val items: List<DirectoryFileItem>,
+)
+
+data class DirectoryFileItem(
     val name: String,
     val path: String,
     val isDirectory: Boolean,
@@ -667,7 +738,8 @@ private fun File.isSameOrChildOf(root: File): Boolean {
     return filePath == rootPath || filePath.startsWith("$rootPath${File.separator}")
 }
 
-private fun PendingDirectoryFileOperation.perform(
+private fun DirectoryFileItem.perform(
+    operation: DirectoryFileOperation,
     destinationDirectory: File,
     app: Application,
 ): DirectoryFileOperationStatus {
@@ -781,6 +853,33 @@ private fun File.deleteEntry(
         )
     },
 )
+
+private fun DirectoryFileOperation.completeResource(): Int = when (this) {
+    DirectoryFileOperation.Copy -> R.plurals.copy_complete_multiple
+    DirectoryFileOperation.Move -> R.plurals.move_complete_multiple
+}
+
+/**
+ * One status for a batch: a single item keeps its own; several are counted, with the first failure
+ * explained when any failed.
+ */
+private fun List<DirectoryFileOperationStatus>.summary(
+    app: Application,
+    completeResource: Int,
+): DirectoryFileOperationStatus {
+    singleOrNull()?.let { return it }
+    val failures = filter { it.isError }
+    if (failures.isEmpty()) {
+        return DirectoryFileOperationStatus(
+            message = app.resources.getQuantityString(completeResource, size, size),
+            isError = false,
+        )
+    }
+    return DirectoryFileOperationStatus(
+        message = app.getString(R.string.file_operation_partial, size - failures.size, size, failures.first().message),
+        isError = true,
+    )
+}
 
 private fun DirectoryFileOperation.failure(
     app: Application,

@@ -17,6 +17,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -31,6 +32,8 @@ fun BaseScaffold(
     subtitle: String? = null,
     showBackButton: Boolean = true,
     onBackClick: () -> Unit = {},
+    backIcon: ImageVector = Icons.AutoMirrored.Filled.ArrowBack,
+    backContentDescription: String = stringResource(R.string.back),
     actions: @Composable () -> Unit = {},
     floatingActionButton: @Composable () -> Unit = {},
     content: @Composable (Modifier) -> Unit,
@@ -62,7 +65,7 @@ fun BaseScaffold(
                 navigationIcon = {
                     if (showBackButton) {
                         IconButton(onClick = onBackClick) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                            Icon(backIcon, contentDescription = backContentDescription)
                         }
                     }
                 },

@@ -41,6 +41,39 @@
     <string name="copy_failed">Unable to copy \"%1$s\": %2$s</string>
     <string name="move_failed">Unable to move \"%1$s\": %2$s</string>
     <string name="delete_failed">Unable to delete \"%1$s\": %2$s</string>
+    <plurals name="copy_pending_multiple">
+        <item quantity="one">Copy %1$d item to this directory</item>
+        <item quantity="other">Copy %1$d items to this directory</item>
+    </plurals>
+    <plurals name="move_pending_multiple">
+        <item quantity="one">Move %1$d item to this directory</item>
+        <item quantity="other">Move %1$d items to this directory</item>
+    </plurals>
+    <plurals name="copy_complete_multiple">
+        <item quantity="one">Copied %1$d item.</item>
+        <item quantity="other">Copied %1$d items.</item>
+    </plurals>
+    <plurals name="move_complete_multiple">
+        <item quantity="one">Moved %1$d item.</item>
+        <item quantity="other">Moved %1$d items.</item>
+    </plurals>
+    <plurals name="delete_complete_multiple">
+        <item quantity="one">Deleted %1$d item.</item>
+        <item quantity="other">Deleted %1$d items.</item>
+    </plurals>
+    <string name="file_operation_partial">%1$d of %2$d done. %3$s</string>
+    <plurals name="selected_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+    <string name="select_all">Select all</string>
+    <string name="clear_selection">Clear selection</string>
+    <string name="select">Select</string>
+    <string name="delete_items_title">Delete items?</string>
+    <plurals name="delete_items_message">
+        <item quantity="one">Delete %1$d item? This cannot be undone.</item>
+        <item quantity="other">Delete %1$d items? This cannot be undone.</item>
+    </plurals>
     <string name="file_operation_source_missing">The item no longer exists.</string>
     <string name="file_operation_destination_unavailable">This directory is not available.</string>
     <string name="file_operation_destination_inside_source">Choose a destination outside the selected folder.</string>
