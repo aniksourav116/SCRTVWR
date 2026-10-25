@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -81,7 +80,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -103,6 +101,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -112,36 +112,25 @@ import androidx.media3.ui.PlayerView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import srv.scrtvwr.media.DirectoryTraversal
 import srv.scrtvwr.media.remote.RemoteVideoPlayback
 import srv.scrtvwr.ui.components.BookmarkFlash
 import srv.scrtvwr.ui.components.TapeTransportButton
 import srv.scrtvwr.ui.components.VideoSideGestures
 import srv.scrtvwr.ui.components.copyLink
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
-import srv.scrtvwr.media.MediaCatalog
 import srv.scrtvwr.media.MediaPaths
-import srv.scrtvwr.media.MediaTypes
-import srv.scrtvwr.media.remote.RemoteDirectoryTree
-import srv.scrtvwr.media.remote.RemotePaths
-import srv.scrtvwr.media.remote.serverFor
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.media.MediaViewerItem
-import srv.scrtvwr.ui.media.MediaViewerType
 import srv.scrtvwr.ui.media.VideoCompletionAction
+import srv.scrtvwr.ui.media.VideoDirectoryTarget
+import srv.scrtvwr.ui.media.VideoDirectoryType
+import srv.scrtvwr.ui.media.VideoPlayerViewModel
 import srv.scrtvwr.ui.media.loopsCurrentVideo
 import srv.scrtvwr.ui.media.nextVideoIndex
 import srv.scrtvwr.ui.media.wrapsAtDirectoryEnd
-import srv.scrtvwr.ui.sort.DirectorySortOrder
-import srv.scrtvwr.ui.sort.fileComparator
 import java.io.File
-import java.io.IOException
 import java.util.Locale
 
 class VideoPlayerActivity : ComponentActivity() {
@@ -215,49 +204,26 @@ private fun VideoPagerScreen(
     onBack: () -> Unit,
     onDirectoryChanged: (String) -> Unit,
     onOpenImageDirectory: (String, String) -> Unit,
+    viewModel: VideoPlayerViewModel = viewModel(),
 ) {
     val context = LocalContext.current
     val preferences = remember { ScrtvwrPreferences(context) }
-    val sortOrder = remember { preferences.getDirectorySortOrder() }
     val videoPreloadDistance = remember { preferences.getVideoPreloadDistance() }
-    val traversalRoot = remember { runCatching { Environment.getExternalStorageDirectory() }.getOrNull() }
-    var currentDirectoryPath by rememberSaveable(directoryPath, selectedPath) {
-        mutableStateOf(directoryPath ?: selectedPath?.let(MediaPaths::parent))
+    LaunchedEffect(directoryPath, selectedPath) {
+        viewModel.open(directoryPath, selectedPath)
     }
-    var selectedVideoPath by rememberSaveable(directoryPath, selectedPath) {
-        mutableStateOf(selectedPath)
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    LaunchedEffect(uiState.directoryPath) {
+        uiState.directoryPath?.let(onDirectoryChanged)
     }
-    val loadedDirectory by produceState<VideoDirectory?>(initialValue = null, currentDirectoryPath, selectedPath) {
-        // The state outlives its keys. Clear it, or the pager would scroll and play within the
-        // previous folder's videos, and record them as the selection, while the next one loads.
-        value = null
-        value = withContext(Dispatchers.IO) {
-            val requestedSelection = selectedPath.takeIf { currentDirectoryPath == directoryPath }
-            if (MediaPaths.isRemote(currentDirectoryPath ?: requestedSelection)) {
-                loadRemoteVideoDirectory(
-                    directoryPath = currentDirectoryPath,
-                    selectedPath = requestedSelection,
-                    sortOrder = sortOrder,
-                    preferences = preferences,
-                )
-            } else {
-                loadVideoDirectory(
-                    directoryPath = currentDirectoryPath,
-                    selectedPath = requestedSelection,
-                    sortOrder = sortOrder,
-                    traversalRoot = traversalRoot,
-                )
-            }
-        }
-    }
-    val videos = loadedDirectory?.videos.orEmpty()
-    val previousDirectory = loadedDirectory?.previousDirectory
-    val nextDirectory = loadedDirectory?.nextDirectory
+    val videos = uiState.videos
+    val previousDirectory = uiState.previousDirectory
+    val nextDirectory = uiState.nextDirectory
     val firstVideoPageIndex = if (previousDirectory != null) 1 else 0
     var completionAction by rememberSaveable { mutableStateOf(preferences.getVideoCompletionAction()) }
     var controlsLocked by rememberSaveable { mutableStateOf(false) }
-    val initialPage = remember(videos, selectedVideoPath, firstVideoPageIndex) {
-        videos.indexOfFirst { it.path == selectedVideoPath }.coerceAtLeast(0) + firstVideoPageIndex
+    val initialPage = remember(videos, uiState.selectedPath, firstVideoPageIndex) {
+        videos.indexOfFirst { it.path == uiState.selectedPath }.coerceAtLeast(0) + firstVideoPageIndex
     }
     val pagerState = rememberPagerState(
         initialPage = initialPage,
@@ -269,7 +235,7 @@ private fun VideoPagerScreen(
     )
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(loadedDirectory, selectedVideoPath) {
+    LaunchedEffect(uiState.loadId, uiState.selectedPath) {
         if (videos.isNotEmpty() && pagerState.currentPage != initialPage) {
             pagerState.scrollToPage(initialPage)
         }
@@ -278,10 +244,7 @@ private fun VideoPagerScreen(
     LaunchedEffect(pagerState, videos) {
         snapshotFlow { pagerState.currentPage }
             .collect { page ->
-                videos.getOrNull(page - firstVideoPageIndex)?.let { video ->
-                    selectedVideoPath = video.path
-                    currentDirectoryPath?.let { preferences.saveLastMediaSession(it, video.path) }
-                }
+                videos.getOrNull(page - firstVideoPageIndex)?.let { video -> viewModel.selectVideo(video.path) }
             }
     }
 
@@ -291,14 +254,14 @@ private fun VideoPagerScreen(
             .background(Color.Black),
     ) {
         when {
-            loadedDirectory?.videos?.isEmpty() == true -> {
+            uiState.isLoading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            videos.isEmpty() -> {
                 Text(
                     stringResource(R.string.no_videos_found),
                     color = Color.White,
                     modifier = Modifier.align(Alignment.Center),
                 )
             }
-            loadedDirectory == null -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             else -> VerticalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
@@ -355,9 +318,7 @@ private fun VideoPagerScreen(
                         direction = VideoDirectoryDirection.Previous,
                         onMove = {
                             if (previousDirectory.type == VideoDirectoryType.Video) {
-                                currentDirectoryPath = previousDirectory.path
-                                selectedVideoPath = previousDirectory.selectedMediaPath
-                                onDirectoryChanged(previousDirectory.path)
+                                viewModel.moveTo(previousDirectory)
                             } else {
                                 onOpenImageDirectory(previousDirectory.path, previousDirectory.selectedMediaPath)
                             }
@@ -369,9 +330,7 @@ private fun VideoPagerScreen(
                         direction = VideoDirectoryDirection.Next,
                         onMove = {
                             if (nextDirectory.type == VideoDirectoryType.Video) {
-                                currentDirectoryPath = nextDirectory.path
-                                selectedVideoPath = nextDirectory.selectedMediaPath
-                                onDirectoryChanged(nextDirectory.path)
+                                viewModel.moveTo(nextDirectory)
                             } else {
                                 onOpenImageDirectory(nextDirectory.path, nextDirectory.selectedMediaPath)
                             }
@@ -385,7 +344,7 @@ private fun VideoPagerScreen(
 
 @Composable
 private fun VideoPage(
-    item: VideoItem,
+    item: MediaViewerItem,
     page: Int,
     pageCount: Int,
     isActive: Boolean,
@@ -728,7 +687,7 @@ private fun VideoPage(
 
 @Composable
 private fun BoxScope.VideoControls(
-    item: VideoItem,
+    item: MediaViewerItem,
     page: Int,
     pageCount: Int,
     player: ExoPlayer,
@@ -1214,153 +1173,6 @@ private fun VideoDirectoryPage(
     }
 }
 
-private fun loadVideoDirectory(
-    directoryPath: String?,
-    selectedPath: String?,
-    sortOrder: DirectorySortOrder,
-    traversalRoot: File?,
-): VideoDirectory {
-    val directory = directoryPath?.let(::File)?.takeIf(File::isDirectory)
-        ?: selectedPath?.let(::File)?.parentFile
-    val videos = directory.listVideos(sortOrder)
-    val fallbackVideos = if (videos.isEmpty()) {
-        selectedPath?.let(::File)?.takeIf(File::isFile)?.let { listOf(VideoItem(it.name, it.absolutePath)) }.orEmpty()
-    } else {
-        videos
-    }
-    return VideoDirectory(
-        videos = fallbackVideos,
-        previousDirectory = directory?.findPreviousMediaDirectory(sortOrder, traversalRoot),
-        nextDirectory = directory?.findNextMediaDirectory(sortOrder, traversalRoot),
-    )
-}
-
-private fun File?.listVideos(sortOrder: DirectorySortOrder): List<VideoItem> = this?.listFiles()
-        ?.asSequence()
-        ?.filter(File::isFile)
-        ?.filter { MediaTypes.isVideo(it.name) }
-        ?.sortedWith(sortOrder.fileComparator(directoriesFirst = false))
-        ?.map { VideoItem(it.name.ifBlank { it.absolutePath }, it.absolutePath) }
-        ?.toList()
-        .orEmpty()
-
-private fun File.findNextMediaDirectory(
-    sortOrder: DirectorySortOrder,
-    traversalRoot: File?,
-): VideoDirectoryTarget? = firstMediaDirectory(sortOrder, traversalRoot) { root ->
-    DirectoryTraversal.forward(this, root, sortOrder)
-}
-
-private fun File.findPreviousMediaDirectory(
-    sortOrder: DirectorySortOrder,
-    traversalRoot: File?,
-): VideoDirectoryTarget? = firstMediaDirectory(sortOrder, traversalRoot) { root ->
-    DirectoryTraversal.backward(this, root, sortOrder)
-}
-
-/**
- * First directory holding playable media along [candidates], the depth-first walk starting here:
- * subfolders first, then following siblings, then the siblings of each ancestor up to the root.
- */
-private fun File.firstMediaDirectory(
-    sortOrder: DirectorySortOrder,
-    traversalRoot: File?,
-    candidates: (root: File) -> Sequence<File>,
-): VideoDirectoryTarget? {
-    val root = DirectoryTraversal.resolveRoot(this, traversalRoot)
-    return candidates(root)
-        .mapNotNull { candidate ->
-            val name = DirectoryTraversal.displayName(this, candidate)
-            val videos = candidate.listVideos(sortOrder)
-            if (videos.isNotEmpty()) {
-                VideoDirectoryTarget(
-                    name = name,
-                    path = candidate.absolutePath,
-                    type = VideoDirectoryType.Video,
-                    selectedMediaPath = videos.first().path,
-                )
-            } else {
-                candidate.listImages(sortOrder).firstOrNull()?.let { image ->
-                    VideoDirectoryTarget(
-                        name = name,
-                        path = candidate.absolutePath,
-                        type = VideoDirectoryType.Image,
-                        selectedMediaPath = image.absolutePath,
-                    )
-                }
-            }
-        }
-        .firstOrNull()
-}
-
-/** [loadVideoDirectory] for a folder on an HTTP server, hopping only within that server. */
-private suspend fun loadRemoteVideoDirectory(
-    directoryPath: String?,
-    selectedPath: String?,
-    sortOrder: DirectorySortOrder,
-    preferences: ScrtvwrPreferences,
-): VideoDirectory {
-    val directory = directoryPath?.takeIf(MediaPaths::isRemote)?.let(RemotePaths::directoryUrl)
-        ?: selectedPath?.let(RemotePaths::parent)
-        ?: return VideoDirectory(videos = emptyList(), previousDirectory = null, nextDirectory = null)
-    val videos = remoteMedia(directory, sortOrder).videos()
-    val fallbackVideos = videos.ifEmpty {
-        selectedPath?.let { listOf(VideoItem(RemotePaths.name(it), it)) }.orEmpty()
-    }
-    val root = RemotePaths.resolveRoot(directory, preferences.getHttpServers().serverFor(directory)?.baseUrl)
-    return VideoDirectory(
-        videos = fallbackVideos,
-        previousDirectory = firstRemoteMediaDirectory(
-            from = directory,
-            candidates = DirectoryTraversal.backward(RemoteDirectoryTree, directory, root, sortOrder),
-            sortOrder = sortOrder,
-        ),
-        nextDirectory = firstRemoteMediaDirectory(
-            from = directory,
-            candidates = DirectoryTraversal.forward(RemoteDirectoryTree, directory, root, sortOrder),
-            sortOrder = sortOrder,
-        ),
-    )
-}
-
-/** Remote counterpart of [firstMediaDirectory]: videos win, otherwise the first image opens the viewer. */
-private suspend fun firstRemoteMediaDirectory(
-    from: String,
-    candidates: Sequence<String>,
-    sortOrder: DirectorySortOrder,
-): VideoDirectoryTarget? {
-    for (candidate in candidates) {
-        currentCoroutineContext().ensureActive()
-        val media = remoteMedia(candidate, sortOrder)
-        val name = DirectoryTraversal.displayName(RemoteDirectoryTree, from, candidate)
-        media.videos().firstOrNull()?.let { video ->
-            return VideoDirectoryTarget(name, candidate, VideoDirectoryType.Video, video.path)
-        }
-        media.firstOrNull { it.type == MediaViewerType.Image }?.let { image ->
-            return VideoDirectoryTarget(name, candidate, VideoDirectoryType.Image, image.path)
-        }
-    }
-    return null
-}
-
-private suspend fun remoteMedia(directoryUrl: String, sortOrder: DirectorySortOrder): List<MediaViewerItem> =
-    try {
-        MediaCatalog.listRemoteDirectory(directoryUrl, sortOrder)
-    } catch (_: IOException) {
-        emptyList()
-    }
-
-private fun List<MediaViewerItem>.videos(): List<VideoItem> =
-    filter { it.type == MediaViewerType.Video }.map { VideoItem(it.name, it.path) }
-
-private fun File.listImages(sortOrder: DirectorySortOrder): List<File> = listFiles()
-    ?.asSequence()
-    ?.filter(File::isFile)
-    ?.filter { MediaTypes.isImage(it.name) }
-    ?.sortedWith(sortOrder.fileComparator(directoriesFirst = false))
-    ?.toList()
-    .orEmpty()
-
 private fun formatVideoTime(millis: Long): String {
     val totalSeconds = millis.coerceAtLeast(0L) / 1_000
     val hours = totalSeconds / 3_600
@@ -1371,19 +1183,6 @@ private fun formatVideoTime(millis: Long): String {
 }
 
 private fun formatSpeed(speed: Float): String = "${speed}x"
-
-private data class VideoItem(val name: String, val path: String)
-private data class VideoDirectory(
-    val videos: List<VideoItem>,
-    val previousDirectory: VideoDirectoryTarget?,
-    val nextDirectory: VideoDirectoryTarget?,
-)
-private data class VideoDirectoryTarget(
-    val name: String,
-    val path: String,
-    val type: VideoDirectoryType,
-    val selectedMediaPath: String,
-)
 
 private enum class VideoDirectoryDirection {
     Previous,
@@ -1399,8 +1198,6 @@ private fun VideoDirectoryDirection.moveStringRes(isArchive: Boolean): Int = whe
     VideoDirectoryDirection.Previous -> if (isArchive) R.string.move_previous_archive else R.string.move_previous_directory
     VideoDirectoryDirection.Next -> if (isArchive) R.string.move_next_archive else R.string.move_next_directory
 }
-
-private enum class VideoDirectoryType { Video, Image }
 
 private val PLAYBACK_SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 private val PLAYER_OPTION_WIDTH = 76.dp
