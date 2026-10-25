@@ -76,6 +76,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -225,14 +226,18 @@ private fun VideoPagerScreen(
     val initialPage = remember(videos, uiState.selectedPath, firstVideoPageIndex) {
         videos.indexOfFirst { it.path == uiState.selectedPath }.coerceAtLeast(0) + firstVideoPageIndex
     }
-    val pagerState = rememberPagerState(
-        initialPage = initialPage,
-        pageCount = {
-            videos.size +
-                (if (previousDirectory != null) 1 else 0) +
-                (if (nextDirectory != null) 1 else 0)
-        },
-    )
+    // Each loaded folder starts its own pager on its selected video. Reusing one would first lay
+    // out the page wherever the previous folder was left, which would start playing that video.
+    val pagerState = key(uiState.loadId) {
+        rememberPagerState(
+            initialPage = initialPage,
+            pageCount = {
+                videos.size +
+                    (if (previousDirectory != null) 1 else 0) +
+                    (if (nextDirectory != null) 1 else 0)
+            },
+        )
+    }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(uiState.loadId, uiState.selectedPath) {
