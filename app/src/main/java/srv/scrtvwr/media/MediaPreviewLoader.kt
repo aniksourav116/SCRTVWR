@@ -25,6 +25,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import srv.scrtvwr.media.remote.HttpAuthenticationException
 import srv.scrtvwr.media.remote.HttpDirectoryClient
 import srv.scrtvwr.media.remote.HttpRangeReader
 import srv.scrtvwr.media.remote.RemoteArchiveCache
@@ -57,6 +58,11 @@ object MediaPreviewLoader {
     private val comicBookCoverSemaphore = Semaphore(2)
     private val remoteImageSemaphore = Semaphore(4)
     private val remoteVideoSemaphore = Semaphore(3)
+    // Server loads for the page on screen, so it never queues behind thumbnails or preloads. Two,
+    // so a page swiped to while the previous one still downloads does not wait for it either.
+    private val onScreenRemoteSemaphore = Semaphore(2)
+    private val remotePreloadPace = RemotePreloadPace()
+    private val _remoteDownloadsSlow = MutableStateFlow(false)
     private val unreadableRemoteVideos = LruCache<String, Boolean>(256)
     private val videoFrameLoad = VideoFrameLoadMonitor()
     private val _videoFrameLoadWarning = MutableStateFlow(false)
@@ -64,6 +70,9 @@ object MediaPreviewLoader {
 
     /** True once reading video frames from servers has been slow enough to suggest turning it off. */
     val videoFrameLoadWarning: StateFlow<Boolean> = _videoFrameLoadWarning.asStateFlow()
+
+    /** True while recent server downloads have been slow or failing, so fewer should run at once. */
+    val remoteDownloadsSlow: StateFlow<Boolean> = _remoteDownloadsSlow.asStateFlow()
     private val diskCacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val diskWritesSinceTrim = AtomicInteger()
     @Volatile private var diskCacheDirectory: File? = null
@@ -77,27 +86,29 @@ object MediaPreviewLoader {
     /**
      * Image at [path], which may be an entry of a local or server archive. A server archive that is
      * not cached yet is downloaded first, unless [downloadArchive] is false; then the result is
-     * empty, so a small thumbnail never costs a whole archive.
+     * empty, so a small thumbnail never costs a whole archive. A server image [onScreen] downloads
+     * through slots of its own.
      */
     suspend fun loadImage(
         path: String,
         modified: Long,
         maxDimension: Int,
         downloadArchive: Boolean = true,
+        onScreen: Boolean = false,
     ): PreviewResult =
         loadCached("image:$path:$modified:$maxDimension", maxDimension) {
             val entryName = MediaPaths.archiveEntryName(path)
             if (entryName != null) {
                 loadArchiveImage(MediaPaths.archivePath(path), entryName, maxDimension, downloadArchive)
             } else if (MediaPaths.isRemote(path)) {
-                remoteImageSemaphore.withPermit { decodeRemoteImage(path, maxDimension) }
+                remoteSemaphore(remoteImageSemaphore, onScreen).withPermit { decodeRemoteImage(path, maxDimension) }
             } else {
                 decodeFile(path, maxDimension)
             }
         }
 
-    suspend fun loadVideoFrame(path: String, modified: Long, maxDimension: Int): PreviewResult {
-        if (MediaPaths.isRemote(path)) return loadRemoteVideoFrame(path, modified, maxDimension)
+    suspend fun loadVideoFrame(path: String, modified: Long, maxDimension: Int, onScreen: Boolean = false): PreviewResult {
+        if (MediaPaths.isRemote(path)) return loadRemoteVideoFrame(path, modified, maxDimension, onScreen)
         return loadCached("video:$path:$modified:$maxDimension", maxDimension) {
             runCatching { retrieveFrame(maxDimension) { setDataSource(path) } }.fold(
                 onSuccess = { PreviewResult(bitmap = it) },
@@ -111,7 +122,12 @@ object MediaPreviewLoader {
      * the whole file. Servers without Range support (python -m http.server) keep the placeholder
      * icon. Viewer-sized frames cost the same reads as thumbnails but stay in memory only.
      */
-    private suspend fun loadRemoteVideoFrame(url: String, modified: Long, maxDimension: Int): PreviewResult {
+    private suspend fun loadRemoteVideoFrame(
+        url: String,
+        modified: Long,
+        maxDimension: Int,
+        onScreen: Boolean,
+    ): PreviewResult {
         val key = "video:$url:$modified:$maxDimension"
         return loadCached(key, maxDimension) {
             if (!HttpRangeReader.supportsRanges(url) || unreadableRemoteVideos.get(key) != null) {
@@ -119,8 +135,15 @@ object MediaPreviewLoader {
             }
             // Tiles that only flash past during a fling are cancelled here, before any request.
             delay(REMOTE_VIDEO_SETTLE_MILLIS)
-            remoteVideoSemaphore.withPermit { decodeRemoteVideoFrame(url, key, maxDimension) }
+            remoteSemaphore(remoteVideoSemaphore, onScreen).withPermit { decodeRemoteVideoFrame(url, key, maxDimension) }
         }
+    }
+
+    private fun remoteSemaphore(shared: Semaphore, onScreen: Boolean): Semaphore =
+        if (onScreen) onScreenRemoteSemaphore else shared
+
+    private fun noteRemoteDownload(elapsedMillis: Long, failed: Boolean) {
+        _remoteDownloadsSlow.value = remotePreloadPace.record(elapsedMillis, failed)
     }
 
     private suspend fun decodeRemoteVideoFrame(url: String, key: String, maxDimension: Int): PreviewResult {
@@ -128,6 +151,7 @@ object MediaPreviewLoader {
         val startedAt = SystemClock.elapsedRealtime()
         var finished = false
         var exhausted = false
+        var timedOut = false
         try {
             val result = withTimeoutOrNull(REMOTE_VIDEO_TIMEOUT_MILLIS) {
                 coroutineScope {
@@ -152,6 +176,7 @@ object MediaPreviewLoader {
             }
             coroutineContext.ensureActive()
             finished = true
+            timedOut = result == null
             val (bitmap, stopReason) = result ?: (null to HttpRangeReader.StopReason.Cancelled)
             exhausted = result == null || stopReason == HttpRangeReader.StopReason.BudgetExceeded
             // A file that fails by itself, rather than through the network, is not tried again this run.
@@ -160,7 +185,10 @@ object MediaPreviewLoader {
             }
             return PreviewResult(bitmap = bitmap)
         } finally {
-            noteVideoFrameLoad(SystemClock.elapsedRealtime() - startedAt, finished, exhausted)
+            val elapsedMillis = SystemClock.elapsedRealtime() - startedAt
+            noteVideoFrameLoad(elapsedMillis, finished, exhausted)
+            // A file too large for its byte budget says nothing about the server's pace.
+            if (finished) noteRemoteDownload(elapsedMillis, failed = timedOut)
         }
     }
 
@@ -344,7 +372,17 @@ object MediaPreviewLoader {
             val download = File.createTempFile("image-", ".part", directory)
             temporary = download
             // Avoid holding the entire compressed file in memory before decoding it.
-            HttpDirectoryClient.download(url, download)
+            val startedAt = SystemClock.elapsedRealtime()
+            try {
+                HttpDirectoryClient.download(url, download)
+            } catch (error: IOException) {
+                // A wrong password fails fast and says nothing about the server's pace.
+                if (error !is HttpAuthenticationException) {
+                    noteRemoteDownload(SystemClock.elapsedRealtime() - startedAt, failed = true)
+                }
+                throw error
+            }
+            noteRemoteDownload(SystemClock.elapsedRealtime() - startedAt, failed = false)
             coroutineContext.ensureActive()
             decodeFile(download.path, maxDimension)
         } catch (error: CancellationException) {

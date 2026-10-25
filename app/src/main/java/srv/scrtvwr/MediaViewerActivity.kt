@@ -127,8 +127,10 @@ import srv.scrtvwr.ui.media.MediaViewerSource
 import srv.scrtvwr.ui.media.MediaViewerType
 import srv.scrtvwr.ui.media.MediaViewerUiState
 import srv.scrtvwr.ui.media.MediaViewerViewModel
+import srv.scrtvwr.ui.media.RemotePreloadLimits
 import srv.scrtvwr.ui.media.SlideShowDirection
 import srv.scrtvwr.ui.media.pageOffset
+import srv.scrtvwr.ui.media.pagesAllowedToLoad
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.util.time.TimeUtil
@@ -272,9 +274,11 @@ private fun MediaViewerScreen(
     var pseudoSlideShowHorizontalFraction by remember { mutableFloatStateOf(0f) }
     var pseudoSlideShowPageOffset by remember { mutableStateOf(1) }
     var pseudoSlideShowStartPage by remember { mutableStateOf<Int?>(null) }
-    // Pages whose load has finished, with or without a picture. Keyed by load, not by list:
-    // sorting the list again keeps its pages and what they loaded.
+    // Pages whose load has started, and finished with or without a picture. Keyed by load, not by
+    // list: sorting the list again keeps its pages and what they loaded.
+    val startedMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
     val settledMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
+    val remoteDownloadsSlow by MediaPreviewLoader.remoteDownloadsSlow.collectAsStateWithLifecycle()
     val zoomedMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
     var zoomCommand by remember { mutableStateOf<ZoomCommand?>(null) }
     var bookmarkFlashId by remember { mutableIntStateOf(0) }
@@ -394,6 +398,25 @@ private fun MediaViewerScreen(
     val selectedMediaKey = selectedItem?.readinessKey
     val isCurrentMediaZoomed = selectedMediaKey?.let { zoomedMedia[it] == true } == true
     val isCurrentMediaSettled = selectedMediaKey?.let { settledMedia[it] == true } ?: true
+    fun pageKey(page: Int): String? = uiState.itemForPage(page)?.readinessKey
+    val preloadDistance = minOf(uiState.imagePreloadDistance, uiState.lastPageIndex)
+    val loadablePages = pagesAllowedToLoad(
+        currentPage = pagerState.currentPage,
+        pageCount = uiState.pageCount,
+        preloadDistance = preloadDistance,
+        isCurrentSettled = isCurrentMediaSettled,
+        // A slow server gets one download at a time, close by, until it speeds up again.
+        remote = if (remoteDownloadsSlow) {
+            RemotePreloadLimits(parallel = 1, distance = minOf(SLOW_SERVER_PRELOAD_DISTANCE, preloadDistance))
+        } else {
+            RemotePreloadLimits(parallel = SERVER_PRELOAD_PARALLEL, distance = preloadDistance)
+        },
+        downloadsFromServer = { page ->
+            uiState.itemForPage(page)?.downloadsFromServer(uiState.loadVideoThumbnails) == true
+        },
+        hasStarted = { page -> pageKey(page)?.let { startedMedia[it] == true } == true },
+        hasSettled = { page -> pageKey(page)?.let { settledMedia[it] == true } == true },
+    )
 
     // Neighbouring sources are looked for only once the media on screen is done, so walking other
     // folders never competes with it.
@@ -735,8 +758,9 @@ private fun MediaViewerScreen(
                             flipped = uiState.flipped,
                             zoomCommand = zoomCommand,
                             loadVideoFrame = uiState.loadVideoThumbnails,
-                            // The page on screen loads first; the rest wait until it has settled.
-                            mayLoad = page == pagerState.currentPage || isCurrentMediaSettled,
+                            onScreen = page == pagerState.currentPage,
+                            mayLoad = page in loadablePages,
+                            onLoadStarted = { startedMedia[item.readinessKey] = true },
                             onSettled = { settledMedia[item.readinessKey] = true },
                             onZoomChanged = { zoomed ->
                                 if (zoomed) {
@@ -1074,15 +1098,20 @@ private fun MediaPage(
     flipped: Boolean,
     zoomCommand: ZoomCommand?,
     loadVideoFrame: Boolean,
+    onScreen: Boolean,
     mayLoad: Boolean,
+    onLoadStarted: () -> Unit,
     onSettled: () -> Unit,
     onZoomChanged: (Boolean) -> Unit,
     onContentClick: () -> Unit,
     onBookmark: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    // Read inside the loads below, which wait for it; once started, a load runs to the end.
+    // Read inside the loads below, which wait for mayLoad; once started, a load runs to the end,
+    // with the priority it started with.
     val latestMayLoad by rememberUpdatedState(mayLoad)
+    val latestOnScreen by rememberUpdatedState(onScreen)
+    val latestOnLoadStarted by rememberUpdatedState(onLoadStarted)
     if (item.type == MediaViewerType.Video) {
         // Pages within the preload distance are composed early, so server video frames preload like images.
         val readsFrame = loadVideoFrame || !MediaPaths.isRemote(item.path)
@@ -1093,8 +1122,9 @@ private fun MediaPage(
             key3 = readsFrame,
         ) {
             snapshotFlow { latestMayLoad }.first { it }
+            latestOnLoadStarted()
             value = if (readsFrame) {
-                MediaPreviewLoader.loadVideoFrame(item.path, item.contentStamp, 1600)
+                MediaPreviewLoader.loadVideoFrame(item.path, item.contentStamp, 1600, onScreen = latestOnScreen)
             } else {
                 PreviewResult()
             }
@@ -1159,7 +1189,8 @@ private fun MediaPage(
     }
     val preview by produceState<PreviewResult?>(initialValue = null, key1 = item.path, key2 = item.contentStamp) {
         snapshotFlow { latestMayLoad }.first { it }
-        value = MediaPreviewLoader.loadImage(item.path, item.contentStamp, 1600)
+        latestOnLoadStarted()
+        value = MediaPreviewLoader.loadImage(item.path, item.contentStamp, 1600, onScreen = latestOnScreen)
     }
 
     LaunchedEffect(preview, item.path, item.contentStamp) {
@@ -1308,6 +1339,19 @@ private val MediaViewerItem.readinessKey: String
  */
 private val MediaViewerItem.contentStamp: Long
     get() = if (MediaPaths.isRemote(path)) 0L else lastModifiedMillis
+
+/**
+ * Whether loading this page downloads from a server. Entries of a server archive are read from its
+ * downloaded copy, and server video pages without frames load nothing.
+ */
+private fun MediaViewerItem.downloadsFromServer(loadVideoFrames: Boolean): Boolean =
+    MediaPaths.isRemote(path) &&
+        MediaPaths.archiveEntryName(path) == null &&
+        (type == MediaViewerType.Image || loadVideoFrames)
+
+// Server downloads running at once beyond the page on screen, and how far a slow server preloads.
+private const val SERVER_PRELOAD_PARALLEL = 3
+private const val SLOW_SERVER_PRELOAD_DISTANCE = 2
 
 private fun adjustedPseudoStayMillis(baseStayMillis: Long, horizontalFraction: Float): Long {
     val speedMultiplier = 4.0.pow(horizontalFraction.toDouble())
