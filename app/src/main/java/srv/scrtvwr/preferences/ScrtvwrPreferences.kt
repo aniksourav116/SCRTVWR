@@ -1,6 +1,11 @@
 package srv.scrtvwr.preferences
 
 import android.content.Context
+import android.content.SharedPreferences
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import org.json.JSONArray
 import org.json.JSONObject
 import srv.scrtvwr.media.MediaPaths
@@ -13,6 +18,7 @@ import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
 import srv.scrtvwr.ui.media.VideoCompletionAction
 import srv.scrtvwr.ui.sort.DirectorySortOrder
+import srv.scrtvwr.ui.theme.ThemeMode
 
 class ScrtvwrPreferences(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -126,6 +132,45 @@ class ScrtvwrPreferences(context: Context) {
 
     fun saveLoadVideoThumbnails(enabled: Boolean) {
         preferences.edit().putBoolean(KEY_LOAD_VIDEO_THUMBNAILS, enabled).apply()
+    }
+
+    fun getThemeMode(): ThemeMode =
+        preferences.getString(KEY_THEME_MODE, null)
+            ?.let { value -> ThemeMode.entries.firstOrNull { it.name == value } }
+            ?: ThemeMode.System
+
+    fun saveThemeMode(mode: ThemeMode) {
+        preferences.edit().putString(KEY_THEME_MODE, mode.name).apply()
+    }
+
+    /** The theme mode now and after every change, so open screens can follow the settings. */
+    fun themeModeChanges(): Flow<ThemeMode> = callbackFlow {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            // A null key means every preference was cleared.
+            if (key == KEY_THEME_MODE || key == null) trySend(getThemeMode())
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        trySend(getThemeMode())
+        awaitClose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+    }.distinctUntilChanged()
+
+    /**
+     * Puts every option of the settings tab back to its default. History, favorites, servers, and
+     * what the viewers remember on their own are kept.
+     */
+    fun resetSettings() {
+        preferences.edit()
+            .remove(KEY_THEME_MODE)
+            .remove(KEY_SHOW_HIDDEN_FILES)
+            .remove(KEY_SHOW_DIRECTORY_FILE_ACTIONS)
+            .remove(KEY_LOAD_VIDEO_THUMBNAILS)
+            .remove(KEY_MEDIA_EDGE_DIALOG_STYLE)
+            .remove(KEY_SLIDE_SHOW_STAY_MILLIS)
+            .remove(KEY_SLIDE_SHOW_DIRECTION)
+            .remove(KEY_HOLD_SLIDE_SHOW_ENABLED)
+            .remove(KEY_IMAGE_PRELOAD_DISTANCE)
+            .remove(KEY_VIDEO_PRELOAD_DISTANCE)
+            .apply()
     }
 
     fun hasSeenGestureTips(screen: GestureTipsScreen): Boolean =
@@ -359,6 +404,7 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
         const val KEY_SHOW_DIRECTORY_FILE_ACTIONS = "show_directory_file_actions"
         const val KEY_LOAD_VIDEO_THUMBNAILS = "load_video_thumbnails"
+        const val KEY_THEME_MODE = "theme_mode"
         const val KEY_GESTURE_TIPS_VIEWER_SEEN = "gesture_tips_viewer_seen"
         const val KEY_GESTURE_TIPS_PLAYER_SEEN = "gesture_tips_player_seen"
         const val KEY_BOOKMARKED_MEDIA = "bookmarked_media"

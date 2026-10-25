@@ -16,7 +16,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.VideoLibrary
@@ -26,6 +28,8 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
@@ -60,6 +64,7 @@ import srv.scrtvwr.ui.components.SimpleDropdown
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
+import srv.scrtvwr.ui.theme.ThemeMode
 import srv.scrtvwr.R
 
 @Composable
@@ -80,6 +85,8 @@ fun Others(
         onVideoPreloadDistanceChange = viewModel::setVideoPreloadDistance,
         onMediaEdgeDialogStyleChange = viewModel::setMediaEdgeDialogStyle,
         onShowGestureTipsAgain = viewModel::showGestureTipsAgain,
+        onThemeModeChange = viewModel::setThemeMode,
+        onResetToDefaults = viewModel::resetToDefaults,
         modifier = modifier,
     )
 }
@@ -98,7 +105,10 @@ fun OthersScreen(
     onMediaEdgeDialogStyleChange: (MediaEdgeDialogStyle) -> Unit,
     modifier: Modifier = Modifier,
     onShowGestureTipsAgain: () -> Unit = {},
+    onThemeModeChange: (ThemeMode) -> Unit = {},
+    onResetToDefaults: () -> Unit = {},
 ) {
+    var resetConfirmationVisible by rememberSaveable { mutableStateOf(false) }
     val shortSlideShowWarning = stringResource(R.string.short_slideshow_warning)
     val largePreloadWarning = stringResource(R.string.large_preload_warning)
     val preloadDistanceRange = PRELOAD_DISTANCE_RANGE.first.toLong()..PRELOAD_DISTANCE_RANGE.last.toLong()
@@ -107,7 +117,27 @@ fun OthersScreen(
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { SettingsSectionHeader(stringResource(R.string.settings_section_browsing), isFirst = true) }
+        item { SettingsSectionHeader(stringResource(R.string.settings_section_appearance), isFirst = true) }
+        item {
+            val themeLabels = ThemeMode.entries.associateWith { mode -> stringResource(mode.labelResource()) }
+            ListItem(
+                modifier = Modifier.fillMaxWidth(),
+                headlineContent = { Text(stringResource(R.string.theme)) },
+                supportingContent = { Text(stringResource(R.string.theme_summary)) },
+                leadingContent = { Icon(Icons.Default.Palette, contentDescription = null) },
+                trailingContent = {
+                    SimpleDropdown(
+                        label = stringResource(R.string.theme),
+                        items = ThemeMode.entries,
+                        selected = uiState.themeMode,
+                        onSelected = onThemeModeChange,
+                        modifier = Modifier.fillMaxWidth(0.46f),
+                        itemLabel = { mode -> themeLabels.getValue(mode) },
+                    )
+                },
+            )
+        }
+        item { SettingsSectionHeader(stringResource(R.string.settings_section_browsing)) }
         item {
             ListItem(
                 modifier = Modifier.fillMaxWidth(),
@@ -276,6 +306,19 @@ fun OthersScreen(
                 warning = { value -> largePreloadWarning.takeIf { value > 10L } },
             )
         }
+        item {
+            ListItem(
+                modifier = Modifier.fillMaxWidth(),
+                headlineContent = { Text(stringResource(R.string.reset_settings)) },
+                supportingContent = { Text(stringResource(R.string.reset_settings_summary)) },
+                leadingContent = { Icon(Icons.Default.RestartAlt, contentDescription = null) },
+                trailingContent = {
+                    TextButton(onClick = { resetConfirmationVisible = true }) {
+                        Text(stringResource(R.string.reset))
+                    }
+                },
+            )
+        }
         item { SettingsSectionHeader(stringResource(R.string.settings_section_about)) }
         item {
             val context = LocalContext.current
@@ -296,6 +339,35 @@ fun OthersScreen(
             }
         }
     }
+
+    if (resetConfirmationVisible) {
+        AlertDialog(
+            onDismissRequest = { resetConfirmationVisible = false },
+            title = { Text(stringResource(R.string.reset_settings_title)) },
+            text = { Text(stringResource(R.string.reset_settings_message)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onResetToDefaults()
+                        resetConfirmationVisible = false
+                    },
+                ) {
+                    Text(stringResource(R.string.reset))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { resetConfirmationVisible = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+}
+
+private fun ThemeMode.labelResource(): Int = when (this) {
+    ThemeMode.System -> R.string.theme_system
+    ThemeMode.Light -> R.string.theme_light
+    ThemeMode.Dark -> R.string.theme_dark
 }
 
 @Composable

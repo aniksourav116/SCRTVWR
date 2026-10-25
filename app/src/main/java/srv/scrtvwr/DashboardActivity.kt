@@ -3,6 +3,7 @@ package srv.scrtvwr
 import android.os.Bundle
 import android.content.res.Configuration
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -34,14 +35,33 @@ import srv.scrtvwr.ui.dashboard.screens.Directory
 import srv.scrtvwr.ui.dashboard.screens.History
 import srv.scrtvwr.ui.dashboard.screens.Others
 import srv.scrtvwr.ui.dashboard.screens.Storage
+import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
+import srv.scrtvwr.ui.theme.isDark
 
 class DashboardActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val preferences = ScrtvwrPreferences(this)
         setContent {
-            SCRTVWRTheme {
+            val themeMode by remember { preferences.themeModeChanges() }
+                .collectAsStateWithLifecycle(initialValue = preferences.getThemeMode())
+            val darkTheme = themeMode.isDark()
+            // The bars follow the app's theme rather than the system's, so their icons stay readable.
+            LaunchedEffect(darkTheme) {
+                enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.auto(
+                        android.graphics.Color.TRANSPARENT,
+                        android.graphics.Color.TRANSPARENT,
+                    ) { darkTheme },
+                    navigationBarStyle = SystemBarStyle.auto(
+                        NAVIGATION_BAR_LIGHT_SCRIM,
+                        NAVIGATION_BAR_DARK_SCRIM,
+                    ) { darkTheme },
+                )
+            }
+            SCRTVWRTheme(darkTheme = darkTheme) {
                 NotificationPermissionRequest()
                 ScrtvwrApp()
             }
@@ -152,6 +172,10 @@ fun ScrtvwrApp(viewModel: DashboardViewModel = viewModel()) {
         }
     }
 }
+
+// The scrims enableEdgeToEdge() uses by default for three-button navigation.
+private val NAVIGATION_BAR_LIGHT_SCRIM = android.graphics.Color.argb(0xe6, 0xFF, 0xFF, 0xFF)
+private val NAVIGATION_BAR_DARK_SCRIM = android.graphics.Color.argb(0x80, 0x1b, 0x1b, 0x1b)
 
 private fun AppDestination.topBarLabel(): Int = when (this) {
     AppDestination.STORAGE -> R.string.storage_devices

@@ -9,11 +9,16 @@ import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
+import srv.scrtvwr.ui.theme.ThemeMode
 
 class OthersViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = ScrtvwrPreferences(application)
-    private val _uiState = MutableStateFlow(
+    private val _uiState = MutableStateFlow(settingsState())
+    val uiState = _uiState.asStateFlow()
+
+    private fun settingsState(): OthersUiState =
         OthersUiState(
+            themeMode = preferences.getThemeMode(),
             slideShowStayMillis = preferences.getSlideShowStayMillis(),
             holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
             slideShowDirection = preferences.getSlideShowDirection(),
@@ -23,9 +28,19 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
             showHiddenFiles = preferences.getShowHiddenFiles(),
             showDirectoryFileActions = preferences.getShowDirectoryFileActions(),
             loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
-        ),
-    )
-    val uiState = _uiState.asStateFlow()
+        )
+
+    fun setThemeMode(mode: ThemeMode) {
+        preferences.saveThemeMode(mode)
+        _uiState.update { it.copy(themeMode = mode) }
+    }
+
+    fun resetToDefaults() {
+        preferences.resetSettings()
+        // Video thumbnails come back on, so their slow-loading check starts over too.
+        MediaPreviewLoader.resetVideoFrameLoadWarning()
+        _uiState.value = settingsState()
+    }
 
     fun setShowHiddenFiles(enabled: Boolean) {
         preferences.saveShowHiddenFiles(enabled)
@@ -89,6 +104,7 @@ val SLIDE_SHOW_STAY_MILLIS_RANGE = 1L..600_000L
 val PRELOAD_DISTANCE_RANGE = 0..20
 
 data class OthersUiState(
+    val themeMode: ThemeMode = ThemeMode.System,
     val showHiddenFiles: Boolean = false,
     val showDirectoryFileActions: Boolean = false,
     val loadVideoThumbnails: Boolean = true,
