@@ -67,6 +67,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -76,6 +77,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -245,6 +247,7 @@ fun Directory(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DirectoryScreen(
     uiState: DirectoryUiState,
@@ -399,45 +402,59 @@ fun DirectoryScreen(
             }
         }
 
-        if (uiState.isLoading && uiState.entries.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        } else when (uiState.viewMode) {
-            DirectoryViewMode.List -> DirectoryList(
-                uiState = uiState,
-                onScrollPositionRequested = onScrollPositionRequested,
-                onSaveScrollPosition = onSaveScrollPosition,
-                onOpenDirectory = onOpenDirectory,
-                onOpenMedia = onOpenMedia,
-                onOpenWithOtherApp = onOpenWithOtherApp,
-                onNavigateUp = onNavigateUp,
-                showFileActions = uiState.fileActionsAvailable,
-                onCopyEntry = onCopyEntry,
-                onMoveEntry = onMoveEntry,
-                onRequestDeleteEntry = { entryPendingDeletion = it },
-                onCopyLink = onCopyLink,
-                onLoadEntryDetails = onLoadEntryDetails,
-                onRetry = onRefresh,
-                onClearSearch = { onSearchQueryChange("") },
-            )
+        // Only a pull shows the indicator; other loads already show their own progress.
+        var isPullRefreshing by remember { mutableStateOf(false) }
+        LaunchedEffect(uiState.isLoading) {
+            if (!uiState.isLoading) isPullRefreshing = false
+        }
+        PullToRefreshBox(
+            isRefreshing = isPullRefreshing,
+            onRefresh = {
+                isPullRefreshing = true
+                onRefresh()
+            },
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            if (uiState.isLoading && uiState.entries.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else when (uiState.viewMode) {
+                DirectoryViewMode.List -> DirectoryList(
+                    uiState = uiState,
+                    onScrollPositionRequested = onScrollPositionRequested,
+                    onSaveScrollPosition = onSaveScrollPosition,
+                    onOpenDirectory = onOpenDirectory,
+                    onOpenMedia = onOpenMedia,
+                    onOpenWithOtherApp = onOpenWithOtherApp,
+                    onNavigateUp = onNavigateUp,
+                    showFileActions = uiState.fileActionsAvailable,
+                    onCopyEntry = onCopyEntry,
+                    onMoveEntry = onMoveEntry,
+                    onRequestDeleteEntry = { entryPendingDeletion = it },
+                    onCopyLink = onCopyLink,
+                    onLoadEntryDetails = onLoadEntryDetails,
+                    onRetry = onRefresh,
+                    onClearSearch = { onSearchQueryChange("") },
+                )
 
-            DirectoryViewMode.Grid -> DirectoryGrid(
-                uiState = uiState,
-                onScrollPositionRequested = onScrollPositionRequested,
-                onSaveScrollPosition = onSaveScrollPosition,
-                onOpenDirectory = onOpenDirectory,
-                onOpenMedia = onOpenMedia,
-                onOpenWithOtherApp = onOpenWithOtherApp,
-                onNavigateUp = onNavigateUp,
-                showFileActions = uiState.fileActionsAvailable,
-                onCopyEntry = onCopyEntry,
-                onMoveEntry = onMoveEntry,
-                onRequestDeleteEntry = { entryPendingDeletion = it },
-                onCopyLink = onCopyLink,
-                onRetry = onRefresh,
-                onClearSearch = { onSearchQueryChange("") },
-            )
+                DirectoryViewMode.Grid -> DirectoryGrid(
+                    uiState = uiState,
+                    onScrollPositionRequested = onScrollPositionRequested,
+                    onSaveScrollPosition = onSaveScrollPosition,
+                    onOpenDirectory = onOpenDirectory,
+                    onOpenMedia = onOpenMedia,
+                    onOpenWithOtherApp = onOpenWithOtherApp,
+                    onNavigateUp = onNavigateUp,
+                    showFileActions = uiState.fileActionsAvailable,
+                    onCopyEntry = onCopyEntry,
+                    onMoveEntry = onMoveEntry,
+                    onRequestDeleteEntry = { entryPendingDeletion = it },
+                    onCopyLink = onCopyLink,
+                    onRetry = onRefresh,
+                    onClearSearch = { onSearchQueryChange("") },
+                )
+            }
         }
     }
 

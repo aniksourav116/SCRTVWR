@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -55,6 +56,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -62,7 +64,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -108,6 +113,9 @@ import srv.scrtvwr.ui.components.hasLocalNetworkAccess
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.R
 import java.text.DecimalFormat
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 @Composable
 fun Storage(
@@ -240,6 +248,7 @@ fun Storage(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StorageScreen(
     uiState: StorageUiState,
@@ -264,95 +273,115 @@ fun StorageScreen(
     var serverPendingRemoval by remember { mutableStateOf<HttpServer?>(null) }
     var serverSigningIn by remember { mutableStateOf<HttpServer?>(null) }
 
-    LazyColumn(
+    var isPullRefreshing by remember { mutableStateOf(false) }
+    val isCheckingServers by rememberUpdatedState(
+        uiState.httpServers.any { it.status == HttpServerStatus.Checking },
+    )
+    val coroutineScope = rememberCoroutineScope()
+    PullToRefreshBox(
+        isRefreshing = isPullRefreshing,
+        onRefresh = {
+            isPullRefreshing = true
+            onRefresh()
+            coroutineScope.launch {
+                // Devices are read at once; the indicator stays up while servers are checked.
+                delay(400)
+                snapshotFlow { isCheckingServers }.first { !it }
+                isPullRefreshing = false
+            }
+        },
         modifier = modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        if (!hasStorageAccess) {
-            item {
-                ElevatedCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(stringResource(R.string.full_access_required), style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            stringResource(R.string.full_access_explanation),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Button(onClick = onGrantStorageAccess) { Text(stringResource(R.string.grant_file_access)) }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            if (!hasStorageAccess) {
+                item {
+                    ElevatedCard(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(stringResource(R.string.full_access_required), style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                stringResource(R.string.full_access_explanation),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Button(onClick = onGrantStorageAccess) { Text(stringResource(R.string.grant_file_access)) }
+                        }
                     }
                 }
             }
-        }
 
-        if (uiState.devices.isEmpty()) {
-            item {
-                Text(
-                    stringResource(R.string.no_storage_devices),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        items(uiState.devices, key = StorageDevice::id) { device ->
-            StorageDeviceCard(
-                device = device,
-                onClick = { onOpenDevice(device) },
-            )
-        }
-
-        item(key = "http_servers_header") {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    stringResource(R.string.http_servers),
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                OutlinedButton(onClick = { showAddServerDialog = true }) {
-                    Icon(Icons.Default.Add, contentDescription = null)
-                    Text(stringResource(R.string.add), Modifier.padding(start = 8.dp))
+            if (uiState.devices.isEmpty()) {
+                item {
+                    Text(
+                        stringResource(R.string.no_storage_devices),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
-        }
 
-        if (uiState.httpServers.isNotEmpty() && !hasLocalNetworkAccess) {
-            item(key = "local_network_access") {
-                LocalNetworkAccessCard(
-                    onAllow = onGrantLocalNetworkAccess,
-                    onOpenAppSettings = onOpenAppSettings,
+            items(uiState.devices, key = StorageDevice::id) { device ->
+                StorageDeviceCard(
+                    device = device,
+                    onClick = { onOpenDevice(device) },
                 )
             }
-        }
 
-        if (uiState.httpServers.isEmpty()) {
-            item(key = "http_servers_empty") {
-                HttpServerHelp()
+            item(key = "http_servers_header") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.http_servers),
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedButton(onClick = { showAddServerDialog = true }) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Text(stringResource(R.string.add), Modifier.padding(start = 8.dp))
+                    }
+                }
             }
-        }
 
-        items(uiState.httpServers, key = { "http:${it.server.id}" }) { device ->
-            HttpServerCard(
-                device = device,
-                onClick = { onOpenHttpServer(device.server) },
-                onRemove = { serverPendingRemoval = device.server },
-                onSignIn = { serverSigningIn = device.server },
-                onConnect = { onConnectHttpServer(device.server) },
-                onDisconnect = { onDisconnectHttpServer(device.server) },
-                onAutoReconnectChange = { enabled -> onHttpServerAutoReconnectChange(device.server, enabled) },
-            )
-        }
+            if (uiState.httpServers.isNotEmpty() && !hasLocalNetworkAccess) {
+                item(key = "local_network_access") {
+                    LocalNetworkAccessCard(
+                        onAllow = onGrantLocalNetworkAccess,
+                        onOpenAppSettings = onOpenAppSettings,
+                    )
+                }
+            }
 
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    stringResource(R.string.last_checked, uiState.lastChecked),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            if (uiState.httpServers.isEmpty()) {
+                item(key = "http_servers_empty") {
+                    HttpServerHelp()
+                }
+            }
+
+            items(uiState.httpServers, key = { "http:${it.server.id}" }) { device ->
+                HttpServerCard(
+                    device = device,
+                    onClick = { onOpenHttpServer(device.server) },
+                    onRemove = { serverPendingRemoval = device.server },
+                    onSignIn = { serverSigningIn = device.server },
+                    onConnect = { onConnectHttpServer(device.server) },
+                    onDisconnect = { onDisconnectHttpServer(device.server) },
+                    onAutoReconnectChange = { enabled -> onHttpServerAutoReconnectChange(device.server, enabled) },
                 )
-                Button(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = null)
-                    Text(stringResource(R.string.refresh), Modifier.padding(start = 8.dp))
+            }
+
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        stringResource(R.string.last_checked, uiState.lastChecked),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Button(onClick = onRefresh) {
+                        Icon(Icons.Default.Refresh, contentDescription = null)
+                        Text(stringResource(R.string.refresh), Modifier.padding(start = 8.dp))
+                    }
                 }
             }
         }
