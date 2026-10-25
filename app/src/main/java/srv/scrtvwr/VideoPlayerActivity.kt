@@ -248,7 +248,7 @@ private fun VideoPagerScreen(
     // to the video's new place, and select whatever video now sits there.
     val latestVideos by rememberUpdatedState(videos)
     LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.currentPage }
+        snapshotFlow { pagerState.settledPage }
             .collect { page ->
                 val video = latestVideos.getOrNull(page - firstVideoPageIndex)
                 if (video != null) {
@@ -311,7 +311,9 @@ private fun VideoPagerScreen(
                         item = item,
                         page = videoIndex,
                         pageCount = videos.size,
-                        isActive = page == pagerState.currentPage,
+                        // The page the pager has stopped on, so videos flung past open no stream
+                        // and the one on screen keeps playing while a swipe is still undecided.
+                        isActive = page == pagerState.settledPage,
                         completionAction = completionAction,
                         onCompletionActionChange = { action ->
                             completionAction = action
