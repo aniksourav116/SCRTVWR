@@ -2,6 +2,7 @@ package srv.scrtvwr
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.view.WindowManager
@@ -14,6 +15,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -81,6 +83,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -92,8 +95,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -122,6 +127,7 @@ import srv.scrtvwr.ui.components.VideoSideGestures
 import srv.scrtvwr.ui.components.copyLink
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.media.MediaPaths
+import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.media.MediaViewerItem
 import srv.scrtvwr.ui.media.VideoCompletionAction
@@ -458,6 +464,16 @@ private fun VideoPage(
     // The listener lives as long as the player, but the completion action can change meanwhile.
     val latestOnEnded by rememberUpdatedState(onEnded)
     val latestOnPlaybackStarted by rememberUpdatedState(onPlaybackStarted)
+    // Whether the player has drawn a frame since it was last stopped; until then the poster shows.
+    var firstFrameRendered by remember(item.path) { mutableStateOf(false) }
+    // The first frame, under the same key as the media viewer's video page, which has usually
+    // read it already. Server videos follow the Load video thumbnails setting, as listings do.
+    val readsPoster = remember { preferences.getLoadVideoThumbnails() } || !MediaPaths.isRemote(item.path)
+    val poster by produceState<Bitmap?>(initialValue = null, item.path, readsPoster) {
+        if (!readsPoster) return@produceState
+        val stamp = if (MediaPaths.isRemote(item.path)) 0L else item.lastModifiedMillis
+        value = MediaPreviewLoader.loadVideoFrame(item.path, stamp, POSTER_MAX_DIMENSION, onScreen = isActive).bitmap
+    }
 
     fun saveCurrentPosition() {
         if (prepareRequested || player.playbackState != Player.STATE_IDLE) {
@@ -492,6 +508,7 @@ private fun VideoPage(
             }
 
             override fun onRenderedFirstFrame() {
+                firstFrameRendered = true
                 latestOnPlaybackStarted()
             }
 
@@ -511,6 +528,7 @@ private fun VideoPage(
                         player.stop()
                         player.seekTo(0L)
                         prepareRequested = false
+                        firstFrameRendered = false
                     }
                     latestOnEnded()
                 }
@@ -545,6 +563,7 @@ private fun VideoPage(
         player.pause()
         player.stop()
         prepareRequested = false
+        firstFrameRendered = false
     }
 
     LaunchedEffect(isActive, reloadWhenActive, player) {
@@ -563,6 +582,7 @@ private fun VideoPage(
             if (prepareRequested || player.playbackState != Player.STATE_IDLE) {
                 player.stop()
                 prepareRequested = false
+                firstFrameRendered = false
             }
         }
     }
@@ -600,6 +620,20 @@ private fun VideoPage(
             },
             modifier = Modifier.fillMaxSize(),
         )
+
+        val posterBitmap = poster
+        if (!firstFrameRendered && posterBitmap != null) {
+            Image(
+                bitmap = posterBitmap.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = when (resizeMode) {
+                    AspectRatioFrameLayout.RESIZE_MODE_FILL -> ContentScale.FillBounds
+                    AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> ContentScale.Crop
+                    else -> ContentScale.Fit
+                },
+            )
+        }
 
         Box(
             modifier = Modifier
@@ -1303,6 +1337,9 @@ private fun VideoDirectoryDirection.edgeReachedMessageStringRes(): Int = when (t
     VideoDirectoryDirection.Previous -> R.string.no_previous_source
     VideoDirectoryDirection.Next -> R.string.no_next_source
 }
+
+// The media viewer's size for video pages, so both screens share one cached frame.
+private const val POSTER_MAX_DIMENSION = 1600
 
 // Folder pages' keys; video pages use their path, which never takes this form.
 private const val PREVIOUS_FOLDER_PAGE_KEY = "\u0000previous-folder"
