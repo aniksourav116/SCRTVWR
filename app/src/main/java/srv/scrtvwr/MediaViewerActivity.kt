@@ -246,6 +246,17 @@ private fun MediaViewerScreen(
             pageCount = { uiState.pageCount.coerceAtLeast(1) },
         )
     }
+    // Pages follow their file rather than their position, so a list sorted again keeps the page on
+    // screen and its loaded picture. An archive can hold an entry name twice, and a repeated key
+    // would crash the pager, so repeats are numbered.
+    val pageKeys = remember(uiState.items) {
+        val seen = HashMap<String, Int>()
+        uiState.items.map { item ->
+            val count = (seen[item.path] ?: 0) + 1
+            seen[item.path] = count
+            if (count == 1) item.path else "${item.path}#$count"
+        }
+    }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     var menuExpanded by rememberSaveable { mutableStateOf(false) }
@@ -563,6 +574,7 @@ private fun MediaViewerScreen(
                     )
                 } else HorizontalPager(
                     state = pagerState,
+                    key = { page -> pageKeys.getOrElse(page) { page } },
                     beyondViewportPageCount = minOf(uiState.imagePreloadDistance, uiState.lastPageIndex),
                     userScrollEnabled = !isCurrentMediaZoomed,
                     modifier = Modifier
