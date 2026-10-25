@@ -204,7 +204,7 @@ class VideoPlayerActivity : ComponentActivity() {
                                 Intent().putExtra(RESULT_DIRECTORY_PATH, directory),
                             )
                             imageViewerLauncher.launch(
-                                Intent(this, MediaViewerActivity::class.java).apply {
+                                Intent(this@VideoPlayerActivity, MediaViewerActivity::class.java).apply {
                                     putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, directory)
                                     putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, imagePath)
                                 },
@@ -883,6 +883,7 @@ private fun VideoPage(
     }
 }
 
+@OptIn(UnstableApi::class)
 @Composable
 private fun BoxScope.VideoControls(
     item: MediaViewerItem,
@@ -1306,18 +1307,21 @@ private fun PlayerOption(
 private fun transportTint(enabled: Boolean): Color =
     if (enabled) Color.White else Color.White.copy(alpha = 0.35f)
 
+@OptIn(UnstableApi::class)
 private fun Int.next(): Int = when (this) {
     AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_FILL
     AspectRatioFrameLayout.RESIZE_MODE_FILL -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
     else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
 }
 
+@OptIn(UnstableApi::class)
 private fun Int.icon(): ImageVector = when (this) {
     AspectRatioFrameLayout.RESIZE_MODE_FILL -> Icons.Default.AspectRatio
     AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> Icons.Default.Fullscreen
     else -> Icons.Default.FitScreen
 }
 
+@OptIn(UnstableApi::class)
 private fun Int.labelRes(): Int = when (this) {
     AspectRatioFrameLayout.RESIZE_MODE_FILL -> R.string.video_resize_fill
     AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> R.string.video_resize_zoom
