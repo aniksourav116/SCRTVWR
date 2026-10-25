@@ -297,6 +297,10 @@
     <string name="sort_smallest">Smallest first</string>
     <string name="sort_order">Sort order</string>
     <string name="version">Version</string>
+    <string name="settings_section_browsing">Browsing</string>
+    <string name="settings_section_viewer">Viewer</string>
+    <string name="settings_section_performance">Performance</string>
+    <string name="settings_section_about">About</string>
     <string name="gesture_tips_title">Gestures</string>
     <string name="got_it">Got it</string>
     <string name="gesture_tips_setting">Gesture tips</string>

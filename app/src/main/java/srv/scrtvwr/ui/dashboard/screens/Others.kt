@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.TouchApp
@@ -128,6 +129,7 @@ fun OthersScreen(
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        item { SettingsSectionHeader(stringResource(R.string.settings_section_browsing), isFirst = true) }
         item {
             ListItem(
                 modifier = Modifier.fillMaxWidth(),
@@ -138,45 +140,6 @@ fun OthersScreen(
                     Switch(
                         checked = uiState.showHiddenFiles,
                         onCheckedChange = onShowHiddenFilesChange,
-                    )
-                },
-            )
-        }
-        item {
-            NumericPreferenceListItem(
-                headline = stringResource(R.string.slideshow_speed),
-                supporting = stringResource(R.string.slideshow_speed_summary),
-                value = slideShowStayMillisText,
-                onValueChange = { value ->
-                    slideShowStayMillisText = value.filter(Char::isDigit)
-                    slideShowStayMillisText.toLongOrNull()?.let(onSlideShowStayMillisChange)
-                },
-                leadingContent = { Icon(Icons.Default.Slideshow, contentDescription = null) },
-                suffix = "ms",
-                warning = slideShowWarning,
-            )
-        }
-        item {
-            val nextMediaLabel = stringResource(R.string.next_media)
-            val previousMediaLabel = stringResource(R.string.previous_media)
-            ListItem(
-                modifier = Modifier.fillMaxWidth(),
-                headlineContent = { Text(stringResource(R.string.slideshow_direction)) },
-                supportingContent = { Text(stringResource(R.string.slideshow_direction_summary)) },
-                leadingContent = { Icon(Icons.Default.Slideshow, contentDescription = null) },
-                trailingContent = {
-                    SimpleDropdown(
-                        label = stringResource(R.string.direction),
-                        items = SlideShowDirection.entries,
-                        selected = uiState.slideShowDirection,
-                        onSelected = onSlideShowDirectionChange,
-                        modifier = Modifier.fillMaxWidth(0.46f),
-                        itemLabel = { direction ->
-                            when (direction) {
-                                SlideShowDirection.Next -> nextMediaLabel
-                                SlideShowDirection.Previous -> previousMediaLabel
-                            }
-                        },
                     )
                 },
             )
@@ -209,46 +172,7 @@ fun OthersScreen(
                 },
             )
         }
-        item {
-            NumericPreferenceListItem(
-                headline = stringResource(R.string.image_preload_distance),
-                supporting = stringResource(R.string.image_preload_summary),
-                value = imagePreloadDistanceText,
-                onValueChange = { value ->
-                    imagePreloadDistanceText = value.filter(Char::isDigit)
-                    imagePreloadDistanceText.toIntOrNull()?.let(onImagePreloadDistanceChange)
-                },
-                leadingContent = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
-                warning = imagePreloadWarning,
-            )
-        }
-        item {
-            NumericPreferenceListItem(
-                headline = stringResource(R.string.video_preload_distance),
-                supporting = stringResource(R.string.video_preload_summary),
-                value = videoPreloadDistanceText,
-                onValueChange = { value ->
-                    videoPreloadDistanceText = value.filter(Char::isDigit)
-                    videoPreloadDistanceText.toIntOrNull()?.let(onVideoPreloadDistanceChange)
-                },
-                leadingContent = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
-                warning = videoPreloadWarning,
-            )
-        }
-        item {
-            ListItem(
-                modifier = Modifier.fillMaxWidth(),
-                headlineContent = { Text(stringResource(R.string.hold_slideshow)) },
-                supportingContent = { Text(stringResource(R.string.hold_slideshow_summary)) },
-                leadingContent = { Icon(Icons.Default.Slideshow, contentDescription = null) },
-                trailingContent = {
-                    Switch(
-                        checked = uiState.holdSlideShowEnabled,
-                        onCheckedChange = onHoldSlideShowEnabledChange,
-                    )
-                },
-            )
-        }
+        item { SettingsSectionHeader(stringResource(R.string.settings_section_viewer)) }
         item {
             val bottomDialogLabel = stringResource(R.string.edge_dialog_style_bottom)
             val centerDialogLabel = stringResource(R.string.edge_dialog_style_center)
@@ -293,6 +217,88 @@ fun OthersScreen(
                 },
             )
         }
+        item { SettingsSectionHeader(stringResource(R.string.slideshow)) }
+        item {
+            NumericPreferenceListItem(
+                headline = stringResource(R.string.slideshow_speed),
+                supporting = stringResource(R.string.slideshow_speed_summary),
+                value = slideShowStayMillisText,
+                onValueChange = { value ->
+                    slideShowStayMillisText = value.filter(Char::isDigit)
+                    slideShowStayMillisText.toLongOrNull()?.let(onSlideShowStayMillisChange)
+                },
+                leadingContent = { Icon(Icons.Default.Slideshow, contentDescription = null) },
+                suffix = "ms",
+                warning = slideShowWarning,
+            )
+        }
+        item {
+            val nextMediaLabel = stringResource(R.string.next_media)
+            val previousMediaLabel = stringResource(R.string.previous_media)
+            ListItem(
+                modifier = Modifier.fillMaxWidth(),
+                headlineContent = { Text(stringResource(R.string.slideshow_direction)) },
+                supportingContent = { Text(stringResource(R.string.slideshow_direction_summary)) },
+                leadingContent = { Icon(Icons.Default.Slideshow, contentDescription = null) },
+                trailingContent = {
+                    SimpleDropdown(
+                        label = stringResource(R.string.direction),
+                        items = SlideShowDirection.entries,
+                        selected = uiState.slideShowDirection,
+                        onSelected = onSlideShowDirectionChange,
+                        modifier = Modifier.fillMaxWidth(0.46f),
+                        itemLabel = { direction ->
+                            when (direction) {
+                                SlideShowDirection.Next -> nextMediaLabel
+                                SlideShowDirection.Previous -> previousMediaLabel
+                            }
+                        },
+                    )
+                },
+            )
+        }
+        item {
+            ListItem(
+                modifier = Modifier.fillMaxWidth(),
+                headlineContent = { Text(stringResource(R.string.hold_slideshow)) },
+                supportingContent = { Text(stringResource(R.string.hold_slideshow_summary)) },
+                leadingContent = { Icon(Icons.Default.Slideshow, contentDescription = null) },
+                trailingContent = {
+                    Switch(
+                        checked = uiState.holdSlideShowEnabled,
+                        onCheckedChange = onHoldSlideShowEnabledChange,
+                    )
+                },
+            )
+        }
+        item { SettingsSectionHeader(stringResource(R.string.settings_section_performance)) }
+        item {
+            NumericPreferenceListItem(
+                headline = stringResource(R.string.image_preload_distance),
+                supporting = stringResource(R.string.image_preload_summary),
+                value = imagePreloadDistanceText,
+                onValueChange = { value ->
+                    imagePreloadDistanceText = value.filter(Char::isDigit)
+                    imagePreloadDistanceText.toIntOrNull()?.let(onImagePreloadDistanceChange)
+                },
+                leadingContent = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
+                warning = imagePreloadWarning,
+            )
+        }
+        item {
+            NumericPreferenceListItem(
+                headline = stringResource(R.string.video_preload_distance),
+                supporting = stringResource(R.string.video_preload_summary),
+                value = videoPreloadDistanceText,
+                onValueChange = { value ->
+                    videoPreloadDistanceText = value.filter(Char::isDigit)
+                    videoPreloadDistanceText.toIntOrNull()?.let(onVideoPreloadDistanceChange)
+                },
+                leadingContent = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
+                warning = videoPreloadWarning,
+            )
+        }
+        item { SettingsSectionHeader(stringResource(R.string.settings_section_about)) }
         item {
             val context = LocalContext.current
             val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
@@ -312,6 +318,19 @@ fun OthersScreen(
             }
         }
     }
+}
+
+@Composable
+private fun SettingsSectionHeader(
+    text: String,
+    isFirst: Boolean = false,
+) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 16.dp, top = if (isFirst) 0.dp else 12.dp),
+    )
 }
 
 @Composable
