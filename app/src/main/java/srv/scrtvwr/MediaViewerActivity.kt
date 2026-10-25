@@ -176,7 +176,7 @@ private fun MediaViewerRoute(
     viewModel: MediaViewerViewModel = viewModel(),
 ) {
     LaunchedEffect(directoryPath, selectedPath) {
-        viewModel.load(directoryPath, selectedPath)
+        viewModel.open(directoryPath, selectedPath)
     }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()

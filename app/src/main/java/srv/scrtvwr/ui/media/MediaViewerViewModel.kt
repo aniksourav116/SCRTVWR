@@ -44,6 +44,20 @@ class MediaViewerViewModel(
     )
     val uiState = _uiState.asStateFlow()
 
+    /**
+     * Loads the source the screen was opened on, once per viewer. A recreated screen (a rotation)
+     * asks again with the same extras, but browsing may have moved to another source since, so the
+     * current one stays. After process death the source last asked for is reloaded instead.
+     */
+    fun open(directoryPath: String?, selectedPath: String?) {
+        if (loadJob != null) return
+        if (savedStateHandle.contains(STATE_REQUESTED_DIRECTORY)) {
+            load(savedStateHandle[STATE_REQUESTED_DIRECTORY], savedStateHandle[STATE_REQUESTED_SELECTED])
+        } else {
+            load(directoryPath, selectedPath)
+        }
+    }
+
     fun load(directoryPath: String?, selectedPath: String?, force: Boolean = false) {
         val currentState = _uiState.value
         if (!force && currentState.sourceDirectoryPath == directoryPath && currentState.selectedPath == selectedPath) {
@@ -51,6 +65,8 @@ class MediaViewerViewModel(
         }
 
         loadJob?.cancel()
+        savedStateHandle[STATE_REQUESTED_DIRECTORY] = directoryPath
+        savedStateHandle[STATE_REQUESTED_SELECTED] = selectedPath
         _uiState.update { it.copy(isLoading = true, errorMessage = null, downloadProgress = null) }
         loadJob = viewModelScope.launch(Dispatchers.IO) {
             runCatching { loadMedia(directoryPath, selectedPath, force) }
@@ -291,6 +307,8 @@ class MediaViewerViewModel(
     private companion object {
         const val STATE_SELECTED_PAGE = "media_selected_page"
         const val STATE_SOURCE = "media_source"
+        const val STATE_REQUESTED_DIRECTORY = "media_requested_directory"
+        const val STATE_REQUESTED_SELECTED = "media_requested_selected"
     }
 }
 
