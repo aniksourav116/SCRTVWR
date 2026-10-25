@@ -75,6 +75,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -235,10 +236,14 @@ private fun MediaViewerScreen(
     onJumpForward: (currentPage: Int) -> Unit,
     onBack: () -> Unit,
 ) {
-    val pagerState = rememberPagerState(
-        initialPage = uiState.selectedPage,
-        pageCount = { uiState.pageCount.coerceAtLeast(1) },
-    )
+    // Each loaded list starts its own pager on its selected page. Reusing one would first lay out,
+    // and so start loading, the pages around wherever the previous list was left.
+    val pagerState = key(uiState.loadId) {
+        rememberPagerState(
+            initialPage = uiState.selectedPage,
+            pageCount = { uiState.pageCount.coerceAtLeast(1) },
+        )
+    }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     var menuExpanded by rememberSaveable { mutableStateOf(false) }

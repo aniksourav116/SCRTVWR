@@ -158,6 +158,7 @@ class MediaViewerViewModel(
         currentCoroutineContext().ensureActive()
         _uiState.update {
             MediaViewerUiState(
+                loadId = it.loadId + 1,
                 sourceDirectoryPath = sourceDirectoryPath,
                 selectedPath = selectedPath,
                 items = items,
@@ -313,6 +314,8 @@ class MediaViewerViewModel(
 }
 
 data class MediaViewerUiState(
+    /** Counts finished loads; a new value means a new list, whose page indexes start over. */
+    val loadId: Int = 0,
     val sourceDirectoryPath: String? = null,
     val selectedPath: String? = null,
     val items: List<MediaViewerItem> = emptyList(),
