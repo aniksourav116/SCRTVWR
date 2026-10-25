@@ -80,6 +80,20 @@ class PageLoadPlanTest {
         assertEquals(setOf(0, 1), allowed)
     }
 
+    @Test
+    fun skippedPagesNeverPreloadNorTakeAServerSlot() {
+        val allowed = plan(
+            currentPage = 5,
+            preloadDistance = 2,
+            remote = RemotePreloadLimits(parallel = 1, distance = 2),
+            server = { true },
+            skipped = { it == 6 },
+        )
+
+        // 6 is skipped, so the one slot goes to 4.
+        assertEquals(setOf(5, 4), allowed)
+    }
+
     private fun plan(
         currentPage: Int,
         pageCount: Int = 20,
@@ -89,6 +103,7 @@ class PageLoadPlanTest {
         server: (Int) -> Boolean,
         started: (Int) -> Boolean = { false },
         settled: (Int) -> Boolean = { false },
+        skipped: (Int) -> Boolean = { false },
     ): Set<Int> = pagesAllowedToLoad(
         currentPage = currentPage,
         pageCount = pageCount,
@@ -98,5 +113,6 @@ class PageLoadPlanTest {
         downloadsFromServer = server,
         hasStarted = started,
         hasSettled = settled,
+        isSkipped = skipped,
     )
 }

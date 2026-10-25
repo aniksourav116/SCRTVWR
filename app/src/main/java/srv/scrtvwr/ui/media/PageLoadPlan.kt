@@ -8,6 +8,7 @@ data class RemotePreloadLimits(val parallel: Int, val distance: Int)
  * starts until it has settled; then pages load nearest first, the one ahead before the one behind.
  * Local pages all start within [preloadDistance]. Server downloads start within [remote]'s distance
  * while fewer than its parallel count are still running. A page that has started stays allowed.
+ * Pages [isSkipped] says a slide show will jump over never preload.
  */
 internal fun pagesAllowedToLoad(
     currentPage: Int,
@@ -18,11 +19,12 @@ internal fun pagesAllowedToLoad(
     downloadsFromServer: (page: Int) -> Boolean,
     hasStarted: (page: Int) -> Boolean,
     hasSettled: (page: Int) -> Boolean,
+    isSkipped: (page: Int) -> Boolean = { false },
 ): Set<Int> {
     val allowed = mutableSetOf(currentPage)
     if (!isCurrentSettled) return allowed
     val window = (1..preloadDistance).flatMap { distance -> listOf(currentPage + distance, currentPage - distance) }
-        .filter { it in 0 until pageCount }
+        .filter { it in 0 until pageCount && !isSkipped(it) }
     var downloading = window.count { downloadsFromServer(it) && hasStarted(it) && !hasSettled(it) }
     window.forEach { page ->
         when {
