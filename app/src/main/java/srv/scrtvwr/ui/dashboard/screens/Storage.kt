@@ -27,6 +27,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
@@ -53,6 +54,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -113,6 +115,7 @@ import srv.scrtvwr.ui.components.hasLocalNetworkAccess
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.R
 import java.text.DecimalFormat
+import srv.scrtvwr.ui.components.copyCommand
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -455,16 +458,44 @@ private fun LocalNetworkAccessCard(
 
 @Composable
 private fun HttpServerHelp() {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             stringResource(R.string.http_server_help),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        ServerCommand(stringResource(R.string.http_server_media_command))
         Text(
-            stringResource(R.string.http_server_command),
-            fontFamily = FontFamily.Monospace,
-            style = MaterialTheme.typography.bodySmall,
+            stringResource(R.string.http_server_help_fallback),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        ServerCommand(stringResource(R.string.http_server_command))
+    }
+}
+
+@Composable
+private fun ServerCommand(command: String) {
+    val context = LocalContext.current
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                command,
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(vertical = 8.dp),
+            )
+            IconButton(onClick = { context.copyCommand(command) }) {
+                Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.copy_command))
+            }
+        }
     }
 }
 

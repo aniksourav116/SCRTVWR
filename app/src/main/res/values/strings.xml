@@ -157,8 +157,13 @@
     <string name="add_http_server">Add HTTP server</string>
     <string name="add">Add</string>
     <string name="remove">Remove</string>
-    <string name="http_server_help">Browse media shared by a computer on the same network. In the folder to share, run:</string>
+    <string name="http_server_help">Browse media shared by a computer on the same network. On that computer, run this from the SCRTVWR repository folder, with the folder to share in place of D:\\Media. Videos can seek, and --password asks for a password:</string>
+    <string name="http_server_media_command" translatable="false">python tools/media_http_server.py 8000 --bind 0.0.0.0 --directory \"D:\\Media\"</string>
+    <string name="http_server_help_fallback">Without the repository, run this in the folder to share instead. Videos cannot seek with it:</string>
     <string name="http_server_command" translatable="false">python -m http.server 8000 --bind 0.0.0.0</string>
+    <string name="command">Command</string>
+    <string name="command_copied">Command copied</string>
+    <string name="copy_command">Copy command</string>
     <string name="http_server_address">Server address</string>
     <string name="http_server_address_placeholder" translatable="false">192.168.1.20:8000</string>
     <string name="http_server_address_help">The computer\'s local IP address and the server\'s port.</string>
