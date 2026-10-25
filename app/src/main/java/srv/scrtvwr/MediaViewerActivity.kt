@@ -272,9 +272,8 @@ private fun MediaViewerScreen(
     var pseudoSlideShowHorizontalFraction by remember { mutableFloatStateOf(0f) }
     var pseudoSlideShowPageOffset by remember { mutableStateOf(1) }
     var pseudoSlideShowStartPage by remember { mutableStateOf<Int?>(null) }
-    // Keyed by load, not by list: sorting the list again keeps its pages and what they loaded.
-    val readyMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
-    // Pages whose load has finished, with or without a picture.
+    // Pages whose load has finished, with or without a picture. Keyed by load, not by list:
+    // sorting the list again keeps its pages and what they loaded.
     val settledMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
     val zoomedMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
     var zoomCommand by remember { mutableStateOf<ZoomCommand?>(null) }
@@ -369,7 +368,8 @@ private fun MediaViewerScreen(
                 return@LaunchedEffect
             }
 
-            snapshotFlow { readyMedia[currentItem.readinessKey] == true }
+            // A page that failed to load counts too, so a broken file never stops the show.
+            snapshotFlow { settledMedia[currentItem.readinessKey] == true }
                 .first { it }
             // Give the loaded bitmap a render frame before even a very short stay begins.
             withFrameNanos { }
@@ -393,6 +393,7 @@ private fun MediaViewerScreen(
     val selectedItem = uiState.itemForPage(pagerState.currentPage)
     val selectedMediaKey = selectedItem?.readinessKey
     val isCurrentMediaZoomed = selectedMediaKey?.let { zoomedMedia[it] == true } == true
+    val isCurrentMediaSettled = selectedMediaKey?.let { settledMedia[it] == true } ?: true
 
     // Neighbouring sources are looked for only once the media on screen is done, so walking other
     // folders never competes with it.
@@ -734,7 +735,8 @@ private fun MediaViewerScreen(
                             flipped = uiState.flipped,
                             zoomCommand = zoomCommand,
                             loadVideoFrame = uiState.loadVideoThumbnails,
-                            onReady = { readyMedia[item.readinessKey] = true },
+                            // The page on screen loads first; the rest wait until it has settled.
+                            mayLoad = page == pagerState.currentPage || isCurrentMediaSettled,
                             onSettled = { settledMedia[item.readinessKey] = true },
                             onZoomChanged = { zoomed ->
                                 if (zoomed) {
@@ -1072,13 +1074,15 @@ private fun MediaPage(
     flipped: Boolean,
     zoomCommand: ZoomCommand?,
     loadVideoFrame: Boolean,
-    onReady: () -> Unit,
+    mayLoad: Boolean,
     onSettled: () -> Unit,
     onZoomChanged: (Boolean) -> Unit,
     onContentClick: () -> Unit,
     onBookmark: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    // Read inside the loads below, which wait for it; once started, a load runs to the end.
+    val latestMayLoad by rememberUpdatedState(mayLoad)
     if (item.type == MediaViewerType.Video) {
         // Pages within the preload distance are composed early, so server video frames preload like images.
         val readsFrame = loadVideoFrame || !MediaPaths.isRemote(item.path)
@@ -1088,6 +1092,7 @@ private fun MediaPage(
             key2 = item.contentStamp,
             key3 = readsFrame,
         ) {
+            snapshotFlow { latestMayLoad }.first { it }
             value = if (readsFrame) {
                 MediaPreviewLoader.loadVideoFrame(item.path, item.contentStamp, 1600)
             } else {
@@ -1096,10 +1101,7 @@ private fun MediaPage(
         }
 
         LaunchedEffect(preview, item.path, item.contentStamp) {
-            if (preview != null) {
-                onSettled()
-                onReady()
-            }
+            if (preview != null) onSettled()
         }
 
         Box(
@@ -1156,13 +1158,12 @@ private fun MediaPage(
         return
     }
     val preview by produceState<PreviewResult?>(initialValue = null, key1 = item.path, key2 = item.contentStamp) {
+        snapshotFlow { latestMayLoad }.first { it }
         value = MediaPreviewLoader.loadImage(item.path, item.contentStamp, 1600)
     }
 
     LaunchedEffect(preview, item.path, item.contentStamp) {
-        val result = preview ?: return@LaunchedEffect
-        onSettled()
-        if (result.bitmap != null) onReady()
+        if (preview != null) onSettled()
     }
 
     var imageScale by remember(item.path, item.contentStamp) { mutableFloatStateOf(MIN_IMAGE_ZOOM) }
