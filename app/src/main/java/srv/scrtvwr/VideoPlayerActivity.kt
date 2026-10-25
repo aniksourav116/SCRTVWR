@@ -18,6 +18,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -141,6 +142,7 @@ import srv.scrtvwr.ui.media.VideoPlayerViewModel
 import srv.scrtvwr.ui.media.loopsCurrentVideo
 import srv.scrtvwr.ui.media.nextVideoIndex
 import srv.scrtvwr.ui.media.wrapsAtDirectoryEnd
+import srv.scrtvwr.util.time.TimeUtil
 import java.io.File
 import java.util.Locale
 
@@ -912,19 +914,33 @@ private fun BoxScope.VideoControls(
             IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back), tint = Color.White)
             }
+            // Laid out as the media viewer's title: the name over when it was taken. The name keeps
+            // to one line and scrolls sideways instead of being cut short.
             Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
                 Text(
                     item.name,
                     color = Color.White,
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    softWrap = false,
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
                 )
-                Text(
-                    stringResource(R.string.video_count, page + 1, pageCount),
-                    color = Color.White.copy(alpha = 0.7f),
-                    style = MaterialTheme.typography.labelSmall,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        TimeUtil.getDateAndTimeWithWeekDay(item.timestampSeconds()),
+                        color = Color.White.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f, fill = false).basicMarquee(),
+                    )
+                    Text(
+                        stringResource(R.string.video_count, page + 1, pageCount),
+                        color = Color.White.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
             }
             IconButton(
                 onClick = { onOptionsExpandedChange(!optionsExpanded) },

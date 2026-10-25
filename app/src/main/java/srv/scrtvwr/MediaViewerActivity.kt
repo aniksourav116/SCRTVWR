@@ -10,6 +10,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -460,15 +462,8 @@ private fun MediaViewerScreen(
         bookmarkFlashId += 1
     }
 
-    val splits = selectedItem?.name?.split("_") ?: emptyList()
-
     val selectedName =  selectedItem?.name?: stringResource(R.string.no_media_selected)
-    val timestampSeconds = if (splits.size >= 4) {
-        splits[(splits.size - 3).coerceAtLeast(0)].toLongOrNull()
-    } else {
-        selectedItem?.lastModifiedMillis?.let { it / 1_000L }
-    }
-    val time = TimeUtil.getDateAndTimeWithWeekDay(timestampSeconds)
+    val time = TimeUtil.getDateAndTimeWithWeekDay(selectedItem?.timestampSeconds())
 
 
     Scaffold(
@@ -477,12 +472,16 @@ private fun MediaViewerScreen(
                 TopAppBar(
                     title = {
                         Column {
+                            // One line that scrolls sideways, so the whole name can be read.
+                            // Keyed by the item so each new one starts at the name's beginning.
                             Text(
                                 text = selectedName,
                                 maxLines = 1,
+                                softWrap = false,
                                 style = MaterialTheme.typography.bodyMedium,
-                                overflow = TextOverflow.MiddleEllipsis,
-//                                modifier = Modifier.basicMarquee(),
+                                modifier = Modifier.horizontalScroll(
+                                    key(selectedItem?.path) { rememberScrollState() },
+                                ),
                             )
                             Text(
                                 text = time,
@@ -1939,6 +1938,16 @@ private fun ViewerTimeline(
             )
         }
     }
+}
+
+/**
+ * When the media was taken, in epoch seconds: the number a name like `prefix_1729850000_x_y` carries
+ * third from the end, else the file's last modification. Shared with the video player's title.
+ */
+internal fun MediaViewerItem.timestampSeconds(): Long? {
+    val splits = name.split("_")
+    val fromName = if (splits.size >= 4) splits[splits.size - 3].toLongOrNull() else null
+    return fromName ?: lastModifiedMillis / 1_000L
 }
 
 @Composable
