@@ -269,6 +269,13 @@ private fun VideoPagerScreen(
             }
             else -> VerticalPager(
                 state = pagerState,
+                // Pages follow their video rather than their position: a page never shows another
+                // video's error or position, and folder pages coming or going do not move the video
+                // on screen. A folder lists each file once, so paths do not repeat.
+                key = { page ->
+                    videos.getOrNull(page - firstVideoPageIndex)?.path
+                        ?: if (page < firstVideoPageIndex) PREVIOUS_FOLDER_PAGE_KEY else NEXT_FOLDER_PAGE_KEY
+                },
                 modifier = Modifier.fillMaxSize(),
                 beyondViewportPageCount = minOf(videoPreloadDistance, pagerState.pageCount - 1),
                 userScrollEnabled = !controlsLocked,
@@ -1203,6 +1210,10 @@ private fun VideoDirectoryDirection.moveStringRes(isArchive: Boolean): Int = whe
     VideoDirectoryDirection.Previous -> if (isArchive) R.string.move_previous_archive else R.string.move_previous_directory
     VideoDirectoryDirection.Next -> if (isArchive) R.string.move_next_archive else R.string.move_next_directory
 }
+
+// Folder pages' keys; video pages use their path, which never takes this form.
+private const val PREVIOUS_FOLDER_PAGE_KEY = "\u0000previous-folder"
+private const val NEXT_FOLDER_PAGE_KEY = "\u0000next-folder"
 
 private val PLAYBACK_SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 private val PLAYER_OPTION_WIDTH = 76.dp
