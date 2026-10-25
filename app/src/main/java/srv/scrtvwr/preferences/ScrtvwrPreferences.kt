@@ -32,6 +32,20 @@ class ScrtvwrPreferences(context: Context) {
         preferences.edit().putBoolean(KEY_HOLD_SLIDE_SHOW_ENABLED, enabled).apply()
     }
 
+    fun getSlideShowSkipsVideos(): Boolean =
+        preferences.getBoolean(KEY_SLIDE_SHOW_SKIPS_VIDEOS, false)
+
+    fun saveSlideShowSkipsVideos(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_SLIDE_SHOW_SKIPS_VIDEOS, enabled).apply()
+    }
+
+    fun getHoldSlideShowSkipsVideos(): Boolean =
+        preferences.getBoolean(KEY_HOLD_SLIDE_SHOW_SKIPS_VIDEOS, false)
+
+    fun saveHoldSlideShowSkipsVideos(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_HOLD_SLIDE_SHOW_SKIPS_VIDEOS, enabled).apply()
+    }
+
     fun getSlideShowDirection(): SlideShowDirection =
         preferences.getString(KEY_SLIDE_SHOW_DIRECTION, null)
             ?.let { value -> SlideShowDirection.entries.firstOrNull { it.name == value } }
@@ -286,6 +300,8 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_SLIDE_SHOW_STAY_MILLIS = "slide_show_stay_millis"
         const val KEY_HOLD_SLIDE_SHOW_ENABLED = "hold_slide_show_enabled"
         const val KEY_SLIDE_SHOW_DIRECTION = "slide_show_direction"
+        const val KEY_SLIDE_SHOW_SKIPS_VIDEOS = "slide_show_skips_videos"
+        const val KEY_HOLD_SLIDE_SHOW_SKIPS_VIDEOS = "hold_slide_show_skips_videos"
         const val KEY_IMAGE_PRELOAD_DISTANCE = "image_preload_distance"
         const val KEY_VIDEO_PRELOAD_DISTANCE = "video_preload_distance"
         const val KEY_VIDEO_COMPLETION_ACTION = "video_completion_action"

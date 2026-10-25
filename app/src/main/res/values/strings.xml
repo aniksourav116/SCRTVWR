@@ -184,6 +184,8 @@
     <string name="reset_zoom">Reset zoom</string>
     <string name="start_slideshow">Start slideshow</string>
     <string name="slideshow">Slide show</string>
+    <string name="slideshow_skips_videos">Skip videos in slide show</string>
+    <string name="hold_slideshow_skips_videos">Skip videos in hold-to-slide</string>
     <string name="per_image_stay">Per image stay time (ms)</string>
     <string name="start">Start</string>
     <string name="cancel">Cancel</string>

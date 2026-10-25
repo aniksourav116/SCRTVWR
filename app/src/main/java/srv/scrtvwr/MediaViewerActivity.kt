@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -210,6 +211,8 @@ private fun MediaViewerRoute(
         onNextSourceClick = viewModel::loadNextSource,
         onSlideShowStart = viewModel::startSlideShow,
         onSlideShowStop = viewModel::stopSlideShow,
+        onSlideShowSkipsVideosToggle = viewModel::toggleSlideShowSkipsVideos,
+        onHoldSlideShowSkipsVideosToggle = viewModel::toggleHoldSlideShowSkipsVideos,
         onSortOrderChange = viewModel::setSortOrder,
         onJumpRecorded = viewModel::recordJump,
         onJumpBack = viewModel::jumpBack,
@@ -234,6 +237,8 @@ private fun MediaViewerScreen(
     onNextSourceClick: () -> Unit,
     onSlideShowStart: (Long, SlideShowDirection) -> Unit,
     onSlideShowStop: () -> Unit,
+    onSlideShowSkipsVideosToggle: () -> Unit,
+    onHoldSlideShowSkipsVideosToggle: () -> Unit,
     onSortOrderChange: (DirectorySortOrder) -> Unit,
     onJumpRecorded: (fromPage: Int, toPage: Int) -> Unit,
     onJumpBack: (currentPage: Int) -> Unit,
@@ -293,6 +298,16 @@ private fun MediaViewerScreen(
     } else {
         uiState.slideShowDirection.pageOffset
     }
+    val activeSlideShowSkipsVideos = if (isPseudoSlideShowRunning) {
+        uiState.holdSlideShowSkipsVideos
+    } else {
+        uiState.slideShowSkipsVideos
+    }
+    // Only a running show jumps over videos; otherwise they load and stay like any page.
+    fun isSkippedBySlideShow(page: Int): Boolean =
+        isAnySlideShowRunning && activeSlideShowSkipsVideos &&
+            uiState.itemForPage(page)?.type == MediaViewerType.Video
+
     fun showEdgeDialog(direction: SourceDirection) {
         if (uiState.items.isNotEmpty()) {
             edgeDialogDirection = direction
@@ -360,6 +375,7 @@ private fun MediaViewerScreen(
         isAnySlideShowRunning,
         activeSlideShowStayMillis,
         activeSlideShowPageOffset,
+        activeSlideShowSkipsVideos,
         isPseudoSlideShowRunning,
         uiState.items,
         pagerState.currentPage,
@@ -372,16 +388,21 @@ private fun MediaViewerScreen(
                 return@LaunchedEffect
             }
 
-            // A page that failed to load counts too, so a broken file never stops the show.
-            snapshotFlow { settledMedia[currentItem.readinessKey] == true }
-                .first { it }
-            // Give the loaded bitmap a render frame before even a very short stay begins.
-            withFrameNanos { }
-            delay(activeSlideShowStayMillis.milliseconds)
+            // A skipped video, such as one the show started on, moves on without a stay.
+            if (!isSkippedBySlideShow(currentPage)) {
+                // A page that failed to load counts too, so a broken file never stops the show.
+                snapshotFlow { settledMedia[currentItem.readinessKey] == true }
+                    .first { it }
+                // Give the loaded bitmap a render frame before even a very short stay begins.
+                withFrameNanos { }
+                delay(activeSlideShowStayMillis.milliseconds)
+            }
 
             if (pagerState.currentPage == currentPage) {
-                val requestedPage = currentPage + activeSlideShowPageOffset
-                if (requestedPage !in uiState.items.indices) {
+                val requestedPage = generateSequence(currentPage + activeSlideShowPageOffset) { it + activeSlideShowPageOffset }
+                    .takeWhile { it in uiState.items.indices }
+                    .firstOrNull { !isSkippedBySlideShow(it) }
+                if (requestedPage == null) {
                     if (isPseudoSlideShowRunning) {
                         stopPseudoSlideShow()
                     } else {
@@ -416,6 +437,7 @@ private fun MediaViewerScreen(
         },
         hasStarted = { page -> pageKey(page)?.let { startedMedia[it] == true } == true },
         hasSettled = { page -> pageKey(page)?.let { settledMedia[it] == true } == true },
+        isSkipped = ::isSkippedBySlideShow,
     )
 
     // Neighbouring sources are looked for only once the media on screen is done, so walking other
@@ -523,6 +545,22 @@ private fun MediaViewerScreen(
                                     enabled = selectedItem?.type == MediaViewerType.Image,
                                     onClick = {
                                         toggleCurrentImageZoom()
+                                        menuExpanded = false
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.slideshow_skips_videos)) },
+                                    trailingIcon = { Checkbox(checked = uiState.slideShowSkipsVideos, onCheckedChange = null) },
+                                    onClick = {
+                                        onSlideShowSkipsVideosToggle()
+                                        menuExpanded = false
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.hold_slideshow_skips_videos)) },
+                                    trailingIcon = { Checkbox(checked = uiState.holdSlideShowSkipsVideos, onCheckedChange = null) },
+                                    onClick = {
+                                        onHoldSlideShowSkipsVideosToggle()
                                         menuExpanded = false
                                     },
                                 )
@@ -1984,6 +2022,8 @@ private fun MediaViewerScreenPreview() {
             onNextSourceClick = {},
             onSlideShowStart = { _, _ -> },
             onSlideShowStop = {},
+            onSlideShowSkipsVideosToggle = {},
+            onHoldSlideShowSkipsVideosToggle = {},
             onSortOrderChange = {},
             onJumpRecorded = { _, _ -> },
             onJumpBack = {},

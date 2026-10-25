@@ -43,6 +43,8 @@ class MediaViewerViewModel(
             slideShowStayMillis = preferences.getSlideShowStayMillis(),
             slideShowDirection = preferences.getSlideShowDirection(),
             holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
+            slideShowSkipsVideos = preferences.getSlideShowSkipsVideos(),
+            holdSlideShowSkipsVideos = preferences.getHoldSlideShowSkipsVideos(),
             imagePreloadDistance = preferences.getImagePreloadDistance(),
             loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
             edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
@@ -143,6 +145,8 @@ class MediaViewerViewModel(
                 slideShowStayMillis = preferences.getSlideShowStayMillis(),
                 slideShowDirection = preferences.getSlideShowDirection(),
                 holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
+                slideShowSkipsVideos = preferences.getSlideShowSkipsVideos(),
+                holdSlideShowSkipsVideos = preferences.getHoldSlideShowSkipsVideos(),
                 imagePreloadDistance = preferences.getImagePreloadDistance(),
                 loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
                 edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
@@ -469,6 +473,18 @@ class MediaViewerViewModel(
         }
     }
 
+    fun toggleSlideShowSkipsVideos() {
+        val enabled = !_uiState.value.slideShowSkipsVideos
+        preferences.saveSlideShowSkipsVideos(enabled)
+        _uiState.update { it.copy(slideShowSkipsVideos = enabled) }
+    }
+
+    fun toggleHoldSlideShowSkipsVideos() {
+        val enabled = !_uiState.value.holdSlideShowSkipsVideos
+        preferences.saveHoldSlideShowSkipsVideos(enabled)
+        _uiState.update { it.copy(holdSlideShowSkipsVideos = enabled) }
+    }
+
     private fun rememberMediaSession(directoryPath: String?, mediaPath: String?) {
         directoryPath ?: return
         preferences.saveLastMediaSession(directoryPath, mediaPath)
@@ -506,6 +522,10 @@ data class MediaViewerUiState(
     val slideShowStayMillis: Long = 100L,
     val slideShowDirection: SlideShowDirection = SlideShowDirection.Next,
     val holdSlideShowEnabled: Boolean = false,
+    /** Whether the timed slide show jumps over video pages. */
+    val slideShowSkipsVideos: Boolean = false,
+    /** Whether the hold-to-slide show jumps over video pages. */
+    val holdSlideShowSkipsVideos: Boolean = false,
     val imagePreloadDistance: Int = 5,
     /** Whether server video pages show their first frame; local videos always do. */
     val loadVideoThumbnails: Boolean = true,
