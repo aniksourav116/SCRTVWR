@@ -313,7 +313,12 @@ private suspend fun File.firstMediaDirectory(
     return null
 }
 
-/** Remote counterpart of [firstMediaDirectory]: videos win, otherwise the first image opens the viewer. */
+/**
+ * Remote counterpart of [firstMediaDirectory]: videos win, otherwise the first image opens the
+ * viewer. Each folder costs only its listing. Sizes and times would cost a request per file, so a
+ * folder's first file comes by name unless they are cached; the folder's own list sorts properly
+ * once it is opened.
+ */
 private suspend fun firstRemoteMediaDirectory(
     from: String,
     candidates: Sequence<String>,
@@ -321,7 +326,14 @@ private suspend fun firstRemoteMediaDirectory(
 ): VideoDirectoryTarget? {
     for (candidate in candidates) {
         currentCoroutineContext().ensureActive()
-        val media = remoteMedia(candidate, sortOrder)
+        val listed = try {
+            MediaCatalog.listRemoteDirectoryUnsorted(candidate)
+        } catch (_: IOException) {
+            continue
+        }
+        if (listed.isEmpty()) continue
+        val known = !sortOrder.needsFileMetadata || MediaCatalog.hasRemoteMetadata(listed)
+        val media = MediaCatalog.sorted(listed, if (known) sortOrder else DirectorySortOrder.NameAscending)
         val name = DirectoryTraversal.displayName(RemoteDirectoryTree, from, candidate)
         media.videos().firstOrNull()?.let { video ->
             return VideoDirectoryTarget(name, candidate, VideoDirectoryType.Video, video.path)
@@ -332,13 +344,6 @@ private suspend fun firstRemoteMediaDirectory(
     }
     return null
 }
-
-private suspend fun remoteMedia(directoryUrl: String, sortOrder: DirectorySortOrder): List<MediaViewerItem> =
-    try {
-        MediaCatalog.listRemoteDirectory(directoryUrl, sortOrder)
-    } catch (_: IOException) {
-        emptyList()
-    }
 
 private fun List<MediaViewerItem>.videos(): List<MediaViewerItem> =
     filter { it.type == MediaViewerType.Video }
