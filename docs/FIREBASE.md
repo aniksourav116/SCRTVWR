@@ -56,6 +56,10 @@ affects the upload, not the build.
 
 ### Signing
 
+Debug builds are signed with `app/debug.keystore`, which is checked in so every machine and
+CI produce the same debug signature and builds install over each other. It uses the standard
+debug credentials (`android` / `androiddebugkey` / `android`) and must never sign a release.
+
 App Distribution needs a signed artifact. `release` picks up a signing config only when a
 keystore is configured; otherwise the release APK is unsigned and the upload will fail —
 distribute the debug variant instead, or supply a keystore.

@@ -44,6 +44,14 @@ android {
     }
 
     signingConfigs {
+        // Checked-in debug key so debug builds from any machine install over each other.
+        // Debug keys aren't secret; never use this one for release.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         if (releaseKeystore != null) {
             create("release") {
                 storeFile = releaseKeystore
@@ -56,6 +64,7 @@ android {
 
     buildTypes {
         debug {
+            signingConfig = signingConfigs.getByName("debug")
             configure<CrashlyticsExtension> {
                 // Debug builds report crashes at runtime but never need a mapping file.
                 mappingFileUploadEnabled = false
