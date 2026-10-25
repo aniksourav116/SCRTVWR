@@ -45,6 +45,7 @@ import androidx.compose.material.icons.automirrored.filled.LastPage
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FirstPage
@@ -53,6 +54,7 @@ import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
 import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -106,6 +108,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -220,6 +223,7 @@ private fun MediaViewerRoute(
         onJumpBack = viewModel::jumpBack,
         onJumpForward = viewModel::jumpForward,
         onBack = onBack,
+        onRetry = viewModel::retry,
     )
 }
 
@@ -246,6 +250,7 @@ private fun MediaViewerScreen(
     onJumpBack: (currentPage: Int) -> Unit,
     onJumpForward: (currentPage: Int) -> Unit,
     onBack: () -> Unit,
+    onRetry: () -> Unit = {},
 ) {
     // Each loaded list starts its own pager on its selected page. Reusing one would first lay out,
     // and so start loading, the pages around wherever the previous list was left.
@@ -627,13 +632,24 @@ private fun MediaViewerScreen(
                 if (uiState.isLoading) {
                     MediaLoadingIndicator(uiState.downloadProgress, Modifier.align(Alignment.Center))
                 } else if (uiState.errorMessage != null && uiState.items.isEmpty()) {
-                    Text(
-                        text = uiState.errorMessage,
-                        color = Color.White,
+                    Column(
                         modifier = Modifier
                             .align(Alignment.Center)
                             .padding(24.dp),
-                    )
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = Color.White)
+                        Text(
+                            text = uiState.errorMessage,
+                            color = Color.White,
+                            textAlign = TextAlign.Center,
+                        )
+                        Button(onClick = onRetry) {
+                            Icon(Icons.Default.Refresh, contentDescription = null)
+                            Text(stringResource(R.string.retry), Modifier.padding(start = 8.dp))
+                        }
+                    }
                 } else HorizontalPager(
                     state = pagerState,
                     key = { page -> pageKeys.getOrElse(page) { page } },

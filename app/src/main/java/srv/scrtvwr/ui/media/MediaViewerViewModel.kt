@@ -99,6 +99,11 @@ class MediaViewerViewModel(
         }
     }
 
+    /** Loads the source last asked for again, after it failed. */
+    fun retry() {
+        load(savedStateHandle[STATE_REQUESTED_DIRECTORY], savedStateHandle[STATE_REQUESTED_SELECTED], force = true)
+    }
+
     private suspend fun loadMedia(directoryPath: String?, selectedPath: String?, force: Boolean = false) {
         val sortOrder = preferences.getDirectorySortOrder()
         // Moving to the next source finds its list already read; any other load drops it.

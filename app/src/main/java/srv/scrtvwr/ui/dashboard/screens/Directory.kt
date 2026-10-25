@@ -52,14 +52,17 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -71,6 +74,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -103,6 +107,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntOffset
@@ -413,6 +418,8 @@ fun DirectoryScreen(
                 onRequestDeleteEntry = { entryPendingDeletion = it },
                 onCopyLink = onCopyLink,
                 onLoadEntryDetails = onLoadEntryDetails,
+                onRetry = onRefresh,
+                onClearSearch = { onSearchQueryChange("") },
             )
 
             DirectoryViewMode.Grid -> DirectoryGrid(
@@ -428,6 +435,8 @@ fun DirectoryScreen(
                 onMoveEntry = onMoveEntry,
                 onRequestDeleteEntry = { entryPendingDeletion = it },
                 onCopyLink = onCopyLink,
+                onRetry = onRefresh,
+                onClearSearch = { onSearchQueryChange("") },
             )
         }
     }
@@ -840,6 +849,8 @@ private fun DirectoryList(
     onRequestDeleteEntry: (DirectoryEntry) -> Unit,
     onCopyLink: (String) -> Unit,
     onLoadEntryDetails: suspend (DirectoryEntry) -> Unit,
+    onRetry: () -> Unit,
+    onClearSearch: () -> Unit,
 ) {
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
@@ -886,7 +897,7 @@ private fun DirectoryList(
 
             if (uiState.entries.isEmpty()) {
                 item(key = "empty") {
-                    EmptyDirectoryMessage(uiState)
+                    EmptyDirectoryMessage(uiState, onRetry = onRetry, onClearSearch = onClearSearch)
                 }
             }
 
@@ -1003,6 +1014,8 @@ private fun DirectoryGrid(
     onMoveEntry: (DirectoryEntry) -> Unit,
     onRequestDeleteEntry: (DirectoryEntry) -> Unit,
     onCopyLink: (String) -> Unit,
+    onRetry: () -> Unit,
+    onClearSearch: () -> Unit,
 ) {
     val gridState = rememberLazyGridState()
     val coroutineScope = rememberCoroutineScope()
@@ -1065,7 +1078,7 @@ private fun DirectoryGrid(
 
             if (uiState.entries.isEmpty()) {
                 item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
-                    EmptyDirectoryMessage(uiState)
+                    EmptyDirectoryMessage(uiState, onRetry = onRetry, onClearSearch = onClearSearch)
                 }
             }
 
@@ -1407,23 +1420,51 @@ private fun defaultEntryVisualStyle(): EntryVisualStyle {
 }
 
 @Composable
-private fun EmptyDirectoryMessage(uiState: DirectoryUiState) {
-    Text(
-        text = when {
-            uiState.errorMessage != null -> uiState.errorMessage
-            !uiState.canReadCurrentDirectory -> {
-                stringResource(R.string.directory_unreadable)
+private fun EmptyDirectoryMessage(
+    uiState: DirectoryUiState,
+    onRetry: () -> Unit,
+    onClearSearch: () -> Unit,
+) {
+    val isError = uiState.errorMessage != null || !uiState.canReadCurrentDirectory
+    val isSearch = !isError && uiState.searchQuery.isNotBlank()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 32.dp, horizontal = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            imageVector = when {
+                isError -> Icons.Default.ErrorOutline
+                isSearch -> Icons.Default.SearchOff
+                else -> Icons.Default.FolderOpen
+            },
+            contentDescription = null,
+            tint = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(40.dp),
+        )
+        Text(
+            text = when {
+                uiState.errorMessage != null -> uiState.errorMessage
+                !uiState.canReadCurrentDirectory -> stringResource(R.string.directory_unreadable)
+                isSearch -> stringResource(R.string.no_search_results, uiState.searchQuery)
+                else -> stringResource(R.string.directory_empty)
+            },
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        when {
+            isError -> OutlinedButton(onClick = onRetry) {
+                Icon(Icons.Default.Refresh, contentDescription = null)
+                Text(stringResource(R.string.retry), Modifier.padding(start = 8.dp))
             }
-            uiState.searchQuery.isBlank() -> {
-                stringResource(R.string.directory_empty)
+            isSearch -> OutlinedButton(onClick = onClearSearch) {
+                Icon(Icons.Default.Close, contentDescription = null)
+                Text(stringResource(R.string.clear_search), Modifier.padding(start = 8.dp))
             }
-            else -> {
-                stringResource(R.string.no_search_results, uiState.searchQuery)
-            }
-        },
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(vertical = 12.dp),
-    )
+        }
+    }
 }
 
 @Composable
