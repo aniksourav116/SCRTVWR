@@ -55,6 +55,7 @@ class DirectoryViewModel(
     private val _uiState = MutableStateFlow(
         DirectoryUiState(
             rootPath = initialRoot,
+            rootLabel = rootLabelFor(initialRoot),
             currentPath = initialDirectory,
             searchQuery = savedStateHandle[STATE_SEARCH] ?: "",
             viewMode = savedStateHandle.get<String>(STATE_VIEW_MODE)
@@ -132,6 +133,7 @@ class DirectoryViewModel(
         _uiState.update {
             it.copy(
                 rootPath = root,
+                rootLabel = rootLabelFor(root),
                 currentPath = directory,
                 searchQuery = "",
                 canNavigateUp = directory.isDifferentDirectory(root),
@@ -323,6 +325,13 @@ class DirectoryViewModel(
             File(path).let { it.exists() && it.isDirectory }
         }
 
+    /** Name of [root] in the path bar: a server's name, a folder's, or null for device storage. */
+    private fun rootLabelFor(root: String): String? = when {
+        MediaPaths.isRemote(root) -> preferences.getHttpServers().serverFor(root)?.name
+        !root.isDifferentDirectory(defaultRootDirectory.absolutePath) -> null
+        else -> MediaPaths.name(root)
+    }
+
     /** Base URL of the saved server holding [url], so navigating up stops at the shared folder. */
     private fun serverRootFor(url: String): String =
         preferences.getHttpServers().serverFor(url)?.baseUrl ?: RemotePaths.directoryUrl(url)
@@ -408,6 +417,8 @@ class DirectoryViewModel(
 data class DirectoryUiState(
     /** Highest directory the browser navigates up to: a local path or an HTTP server's base URL. */
     val rootPath: String = Environment.getExternalStorageDirectory().absolutePath,
+    /** How the path bar names [rootPath]; null for device storage. */
+    val rootLabel: String? = null,
     val currentPath: String = rootPath,
     val searchQuery: String = "",
     val directoryListing: DirectoryListing = DirectoryListing(entries = emptyList()),
@@ -457,6 +468,17 @@ private data class DirectoryScanKey(
 
 private val DirectoryUiState.scanKey: DirectoryScanKey
     get() = DirectoryScanKey(currentPath, searchQuery, sortOrder, mediaFilter, showHiddenFiles)
+
+/** Each folder from [DirectoryUiState.rootPath] down to [DirectoryUiState.currentPath]. */
+fun DirectoryUiState.pathSegments(): List<String> {
+    val paths = mutableListOf(currentPath)
+    var path = currentPath
+    while (path.isDifferentDirectory(rootPath)) {
+        path = MediaPaths.parent(path) ?: break
+        paths += path
+    }
+    return paths.asReversed()
+}
 
 data class DirectoryListing(
     val entries: List<DirectoryEntry>,

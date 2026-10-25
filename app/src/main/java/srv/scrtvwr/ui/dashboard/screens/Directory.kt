@@ -46,6 +46,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Archive
@@ -93,6 +94,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -139,6 +141,7 @@ import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewModel
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewMode
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.PendingDirectoryFileOperation
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.pathSegments
 import srv.scrtvwr.ui.components.BaseScaffold
 import srv.scrtvwr.ui.components.copyLink
 import srv.scrtvwr.ui.sort.DirectorySortOrder
@@ -285,7 +288,6 @@ fun DirectoryScreen(
     var entryPendingDeletion by remember { mutableStateOf<DirectoryEntry?>(null) }
     BaseScaffold(
         title = uiState.currentName,
-        subtitle = uiState.currentPath,
         showBackButton = false,
         actions = {
             Box {
@@ -354,6 +356,11 @@ fun DirectoryScreen(
             .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+        DirectoryPathBar(
+            uiState = uiState,
+            onOpenDirectory = onOpenRecentDirectory,
+        )
+
         if (searchVisible) {
             DirectorySearchField(
                 query = uiState.searchQuery,
@@ -471,6 +478,55 @@ fun DirectoryScreen(
         )
     }
 }
+}
+
+@Composable
+private fun DirectoryPathBar(
+    uiState: DirectoryUiState,
+    onOpenDirectory: (String) -> Unit,
+) {
+    val segments = remember(uiState.rootPath, uiState.currentPath) { uiState.pathSegments() }
+    val rootLabel = uiState.rootLabel ?: stringResource(R.string.device_storage)
+    val scrollState = rememberScrollState()
+    // Keeps the current folder in view as the bar fills in or the folder changes.
+    LaunchedEffect(segments) {
+        snapshotFlow { scrollState.maxValue }.collect { scrollState.scrollTo(it) }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(scrollState),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        segments.forEachIndexed { index, path ->
+            val isCurrent = index == segments.lastIndex
+            if (index > 0) {
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            Text(
+                text = if (index == 0) rootLabel else MediaPaths.name(path),
+                style = MaterialTheme.typography.labelLarge,
+                color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1,
+                modifier = Modifier
+                    .clip(MaterialTheme.shapes.small)
+                    .then(
+                        if (isCurrent) {
+                            Modifier
+                        } else {
+                            Modifier.clickable(role = Role.Button) { onOpenDirectory(path) }
+                        },
+                    )
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
+            )
+        }
+    }
 }
 
 @Composable
