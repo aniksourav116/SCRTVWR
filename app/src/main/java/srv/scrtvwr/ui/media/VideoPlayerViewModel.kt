@@ -37,6 +37,10 @@ class VideoPlayerViewModel(
     private val preferences = ScrtvwrPreferences(application)
     private val traversalRoot = runCatching { Environment.getExternalStorageDirectory() }.getOrNull()
     private var loadJob: Job? = null
+    private var neighbourJob: Job? = null
+    private var neighbourSearchLoadId = -1
+    // The folder the current list was read from, for finding the folders around it.
+    @Volatile private var loadedFolder: LoadedFolder? = null
     private val _uiState = MutableStateFlow(VideoPlayerUiState())
     val uiState = _uiState.asStateFlow()
 
@@ -68,63 +72,105 @@ class VideoPlayerViewModel(
         _uiState.update { it.copy(selectedPath = path) }
     }
 
+    /**
+     * Looks for the folders before and after this one, the next one first since browsing mostly
+     * goes forward. The screen calls this once the video on screen has started or failed, or
+     * sooner when a folder page is reached; each list is searched once.
+     */
+    fun findNeighbourDirectories() {
+        val state = _uiState.value
+        val folder = loadedFolder
+        if (folder == null || state.isLoading || neighbourSearchLoadId == state.loadId) return
+        val loadId = state.loadId
+        neighbourSearchLoadId = loadId
+        neighbourJob?.cancel()
+        neighbourJob = viewModelScope.launch(Dispatchers.IO) {
+            val nextDirectory = findNeighbour(folder, next = true)
+            ensureActive()
+            _uiState.update {
+                if (it.loadId == loadId) it.copy(nextDirectory = nextDirectory, isNextDirectoryKnown = true) else it
+            }
+            val previousDirectory = findNeighbour(folder, next = false)
+            ensureActive()
+            _uiState.update {
+                if (it.loadId == loadId) {
+                    it.copy(previousDirectory = previousDirectory, isPreviousDirectoryKnown = true)
+                } else {
+                    it
+                }
+            }
+        }
+    }
+
     private fun load(directoryPath: String?, selectedPath: String?) {
         loadJob?.cancel()
+        neighbourJob?.cancel()
+        neighbourSearchLoadId = -1
         savedStateHandle[STATE_DIRECTORY] = directoryPath
         savedStateHandle[STATE_SELECTED] = selectedPath
         _uiState.update { it.copy(isLoading = true) }
         val sortOrder = preferences.getDirectorySortOrder()
         loadJob = viewModelScope.launch(Dispatchers.IO) {
-            val directory = if (MediaPaths.isRemote(directoryPath ?: selectedPath)) {
-                loadRemoteVideoDirectory(directoryPath, selectedPath, sortOrder)
+            val isRemote = MediaPaths.isRemote(directoryPath ?: selectedPath)
+            val folder = if (isRemote) {
+                loadRemoteVideoFolder(directoryPath, selectedPath, sortOrder)
             } else {
-                loadVideoDirectory(directoryPath, selectedPath, sortOrder, traversalRoot)
+                loadVideoFolder(directoryPath, selectedPath, sortOrder)
             }
             ensureActive()
+            loadedFolder = folder.path?.let { LoadedFolder(it, isRemote, sortOrder) }
+            // The neighbouring folders are left unknown: findNeighbourDirectories looks for them
+            // once the video on screen has started, so the list shows without waiting for a walk.
+            val hasNoFolder = folder.path == null
             _uiState.update {
                 VideoPlayerUiState(
                     loadId = it.loadId + 1,
-                    directoryPath = directory.path ?: directoryPath,
-                    videos = directory.videos,
-                    selectedPath = selectedPath?.takeIf { path -> directory.videos.any { video -> video.path == path } }
-                        ?: directory.videos.firstOrNull()?.path,
-                    previousDirectory = directory.previousDirectory,
-                    nextDirectory = directory.nextDirectory,
+                    directoryPath = folder.path ?: directoryPath,
+                    videos = folder.videos,
+                    selectedPath = selectedPath?.takeIf { path -> folder.videos.any { video -> video.path == path } }
+                        ?: folder.videos.firstOrNull()?.path,
+                    isPreviousDirectoryKnown = hasNoFolder,
+                    isNextDirectoryKnown = hasNoFolder,
                     isLoading = false,
                 )
             }
         }
     }
 
-    /** [loadVideoDirectory] for a folder on an HTTP server, hopping only within that server. */
-    private suspend fun loadRemoteVideoDirectory(
-        directoryPath: String?,
-        selectedPath: String?,
-        sortOrder: DirectorySortOrder,
-    ): VideoDirectory {
-        val directory = directoryPath?.takeIf(MediaPaths::isRemote)?.let(RemotePaths::directoryUrl)
-            ?: selectedPath?.let(RemotePaths::parent)
-            ?: return VideoDirectory(path = null, videos = emptyList(), previousDirectory = null, nextDirectory = null)
-        val videos = remoteMedia(directory, sortOrder).videos()
-        val fallbackVideos = videos.ifEmpty {
-            selectedPath?.let(MediaCatalog::remoteItem)?.let(::listOf).orEmpty()
+    private suspend fun findNeighbour(folder: LoadedFolder, next: Boolean): VideoDirectoryTarget? =
+        try {
+            if (folder.isRemote) {
+                val root = RemotePaths.resolveRoot(
+                    folder.path,
+                    preferences.getHttpServers().serverFor(folder.path)?.baseUrl,
+                )
+                firstRemoteMediaDirectory(
+                    from = folder.path,
+                    candidates = if (next) {
+                        DirectoryTraversal.forward(RemoteDirectoryTree, folder.path, root, folder.sortOrder)
+                    } else {
+                        DirectoryTraversal.backward(RemoteDirectoryTree, folder.path, root, folder.sortOrder)
+                    },
+                    sortOrder = folder.sortOrder,
+                )
+            } else {
+                val directory = File(folder.path)
+                val root = DirectoryTraversal.resolveRoot(directory, traversalRoot)
+                directory.firstMediaDirectory(
+                    sortOrder = folder.sortOrder,
+                    candidates = if (next) {
+                        DirectoryTraversal.forward(directory, root, folder.sortOrder)
+                    } else {
+                        DirectoryTraversal.backward(directory, root, folder.sortOrder)
+                    },
+                )
+            }
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // A folder that cannot be walked from simply has no neighbour to offer.
+            null
         }
-        val root = RemotePaths.resolveRoot(directory, preferences.getHttpServers().serverFor(directory)?.baseUrl)
-        return VideoDirectory(
-            path = directory,
-            videos = fallbackVideos,
-            previousDirectory = firstRemoteMediaDirectory(
-                from = directory,
-                candidates = DirectoryTraversal.backward(RemoteDirectoryTree, directory, root, sortOrder),
-                sortOrder = sortOrder,
-            ),
-            nextDirectory = firstRemoteMediaDirectory(
-                from = directory,
-                candidates = DirectoryTraversal.forward(RemoteDirectoryTree, directory, root, sortOrder),
-                sortOrder = sortOrder,
-            ),
-        )
-    }
 
     private companion object {
         const val STATE_DIRECTORY = "video_directory"
@@ -141,6 +187,10 @@ data class VideoPlayerUiState(
     val selectedPath: String? = null,
     val previousDirectory: VideoDirectoryTarget? = null,
     val nextDirectory: VideoDirectoryTarget? = null,
+    /** Whether [previousDirectory] is the search's answer, rather than null because it has not finished. */
+    val isPreviousDirectoryKnown: Boolean = false,
+    /** Whether [nextDirectory] is the search's answer, rather than null because it has not finished. */
+    val isNextDirectoryKnown: Boolean = false,
     val isLoading: Boolean = true,
 )
 
@@ -154,31 +204,35 @@ data class VideoDirectoryTarget(
 
 enum class VideoDirectoryType { Video, Image }
 
-private class VideoDirectory(
-    val path: String?,
-    val videos: List<MediaViewerItem>,
-    val previousDirectory: VideoDirectoryTarget?,
-    val nextDirectory: VideoDirectoryTarget?,
-)
+/** What a list was read from: an absolute folder path, or a folder URL on a server. */
+private class LoadedFolder(val path: String, val isRemote: Boolean, val sortOrder: DirectorySortOrder)
 
-private fun loadVideoDirectory(
-    directoryPath: String?,
-    selectedPath: String?,
-    sortOrder: DirectorySortOrder,
-    traversalRoot: File?,
-): VideoDirectory {
+private class VideoFolder(val path: String?, val videos: List<MediaViewerItem>)
+
+private fun loadVideoFolder(directoryPath: String?, selectedPath: String?, sortOrder: DirectorySortOrder): VideoFolder {
     val directory = directoryPath?.let(::File)?.takeIf(File::isDirectory)
         ?: selectedPath?.let(::File)?.parentFile
     val videos = directory.listVideos(sortOrder)
     val fallbackVideos = videos.ifEmpty {
         selectedPath?.let(::File)?.takeIf(File::isFile)?.let(MediaCatalog::toItem)?.let(::listOf).orEmpty()
     }
-    return VideoDirectory(
-        path = directory?.absolutePath,
-        videos = fallbackVideos,
-        previousDirectory = directory?.findPreviousMediaDirectory(sortOrder, traversalRoot),
-        nextDirectory = directory?.findNextMediaDirectory(sortOrder, traversalRoot),
-    )
+    return VideoFolder(path = directory?.absolutePath, videos = fallbackVideos)
+}
+
+/** [loadVideoFolder] for a folder on an HTTP server. */
+private suspend fun loadRemoteVideoFolder(
+    directoryPath: String?,
+    selectedPath: String?,
+    sortOrder: DirectorySortOrder,
+): VideoFolder {
+    val directory = directoryPath?.takeIf(MediaPaths::isRemote)?.let(RemotePaths::directoryUrl)
+        ?: selectedPath?.let(RemotePaths::parent)
+        ?: return VideoFolder(path = null, videos = emptyList())
+    val videos = remoteMedia(directory, sortOrder).videos()
+    val fallbackVideos = videos.ifEmpty {
+        selectedPath?.let(MediaCatalog::remoteItem)?.let(::listOf).orEmpty()
+    }
+    return VideoFolder(path = directory, videos = fallbackVideos)
 }
 
 private fun File?.listVideos(sortOrder: DirectorySortOrder): List<MediaViewerItem> = this?.listFiles()
@@ -190,53 +244,25 @@ private fun File?.listVideos(sortOrder: DirectorySortOrder): List<MediaViewerIte
     ?.toList()
     .orEmpty()
 
-private fun File.findNextMediaDirectory(
-    sortOrder: DirectorySortOrder,
-    traversalRoot: File?,
-): VideoDirectoryTarget? = firstMediaDirectory(sortOrder, traversalRoot) { root ->
-    DirectoryTraversal.forward(this, root, sortOrder)
-}
-
-private fun File.findPreviousMediaDirectory(
-    sortOrder: DirectorySortOrder,
-    traversalRoot: File?,
-): VideoDirectoryTarget? = firstMediaDirectory(sortOrder, traversalRoot) { root ->
-    DirectoryTraversal.backward(this, root, sortOrder)
-}
-
 /**
  * First directory holding playable media along [candidates], the depth-first walk starting here:
  * subfolders first, then following siblings, then the siblings of each ancestor up to the root.
  */
-private fun File.firstMediaDirectory(
+private suspend fun File.firstMediaDirectory(
     sortOrder: DirectorySortOrder,
-    traversalRoot: File?,
-    candidates: (root: File) -> Sequence<File>,
+    candidates: Sequence<File>,
 ): VideoDirectoryTarget? {
-    val root = DirectoryTraversal.resolveRoot(this, traversalRoot)
-    return candidates(root)
-        .mapNotNull { candidate ->
-            val name = DirectoryTraversal.displayName(this, candidate)
-            val videos = candidate.listVideos(sortOrder)
-            if (videos.isNotEmpty()) {
-                VideoDirectoryTarget(
-                    name = name,
-                    path = candidate.absolutePath,
-                    type = VideoDirectoryType.Video,
-                    selectedMediaPath = videos.first().path,
-                )
-            } else {
-                candidate.listImages(sortOrder).firstOrNull()?.let { image ->
-                    VideoDirectoryTarget(
-                        name = name,
-                        path = candidate.absolutePath,
-                        type = VideoDirectoryType.Image,
-                        selectedMediaPath = image.absolutePath,
-                    )
-                }
-            }
+    for (candidate in candidates) {
+        currentCoroutineContext().ensureActive()
+        val name = DirectoryTraversal.displayName(this, candidate)
+        candidate.listVideos(sortOrder).firstOrNull()?.let { video ->
+            return VideoDirectoryTarget(name, candidate.absolutePath, VideoDirectoryType.Video, video.path)
         }
-        .firstOrNull()
+        candidate.listImages(sortOrder).firstOrNull()?.let { image ->
+            return VideoDirectoryTarget(name, candidate.absolutePath, VideoDirectoryType.Image, image.absolutePath)
+        }
+    }
+    return null
 }
 
 /** Remote counterpart of [firstMediaDirectory]: videos win, otherwise the first image opens the viewer. */

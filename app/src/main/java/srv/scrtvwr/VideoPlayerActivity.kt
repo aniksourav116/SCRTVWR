@@ -220,7 +220,9 @@ private fun VideoPagerScreen(
     val videos = uiState.videos
     val previousDirectory = uiState.previousDirectory
     val nextDirectory = uiState.nextDirectory
-    val firstVideoPageIndex = if (previousDirectory != null) 1 else 0
+    // A folder page always sits at each end, searching until the neighbouring folder is known, so
+    // the videos never shift when the answer arrives.
+    val firstVideoPageIndex = 1
     var completionAction by rememberSaveable { mutableStateOf(preferences.getVideoCompletionAction()) }
     var controlsLocked by rememberSaveable { mutableStateOf(false) }
     val initialPage = remember(videos, uiState.selectedPath, firstVideoPageIndex) {
@@ -231,11 +233,7 @@ private fun VideoPagerScreen(
     val pagerState = key(uiState.loadId) {
         rememberPagerState(
             initialPage = initialPage,
-            pageCount = {
-                videos.size +
-                    (if (previousDirectory != null) 1 else 0) +
-                    (if (nextDirectory != null) 1 else 0)
-            },
+            pageCount = { videos.size + 2 },
         )
     }
     val scope = rememberCoroutineScope()
@@ -249,7 +247,13 @@ private fun VideoPagerScreen(
     LaunchedEffect(pagerState, videos) {
         snapshotFlow { pagerState.currentPage }
             .collect { page ->
-                videos.getOrNull(page - firstVideoPageIndex)?.let { video -> viewModel.selectVideo(video.path) }
+                val video = videos.getOrNull(page - firstVideoPageIndex)
+                if (video != null) {
+                    viewModel.selectVideo(video.path)
+                } else {
+                    // A folder page reached before the video on screen started needs the answer now.
+                    viewModel.findNeighbourDirectories()
+                }
             }
     }
 
@@ -323,28 +327,30 @@ private fun VideoPagerScreen(
                                 }
                             }
                         },
+                        // Neighbouring folders are looked for only once the video on screen is
+                        // showing, or has failed, so walking other folders never delays it.
+                        onPlaybackStarted = viewModel::findNeighbourDirectories,
                     )
-                } else if (page == 0 && previousDirectory != null) {
+                } else {
+                    val direction = if (page < firstVideoPageIndex) {
+                        VideoDirectoryDirection.Previous
+                    } else {
+                        VideoDirectoryDirection.Next
+                    }
+                    val directory = if (direction == VideoDirectoryDirection.Previous) previousDirectory else nextDirectory
                     VideoDirectoryPage(
-                        directory = previousDirectory,
-                        direction = VideoDirectoryDirection.Previous,
-                        onMove = {
-                            if (previousDirectory.type == VideoDirectoryType.Video) {
-                                viewModel.moveTo(previousDirectory)
-                            } else {
-                                onOpenImageDirectory(previousDirectory.path, previousDirectory.selectedMediaPath)
-                            }
+                        directory = directory,
+                        isSearching = if (direction == VideoDirectoryDirection.Previous) {
+                            !uiState.isPreviousDirectoryKnown
+                        } else {
+                            !uiState.isNextDirectoryKnown
                         },
-                    )
-                } else if (nextDirectory != null) {
-                    VideoDirectoryPage(
-                        directory = nextDirectory,
-                        direction = VideoDirectoryDirection.Next,
+                        direction = direction,
                         onMove = {
-                            if (nextDirectory.type == VideoDirectoryType.Video) {
-                                viewModel.moveTo(nextDirectory)
-                            } else {
-                                onOpenImageDirectory(nextDirectory.path, nextDirectory.selectedMediaPath)
+                            if (directory?.type == VideoDirectoryType.Video) {
+                                viewModel.moveTo(directory)
+                            } else if (directory != null) {
+                                onOpenImageDirectory(directory.path, directory.selectedMediaPath)
                             }
                         },
                     )
@@ -370,6 +376,7 @@ private fun VideoPage(
     onMoveToFirst: () -> Unit,
     onMoveToLast: () -> Unit,
     onEnded: () -> Unit,
+    onPlaybackStarted: () -> Unit,
 ) {
     val context = LocalContext.current
     val preferences = remember { ScrtvwrPreferences(context) }
@@ -408,6 +415,7 @@ private fun VideoPage(
     val latestIsActive by rememberUpdatedState(isActive)
     // The listener lives as long as the player, but the completion action can change meanwhile.
     val latestOnEnded by rememberUpdatedState(onEnded)
+    val latestOnPlaybackStarted by rememberUpdatedState(onPlaybackStarted)
 
     fun saveCurrentPosition() {
         if (prepareRequested || player.playbackState != Player.STATE_IDLE) {
@@ -441,6 +449,10 @@ private fun VideoPage(
                 isPlaying = value
             }
 
+            override fun onRenderedFirstFrame() {
+                latestOnPlaybackStarted()
+            }
+
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) {
                     prepareRequested = true
@@ -463,6 +475,8 @@ private fun VideoPage(
             }
 
             override fun onPlayerError(playbackError: PlaybackException) {
+                // A video that fails has finished with the network as much as one that plays.
+                latestOnPlaybackStarted()
                 prepareRequested = false
                 if (latestIsActive && activeReloadAttempts < ACTIVE_ERROR_RELOAD_ATTEMPTS) {
                     error = null
@@ -1138,12 +1152,18 @@ private fun VideoCompletionAction.next(): VideoCompletionAction = when (this) {
     VideoCompletionAction.RepeatAll -> VideoCompletionAction.Stop
 }
 
+/**
+ * The folder past the first or last video. While [isSearching] it says so with Move disabled; once
+ * known it names the folder, or says there is none.
+ */
 @Composable
 private fun VideoDirectoryPage(
-    directory: VideoDirectoryTarget,
+    directory: VideoDirectoryTarget?,
+    isSearching: Boolean,
     direction: VideoDirectoryDirection,
     onMove: () -> Unit,
 ) {
+    val offersMove = isSearching || directory != null
     Box(
         modifier = Modifier.fillMaxSize().background(Color.Black),
         contentAlignment = Alignment.Center,
@@ -1167,19 +1187,40 @@ private fun VideoDirectoryPage(
                 )
             }
             Text(
-                stringResource(direction.titleStringRes(isArchive = false)),
+                stringResource(
+                    if (offersMove) direction.titleStringRes(isArchive = false) else direction.edgeReachedTitleStringRes(),
+                ),
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium,
             )
-            Text(
-                directory.name,
-                color = Color.White.copy(alpha = 0.7f),
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Button(onClick = onMove) {
-                Text(stringResource(direction.moveStringRes(isArchive = false)))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                if (isSearching) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White.copy(alpha = 0.7f),
+                    )
+                }
+                Text(
+                    when {
+                        isSearching -> stringResource(R.string.finding_source)
+                        directory != null -> directory.name
+                        else -> stringResource(direction.edgeReachedMessageStringRes())
+                    },
+                    color = Color.White.copy(alpha = 0.7f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (offersMove) {
+                Button(onClick = onMove, enabled = !isSearching) {
+                    Text(stringResource(direction.moveStringRes(isArchive = false)))
+                }
             }
         }
     }
@@ -1209,6 +1250,16 @@ private fun VideoDirectoryDirection.titleStringRes(isArchive: Boolean): Int = wh
 private fun VideoDirectoryDirection.moveStringRes(isArchive: Boolean): Int = when (this) {
     VideoDirectoryDirection.Previous -> if (isArchive) R.string.move_previous_archive else R.string.move_previous_directory
     VideoDirectoryDirection.Next -> if (isArchive) R.string.move_next_archive else R.string.move_next_directory
+}
+
+private fun VideoDirectoryDirection.edgeReachedTitleStringRes(): Int = when (this) {
+    VideoDirectoryDirection.Previous -> R.string.reached_first_media
+    VideoDirectoryDirection.Next -> R.string.reached_last_media
+}
+
+private fun VideoDirectoryDirection.edgeReachedMessageStringRes(): Int = when (this) {
+    VideoDirectoryDirection.Previous -> R.string.no_previous_source
+    VideoDirectoryDirection.Next -> R.string.no_next_source
 }
 
 // Folder pages' keys; video pages use their path, which never takes this form.
