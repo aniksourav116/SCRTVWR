@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -112,6 +113,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -128,6 +131,7 @@ import srv.scrtvwr.ui.components.copyLink
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.media.MediaPaths
 import srv.scrtvwr.media.MediaPreviewLoader
+import srv.scrtvwr.media.PreBufferLoadControl
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.media.MediaViewerItem
 import srv.scrtvwr.ui.media.VideoCompletionAction
@@ -253,10 +257,20 @@ private fun VideoPagerScreen(
     // Not restarted by a re-sort: a restart would read the page index from before the pager moved
     // to the video's new place, and select whatever video now sits there.
     val latestVideos by rememberUpdatedState(videos)
+    // Which way browsing last went, +1 down or -1 up; the video that way is the one pre-buffered.
+    var swipeDirection by remember { mutableIntStateOf(1) }
     LaunchedEffect(pagerState) {
+        var lastPage = -1
+        var lastPath: String? = null
         snapshotFlow { pagerState.settledPage }
             .collect { page ->
                 val video = latestVideos.getOrNull(page - firstVideoPageIndex)
+                // A re-sort moves the same video to another index; that is not a swipe.
+                if (lastPage >= 0 && page != lastPage && video?.path != lastPath) {
+                    swipeDirection = if (page > lastPage) 1 else -1
+                }
+                lastPage = page
+                lastPath = video?.path
                 if (video != null) {
                     viewModel.selectVideo(video.path)
                 } else {
@@ -265,6 +279,14 @@ private fun VideoPagerScreen(
                 }
             }
     }
+
+    // The next video in the swipe direction is prepared paused, its first seconds buffered, once
+    // the one on screen is playing; never while server downloads are slow, so it keeps the bandwidth.
+    var startedVideoPath by remember(uiState.loadId) { mutableStateOf<String?>(null) }
+    val remoteDownloadsSlow by MediaPreviewLoader.remoteDownloadsSlow.collectAsStateWithLifecycle()
+    val activeVideoPath = videos.getOrNull(pagerState.settledPage - firstVideoPageIndex)?.path
+    val preBufferPage = (pagerState.settledPage + swipeDirection)
+        .takeIf { activeVideoPath != null && startedVideoPath == activeVideoPath }
 
     Box(
         modifier = Modifier
@@ -307,7 +329,8 @@ private fun VideoPagerScreen(
                         ?: if (page < firstVideoPageIndex) PREVIOUS_FOLDER_PAGE_KEY else NEXT_FOLDER_PAGE_KEY
                 },
                 modifier = Modifier.fillMaxSize(),
-                beyondViewportPageCount = minOf(videoPreloadDistance, pagerState.pageCount - 1),
+                // At least one, so the video to pre-buffer is composed.
+                beyondViewportPageCount = minOf(videoPreloadDistance.coerceAtLeast(1), pagerState.pageCount - 1),
                 userScrollEnabled = !controlsLocked,
             ) { page ->
                 val videoIndex = page - firstVideoPageIndex
@@ -320,6 +343,7 @@ private fun VideoPagerScreen(
                         // The page the pager has stopped on, so videos flung past open no stream
                         // and the one on screen keeps playing while a swipe is still undecided.
                         isActive = page == pagerState.settledPage,
+                        preBuffer = page == preBufferPage && !(remoteDownloadsSlow && MediaPaths.isRemote(item.path)),
                         completionAction = completionAction,
                         onCompletionActionChange = { action ->
                             completionAction = action
@@ -357,7 +381,10 @@ private fun VideoPagerScreen(
                         },
                         // Neighbouring folders are looked for only once the video on screen is
                         // showing, or has failed, so walking other folders never delays it.
-                        onPlaybackStarted = viewModel::findNeighbourDirectories,
+                        onPlaybackStarted = {
+                            if (page == pagerState.settledPage) startedVideoPath = item.path
+                            viewModel.findNeighbourDirectories()
+                        },
                     )
                 } else {
                     val direction = if (page < firstVideoPageIndex) {
@@ -408,12 +435,15 @@ private fun VideoPagerScreen(
     }
 }
 
+// DefaultLoadControl and ExoPlayer.Builder.setLoadControl are unstable Media3 API.
+@OptIn(UnstableApi::class)
 @Composable
 private fun VideoPage(
     item: MediaViewerItem,
     page: Int,
     pageCount: Int,
     isActive: Boolean,
+    preBuffer: Boolean,
     completionAction: VideoCompletionAction,
     onCompletionActionChange: (VideoCompletionAction) -> Unit,
     controlsLocked: Boolean,
@@ -433,11 +463,16 @@ private fun VideoPage(
         // Server files stream through ExoPlayer's HTTP data source straight from their URL.
         MediaItem.fromUri(if (MediaPaths.isRemote(item.path)) Uri.parse(item.path) else Uri.fromFile(File(item.path)))
     }
+    val preBufferControl = remember(item.path) {
+        PreBufferLoadControl(
+            if (MediaPaths.isRemote(item.path)) RemoteVideoPlayback.loadControl() else DefaultLoadControl(),
+        )
+    }
     val player = remember(item.path) {
         val playback = if (MediaPaths.isRemote(item.path)) {
-            RemoteVideoPlayback.player(context)
+            RemoteVideoPlayback.player(context, preBufferControl)
         } else {
-            ExoPlayer.Builder(context).build()
+            ExoPlayer.Builder(context).setLoadControl(preBufferControl).build()
         }
         playback.apply {
             setMediaItem(mediaItem)
@@ -566,8 +601,9 @@ private fun VideoPage(
         firstFrameRendered = false
     }
 
-    LaunchedEffect(isActive, reloadWhenActive, player) {
+    LaunchedEffect(isActive, preBuffer, reloadWhenActive, player) {
         if (isActive) {
+            preBufferControl.preBuffering = false
             player.playWhenReady = true
             if (reloadWhenActive || !prepareRequested || player.playbackState == Player.STATE_IDLE) {
                 if (reloadWhenActive) delay(ACTIVE_ERROR_RELOAD_DELAY_MILLIS)
@@ -575,6 +611,15 @@ private fun VideoPage(
             }
             if (player.playbackState != Player.STATE_ENDED) {
                 player.play()
+            }
+        } else if (preBuffer) {
+            // Prepared paused with only its first seconds loaded, so it starts at once when
+            // reached. A load that failed waits until the page is reached rather than retrying.
+            saveCurrentPosition()
+            preBufferControl.preBuffering = true
+            player.playWhenReady = false
+            if (!reloadWhenActive && (!prepareRequested || player.playbackState == Player.STATE_IDLE)) {
+                preparePlayerForActivePlayback()
             }
         } else {
             saveCurrentPosition()
