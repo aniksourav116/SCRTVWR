@@ -228,6 +228,9 @@ private fun VideoPagerScreen(
         mutableStateOf(selectedPath)
     }
     val loadedDirectory by produceState<VideoDirectory?>(initialValue = null, currentDirectoryPath, selectedPath) {
+        // The state outlives its keys. Clear it, or the pager would scroll and play within the
+        // previous folder's videos, and record them as the selection, while the next one loads.
+        value = null
         value = withContext(Dispatchers.IO) {
             val requestedSelection = selectedPath.takeIf { currentDirectoryPath == directoryPath }
             if (MediaPaths.isRemote(currentDirectoryPath ?: requestedSelection)) {
