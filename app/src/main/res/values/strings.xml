@@ -241,6 +241,7 @@
     <string name="reached_last_media">End reached</string>
     <string name="no_previous_source">You are already at the first media item, and there is no previous directory or archive to open.</string>
     <string name="no_next_source">You are already at the last media item, and there is no next directory or archive to open.</string>
+    <string name="finding_source">Looking for it…</string>
     <string name="previous_media">Previous media</string>
     <string name="next_media">Next media</string>
     <string name="no_media_selected">No image or video selected</string>

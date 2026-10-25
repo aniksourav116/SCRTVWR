@@ -281,6 +281,8 @@ private fun MediaViewerScreen(
     fun showEdgeDialog(direction: SourceDirection) {
         if (uiState.items.isNotEmpty()) {
             edgeDialogDirection = direction
+            // Reaching an edge before the media on screen settled needs the answer now.
+            onFindSources()
         }
     }
 
@@ -829,6 +831,11 @@ private fun MediaViewerScreen(
                 SourceDirection.Previous -> uiState.previousSource
                 SourceDirection.Next -> uiState.nextSource
             },
+            isSearching = when (direction) {
+                SourceDirection.Previous -> !uiState.isPreviousSourceKnown
+                SourceDirection.Next -> !uiState.isNextSourceKnown
+            },
+            isArchiveSource = selectedItem?.path?.let(MediaPaths::archiveEntryName) != null,
             style = uiState.edgeDialogStyle,
             onDismiss = { edgeDialogDirection = null },
             onMove = {
@@ -1376,27 +1383,35 @@ private fun MediaLoadingIndicator(downloadProgress: DownloadProgress?, modifier:
     }
 }
 
+/**
+ * What lies past the first or last item. While [isSearching], the neighbouring source is still
+ * being looked for: the dialog says so with Move disabled, and fills in once the answer arrives.
+ */
 @Composable
 private fun SourceEdgeDialog(
     direction: SourceDirection,
     source: MediaViewerSource?,
+    isSearching: Boolean,
+    isArchiveSource: Boolean,
     style: MediaEdgeDialogStyle,
     onDismiss: () -> Unit,
     onMove: () -> Unit,
 ) {
-    val isArchive = source?.isArchive == true
-    val title = if (source != null) {
+    // Archives lead to archives and folders to folders, so the kind is known before the answer.
+    val isArchive = source?.isArchive ?: isArchiveSource
+    val offersMove = isSearching || source != null
+    val title = if (offersMove) {
         stringResource(direction.titleStringRes(isArchive))
     } else {
         stringResource(direction.edgeReachedTitleStringRes())
     }
-    val message = if (source != null) {
-        source.name
-    } else {
-        stringResource(direction.edgeReachedMessageStringRes())
+    val message = when {
+        isSearching -> stringResource(R.string.finding_source)
+        source != null -> source.name
+        else -> stringResource(direction.edgeReachedMessageStringRes())
     }
     val detail = source?.path
-    val moveLabel = source?.let { stringResource(direction.moveStringRes(isArchive)) }
+    val moveLabel = if (offersMove) stringResource(direction.moveStringRes(isArchive)) else null
 
     if (style == MediaEdgeDialogStyle.Bottom) {
         BottomSourceEdgeDialog(
@@ -1404,6 +1419,7 @@ private fun SourceEdgeDialog(
             message = message,
             detail = null,
             moveLabel = moveLabel,
+            isSearching = isSearching,
             onDismiss = onDismiss,
             onMove = onMove,
         )
@@ -1414,7 +1430,15 @@ private fun SourceEdgeDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            if (source != null) {
+            if (isSearching) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text(message)
+                }
+            } else if (source != null) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(message)
                     Text(detail.orEmpty(), style = MaterialTheme.typography.bodySmall)
@@ -1424,8 +1448,8 @@ private fun SourceEdgeDialog(
             }
         },
         confirmButton = {
-            if (source != null) {
-                Button(onClick = onMove) {
+            if (offersMove) {
+                Button(onClick = onMove, enabled = !isSearching) {
                     Text(moveLabel.orEmpty())
                 }
             } else {
@@ -1435,7 +1459,7 @@ private fun SourceEdgeDialog(
             }
         },
         dismissButton = {
-            if (source != null) {
+            if (offersMove) {
                 TextButton(onClick = onDismiss) {
                     Text(stringResource(R.string.cancel))
                 }
@@ -1450,6 +1474,7 @@ private fun BottomSourceEdgeDialog(
     message: String,
     detail: String?,
     moveLabel: String?,
+    isSearching: Boolean,
     onDismiss: () -> Unit,
     onMove: () -> Unit,
 ) {
@@ -1475,6 +1500,10 @@ private fun BottomSourceEdgeDialog(
                         .padding(start = 14.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    if (isSearching) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(10.dp))
+                    }
                     Column(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(1.dp),
@@ -1506,7 +1535,7 @@ private fun BottomSourceEdgeDialog(
                         Text(stringResource(if (moveLabel == null) R.string.close else R.string.cancel))
                     }
                     moveLabel?.let {
-                        Button(onClick = onMove) {
+                        Button(onClick = onMove, enabled = !isSearching) {
                             Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
