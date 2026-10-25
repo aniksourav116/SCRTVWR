@@ -57,6 +57,14 @@ class ScrtvwrPreferences(context: Context) {
             .apply()
     }
 
+    /** Whether full-screen media fills the screen rather than fitting inside it. */
+    fun getFillFrame(): Boolean =
+        preferences.getBoolean(KEY_FILL_FRAME, false)
+
+    fun saveFillFrame(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_FILL_FRAME, enabled).apply()
+    }
+
     fun getImagePreloadDistance(): Int =
         preferences.getInt(KEY_IMAGE_PRELOAD_DISTANCE, DEFAULT_IMAGE_PRELOAD_DISTANCE)
 
@@ -302,6 +310,7 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_SLIDE_SHOW_DIRECTION = "slide_show_direction"
         const val KEY_SLIDE_SHOW_SKIPS_VIDEOS = "slide_show_skips_videos"
         const val KEY_HOLD_SLIDE_SHOW_SKIPS_VIDEOS = "hold_slide_show_skips_videos"
+        const val KEY_FILL_FRAME = "fill_frame"
         const val KEY_IMAGE_PRELOAD_DISTANCE = "image_preload_distance"
         const val KEY_VIDEO_PRELOAD_DISTANCE = "video_preload_distance"
         const val KEY_VIDEO_COMPLETION_ACTION = "video_completion_action"

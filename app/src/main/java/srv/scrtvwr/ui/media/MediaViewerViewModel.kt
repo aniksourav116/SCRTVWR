@@ -45,6 +45,7 @@ class MediaViewerViewModel(
             holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
             slideShowSkipsVideos = preferences.getSlideShowSkipsVideos(),
             holdSlideShowSkipsVideos = preferences.getHoldSlideShowSkipsVideos(),
+            fillFrame = preferences.getFillFrame(),
             imagePreloadDistance = preferences.getImagePreloadDistance(),
             loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
             edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
@@ -147,6 +148,7 @@ class MediaViewerViewModel(
                 holdSlideShowEnabled = preferences.getHoldSlideShowEnabled(),
                 slideShowSkipsVideos = preferences.getSlideShowSkipsVideos(),
                 holdSlideShowSkipsVideos = preferences.getHoldSlideShowSkipsVideos(),
+                fillFrame = preferences.getFillFrame(),
                 imagePreloadDistance = preferences.getImagePreloadDistance(),
                 loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
                 edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
@@ -415,7 +417,9 @@ class MediaViewerViewModel(
     }
 
     fun toggleFillFrame() {
-        _uiState.update { it.copy(fillFrame = !it.fillFrame) }
+        val enabled = !_uiState.value.fillFrame
+        preferences.saveFillFrame(enabled)
+        _uiState.update { it.copy(fillFrame = enabled) }
     }
 
     fun rotateClockwise() {
