@@ -65,6 +65,11 @@ class VideoPlayerViewModel(
         load(target.path, target.selectedMediaPath)
     }
 
+    /** Reads the folder again, after it could not be listed. */
+    fun retry() {
+        load(savedStateHandle[STATE_DIRECTORY], savedStateHandle[STATE_SELECTED])
+    }
+
     /** Records [path] as the video on screen, for the saved session and a recreated screen. */
     fun selectVideo(path: String) {
         val state = _uiState.value
@@ -136,6 +141,7 @@ class VideoPlayerViewModel(
                     isNextDirectoryKnown = hasNoFolder,
                     isLoading = false,
                     isSorting = folder.needsSorting,
+                    listingError = folder.listingError,
                 )
             }
             if (folder.needsSorting) sortInPlace(sortOrder)
@@ -227,6 +233,8 @@ data class VideoPlayerUiState(
     val isLoading: Boolean = true,
     /** Set while the list waits for the file sizes and times its sort order compares. */
     val isSorting: Boolean = false,
+    /** Why the server would not list the folder, when that left nothing to play. */
+    val listingError: String? = null,
 )
 
 /** A folder next to the player's, opened at [selectedMediaPath]: in the player, or in the viewer for images. */
@@ -247,6 +255,8 @@ private class VideoFolder(
     val videos: List<MediaViewerItem>,
     /** Whether [videos] are in name order only because their sizes and times were not known yet. */
     val needsSorting: Boolean = false,
+    /** Why the server would not list the folder, when that left nothing to play. */
+    val listingError: String? = null,
 )
 
 private fun loadVideoFolder(directoryPath: String?, selectedPath: String?, sortOrder: DirectorySortOrder): VideoFolder {
@@ -270,8 +280,14 @@ private suspend fun loadRemoteVideoFolder(
         ?: return VideoFolder(path = null, videos = emptyList())
     val listed = try {
         MediaCatalog.listRemoteDirectoryUnsorted(directory).videos()
-    } catch (_: IOException) {
-        emptyList()
+    } catch (error: IOException) {
+        // The tapped video can still be tried on its own; with nothing to play, the reason shows.
+        val fallback = selectedPath?.let(MediaCatalog::remoteItem)?.let(::listOf).orEmpty()
+        return VideoFolder(
+            path = directory,
+            videos = fallback,
+            listingError = if (fallback.isEmpty()) error.message ?: error.javaClass.simpleName else null,
+        )
     }
     // Sizes and times cost a request per file. Until they arrive the list shows in name order, the
     // order most folders are browsed in, and sortInPlace sorts it afterwards.

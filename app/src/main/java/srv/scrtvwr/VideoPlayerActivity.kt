@@ -267,6 +267,23 @@ private fun VideoPagerScreen(
     ) {
         when {
             uiState.isLoading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            uiState.listingError != null -> Column(
+                modifier = Modifier.align(Alignment.Center).padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = Color.White.copy(alpha = 0.85f))
+                Text(
+                    stringResource(R.string.http_listing_failed, uiState.listingError.orEmpty()),
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                )
+                Button(onClick = viewModel::retry) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text(stringResource(R.string.retry), modifier = Modifier.padding(start = 8.dp))
+                }
+            }
             videos.isEmpty() -> {
                 Text(
                     stringResource(R.string.no_videos_found),
