@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -31,7 +32,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Refresh
@@ -42,6 +43,8 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -238,7 +241,7 @@ fun Storage(
             if (!context.hasLocalNetworkAccess()) requestLocalNetworkAccess()
         },
         onDisconnectHttpServer = viewModel::disconnectHttpServer,
-        onHttpServerAutoReconnectChange = viewModel::setHttpServerAutoReconnect,
+        onEditHttpServer = viewModel::updateHttpServer,
         onHttpServerCredentialsChange = viewModel::setHttpServerCredentials,
         hasLocalNetworkAccess = hasLocalNetworkAccess,
         onGrantLocalNetworkAccess = requestLocalNetworkAccess,
@@ -265,7 +268,13 @@ fun StorageScreen(
     onRemoveHttpServer: (HttpServer) -> Unit = {},
     onConnectHttpServer: (HttpServer) -> Unit = {},
     onDisconnectHttpServer: (HttpServer) -> Unit = {},
-    onHttpServerAutoReconnectChange: (HttpServer, Boolean) -> Unit = { _, _ -> },
+    onEditHttpServer: (
+        server: HttpServer,
+        name: String,
+        address: String,
+        credentials: HttpCredentials?,
+        autoReconnect: Boolean,
+    ) -> HttpServerInputError? = { _, _, _, _, _ -> null },
     onHttpServerCredentialsChange: (HttpServer, HttpCredentials?) -> Unit = { _, _ -> },
     hasLocalNetworkAccess: Boolean = true,
     onGrantLocalNetworkAccess: () -> Unit = {},
@@ -275,6 +284,7 @@ fun StorageScreen(
     var showAddServerDialog by remember { mutableStateOf(false) }
     var serverPendingRemoval by remember { mutableStateOf<HttpServer?>(null) }
     var serverSigningIn by remember { mutableStateOf<HttpServer?>(null) }
+    var serverBeingEdited by remember { mutableStateOf<HttpServer?>(null) }
 
     var isPullRefreshing by remember { mutableStateOf(false) }
     val isCheckingServers by rememberUpdatedState(
@@ -367,11 +377,10 @@ fun StorageScreen(
                 HttpServerCard(
                     device = device,
                     onClick = { onOpenHttpServer(device.server) },
-                    onRemove = { serverPendingRemoval = device.server },
+                    onEdit = { serverBeingEdited = device.server },
                     onSignIn = { serverSigningIn = device.server },
                     onConnect = { onConnectHttpServer(device.server) },
                     onDisconnect = { onDisconnectHttpServer(device.server) },
-                    onAutoReconnectChange = { enabled -> onHttpServerAutoReconnectChange(device.server, enabled) },
                 )
             }
 
@@ -388,6 +397,22 @@ fun StorageScreen(
                 }
             }
         }
+    }
+
+    serverBeingEdited?.let { server ->
+        EditHttpServerSheet(
+            server = server,
+            onDismiss = { serverBeingEdited = null },
+            onSave = { name, address, credentials, autoReconnect ->
+                onEditHttpServer(server, name, address, credentials, autoReconnect).also { error ->
+                    if (error == null) serverBeingEdited = null
+                }
+            },
+            onRemove = {
+                serverBeingEdited = null
+                serverPendingRemoval = server
+            },
+        )
     }
 
     if (showAddServerDialog) {
@@ -503,11 +528,10 @@ private fun ServerCommand(command: String) {
 private fun HttpServerCard(
     device: HttpServerDevice,
     onClick: () -> Unit,
-    onRemove: () -> Unit,
+    onEdit: () -> Unit,
     onSignIn: () -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
-    onAutoReconnectChange: (Boolean) -> Unit,
 ) {
     ElevatedCard(
         Modifier
@@ -538,11 +562,8 @@ private fun HttpServerCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                IconButton(onClick = onSignIn) {
-                    Icon(Icons.Default.Key, contentDescription = stringResource(R.string.http_server_sign_in_details))
-                }
-                IconButton(onClick = onRemove) {
-                    Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.remove_http_server))
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.edit_http_server))
                 }
             }
             when (val status = device.status) {
@@ -595,23 +616,6 @@ private fun HttpServerCard(
                     )
                     TextButton(onClick = onSignIn) { Text(stringResource(R.string.http_server_sign_in)) }
                 }
-            }
-            Row(
-                modifier = Modifier.padding(end = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.http_server_auto_reconnect))
-                    Text(
-                        stringResource(R.string.http_server_auto_reconnect_summary),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                Switch(
-                    checked = device.server.autoReconnect,
-                    onCheckedChange = onAutoReconnectChange,
-                )
             }
             Row(
                 modifier = Modifier.padding(end = 4.dp),
@@ -754,6 +758,98 @@ private fun AddHttpServerDialog(
             }
         },
     )
+}
+
+/** Name, address, sign-in and auto reconnect of a saved server, with a way to remove it. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditHttpServerSheet(
+    server: HttpServer,
+    onDismiss: () -> Unit,
+    onSave: (name: String, address: String, credentials: HttpCredentials?, autoReconnect: Boolean) -> HttpServerInputError?,
+    onRemove: () -> Unit,
+) {
+    var name by remember { mutableStateOf(server.name) }
+    var address by remember { mutableStateOf(server.baseUrl) }
+    var username by remember { mutableStateOf(server.credentials?.username.orEmpty()) }
+    var password by remember { mutableStateOf(server.credentials?.password.orEmpty()) }
+    var autoReconnect by remember { mutableStateOf(server.autoReconnect) }
+    var error by remember { mutableStateOf<HttpServerInputError?>(null) }
+    val canSave = address.isNotBlank()
+    val save = {
+        error = onSave(name, address, HttpCredentials.of(username, password), autoReconnect)
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .imePadding()
+                .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(stringResource(R.string.edit_http_server), style = MaterialTheme.typography.titleLarge)
+            OutlinedTextField(
+                value = address,
+                onValueChange = {
+                    address = it
+                    error = null
+                },
+                label = { Text(stringResource(R.string.http_server_address)) },
+                supportingText = { Text(error.message(splitInput = false)) },
+                isError = error != null,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text(stringResource(R.string.http_server_name)) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            HttpCredentialsFields(
+                username = username,
+                onUsernameChange = { username = it },
+                password = password,
+                onPasswordChange = { password = it },
+                onDone = { if (canSave) save() },
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.http_server_auto_reconnect))
+                    Text(
+                        stringResource(R.string.http_server_auto_reconnect_summary),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(
+                    checked = autoReconnect,
+                    onCheckedChange = { autoReconnect = it },
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(
+                    onClick = onRemove,
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null)
+                    Text(stringResource(R.string.remove_http_server), Modifier.padding(start = 8.dp))
+                }
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.cancel))
+                }
+                Button(onClick = save, enabled = canSave) {
+                    Text(stringResource(R.string.save))
+                }
+            }
+        }
+    }
 }
 
 /** Changes the username and password sent to [server]; clearing both makes it an open server again. */

@@ -119,20 +119,40 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
         updateServerStatus(server.id, HttpServerStatus.Disconnected)
     }
 
-    fun setHttpServerAutoReconnect(server: HttpServer, enabled: Boolean) {
-        preferences.saveHttpServers(
-            preferences.getHttpServers().map { if (it.id == server.id) it.copy(autoReconnect = enabled) else it },
+    /**
+     * Saves the edited name, address, sign-in and auto reconnect of [server], or returns why
+     * [address] cannot be used. A connected server is checked again with what changed.
+     */
+    fun updateHttpServer(
+        server: HttpServer,
+        name: String,
+        address: String,
+        credentials: HttpCredentials?,
+        autoReconnect: Boolean,
+    ): HttpServerInputError? {
+        val baseUrl = RemotePaths.normalizeServerUrl(address) ?: return HttpServerInputError.InvalidAddress
+        val servers = preferences.getHttpServers()
+        if (servers.any { it.id != server.id && it.baseUrl == baseUrl }) return HttpServerInputError.AlreadyAdded
+
+        val updated = server.copy(
+            name = name.trim().ifBlank { RemotePaths.name(baseUrl) },
+            baseUrl = baseUrl,
+            credentials = credentials,
+            autoReconnect = autoReconnect,
         )
+        preferences.saveHttpServers(servers.map { if (it.id == server.id) updated else it })
         _uiState.update { state ->
             state.copy(
                 httpServers = state.httpServers.map { device ->
-                    if (device.server.id == server.id) device.copy(server = device.server.copy(autoReconnect = enabled)) else device
+                    if (device.server.id == server.id) device.copy(server = updated) else device
                 },
             )
         }
-        // Turning it on for a server that is already down starts the retries straight away.
-        val device = _uiState.value.httpServers.firstOrNull { it.server.id == server.id }
-        if (enabled && device?.status is HttpServerStatus.Offline) checkHttpServer(device.server)
+        if (_uiState.value.httpServers.firstOrNull { it.server.id == server.id }?.isConnected == true) {
+            updateServerStatus(server.id, HttpServerStatus.Checking)
+            checkHttpServer(updated)
+        }
+        return null
     }
 
     /** Saves [credentials], or none for an open server, and checks a connected server again with them. */
