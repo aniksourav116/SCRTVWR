@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -62,6 +63,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -71,6 +73,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -116,6 +119,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -127,6 +131,7 @@ import srv.scrtvwr.media.MediaPaths
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.MediaTypes
 import srv.scrtvwr.media.PreviewResult
+import srv.scrtvwr.preferences.LastMediaSession
 import srv.scrtvwr.MediaViewerActivity
 import srv.scrtvwr.VideoPlayerActivity
 import srv.scrtvwr.R
@@ -349,6 +354,11 @@ fun DirectoryScreen(
                 )
             }
         },
+        floatingActionButton = {
+            uiState.lastMediaSession?.let { session ->
+                ResumeButton(session = session, onClick = onResumeMedia)
+            }
+        },
     ) { contentModifier ->
         Column(
             modifier = contentModifier
@@ -478,6 +488,30 @@ fun DirectoryScreen(
         )
     }
 }
+}
+
+@Composable
+private fun ResumeButton(
+    session: LastMediaSession,
+    onClick: () -> Unit,
+) {
+    // An archive page resumes the archive, so it is named after the archive.
+    val name = MediaPaths.name(session.mediaPath?.substringBefore("::") ?: session.directoryPath)
+    ExtendedFloatingActionButton(
+        onClick = onClick,
+        icon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
+        text = {
+            Column(modifier = Modifier.widthIn(max = 200.dp)) {
+                Text(stringResource(R.string.resume))
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.MiddleEllipsis,
+                )
+            }
+        },
+    )
 }
 
 @Composable
@@ -957,7 +991,7 @@ private fun DirectoryList(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp, end = 28.dp),
+            contentPadding = PaddingValues(top = 4.dp, bottom = uiState.listBottomPadding, end = 28.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (uiState.canNavigateUp) {
@@ -1123,7 +1157,7 @@ private fun DirectoryGrid(
             state = gridState,
             columns = GridCells.Adaptive(112.dp),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = 4.dp, end = 28.dp, bottom = 4.dp),
+            contentPadding = PaddingValues(top = 4.dp, end = 28.dp, bottom = uiState.listBottomPadding),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
@@ -1565,6 +1599,10 @@ private fun DirectoryEntry.typeText(): String =
         mediaType == DirectoryMediaType.Archive -> stringResource(R.string.archive)
         else -> stringResource(R.string.file)
     }
+
+/** Room under the last entry, so the Resume button never covers it. */
+private val DirectoryUiState.listBottomPadding: Dp
+    get() = if (lastMediaSession != null) 88.dp else 16.dp
 
 private fun DirectoryFileOperation.pendingLabelResource(): Int = when (this) {
     DirectoryFileOperation.Copy -> R.string.copy_pending

@@ -32,6 +32,7 @@ fun BaseScaffold(
     showBackButton: Boolean = true,
     onBackClick: () -> Unit = {},
     actions: @Composable () -> Unit = {},
+    floatingActionButton: @Composable () -> Unit = {},
     content: @Composable (Modifier) -> Unit,
 ) {
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -72,6 +73,7 @@ fun BaseScaffold(
                 expandedHeight = if (isLandscape) 48.dp else TopAppBarDefaults.TopAppBarExpandedHeight,
             )
         },
+        floatingActionButton = floatingActionButton,
     ) { padding ->
         content(Modifier.fillMaxSize().then(Modifier.padding(padding)))
     }
