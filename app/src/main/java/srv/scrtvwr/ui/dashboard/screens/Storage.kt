@@ -11,7 +11,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -20,6 +22,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -75,6 +79,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
@@ -549,12 +555,16 @@ private fun HttpServerCard(
             ) {
                 Icon(Icons.Default.Dns, contentDescription = null)
                 Column(Modifier.weight(1f)) {
-                    Text(
-                        device.server.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        HttpServerStatusDot(device)
+                        Text(
+                            device.server.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
                     Text(
                         device.server.baseUrl,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -759,6 +769,31 @@ private fun AddHttpServerDialog(
         },
     )
 }
+
+/**
+ * The server's state at a glance: green online, amber checking or retrying, red when it needs
+ * attention, grey when disconnected. The card's text says the same, so it is not read aloud.
+ */
+@Composable
+private fun HttpServerStatusDot(device: HttpServerDevice) {
+    val color = when (device.status) {
+        is HttpServerStatus.Online -> STATUS_ONLINE_COLOR
+        HttpServerStatus.Checking -> STATUS_PENDING_COLOR
+        is HttpServerStatus.Offline -> if (device.server.autoReconnect) STATUS_PENDING_COLOR else MaterialTheme.colorScheme.error
+        HttpServerStatus.LocalNetworkBlocked,
+        HttpServerStatus.AuthenticationFailed -> MaterialTheme.colorScheme.error
+        HttpServerStatus.Disconnected -> MaterialTheme.colorScheme.outline
+    }
+    Box(
+        modifier = Modifier
+            .size(10.dp)
+            .clip(CircleShape)
+            .background(color),
+    )
+}
+
+private val STATUS_ONLINE_COLOR = Color(0xFF43A047)
+private val STATUS_PENDING_COLOR = Color(0xFFFFB300)
 
 /** Name, address, sign-in and auto reconnect of a saved server, with a way to remove it. */
 @OptIn(ExperimentalMaterial3Api::class)
