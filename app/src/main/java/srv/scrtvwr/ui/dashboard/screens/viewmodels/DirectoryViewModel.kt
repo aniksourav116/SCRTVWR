@@ -178,16 +178,16 @@ class DirectoryViewModel(
 
     fun scrollPositionFor(directoryPath: String): DirectoryScrollPosition? = scrollPositions[directoryPath]
 
-    /**
-     * Rereads preferences and the current directory. [reload] also bypasses the short-lived cache
-     * of HTTP server listings, for an explicit refresh rather than a screen resuming.
-     */
     fun turnOffVideoThumbnails() {
         preferences.saveLoadVideoThumbnails(false)
         MediaPreviewLoader.dismissVideoFrameLoadWarning()
         _uiState.update { it.copy(loadVideoThumbnails = false) }
     }
 
+    /**
+     * Rereads preferences and the current directory. An HTTP server folder already listed is shown
+     * from the cache; only [reload], an explicit refresh, asks the server for it again.
+     */
     fun refresh(reload: Boolean = false) {
         val servers = preferences.getConnectedHttpServers()
         val currentPath = _uiState.value.currentPath

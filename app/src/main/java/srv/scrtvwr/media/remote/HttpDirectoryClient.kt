@@ -24,15 +24,15 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * Reads directory listings and files from HTTP storage servers.
  *
- * Listings are cached briefly so a traversal that revisits folders, or a screen that refreshes
- * on resume, does not hit the server each time, and callers asking for the same folder at once
- * share one request. Sizes and modification times come from one HEAD request per file, so they
- * are only fetched for the files a caller asks about.
+ * Each folder is listed once and kept until a caller asks for a refresh, so the browser, viewer and
+ * player, a screen resuming, or a traversal revisiting folders never wait on the server for a folder
+ * already read, and callers asking for the same folder at once share one request. Sizes and
+ * modification times come from one HEAD request per file, so they are only fetched for the files a
+ * caller asks about.
  */
 object HttpDirectoryClient {
     internal const val CONNECT_TIMEOUT_MILLIS = 15_000
     internal const val READ_TIMEOUT_MILLIS = 60_000
-    private const val LISTING_CACHE_MILLIS = 30_000L
     private const val MAX_LISTING_BYTES = 8L * 1024L * 1024L
     private const val MAX_CACHED_LISTINGS = 256
     private const val MAX_CACHED_METADATA_DIRECTORIES = 64
@@ -40,7 +40,7 @@ object HttpDirectoryClient {
     private const val METADATA_FILL_WORKERS = 4
     private const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
 
-    private val listings = lruMap<String, CachedListing>(MAX_CACHED_LISTINGS)
+    private val listings = lruMap<String, List<RemoteEntry>>(MAX_CACHED_LISTINGS)
     private val listingRequests = ConcurrentHashMap<String, FutureTask<List<RemoteEntry>>>()
 
     // Kept per folder, so filling in one huge folder never evicts the results it just fetched.
@@ -176,8 +176,6 @@ object HttpDirectoryClient {
 
     private fun cachedListing(url: String): List<RemoteEntry>? =
         synchronized(listings) { listings[url] }
-            ?.takeIf { System.currentTimeMillis() - it.fetchedAtMillis < LISTING_CACHE_MILLIS }
-            ?.entries
 
     private fun fetchListing(url: String): List<RemoteEntry> {
         val entries = request(url, method = "GET") { connection ->
@@ -192,7 +190,7 @@ object HttpDirectoryClient {
                 directoryUrl = connection.url.toString(),
             )
         }
-        synchronized(listings) { listings[url] = CachedListing(entries, System.currentTimeMillis()) }
+        synchronized(listings) { listings[url] = entries }
         return entries
     }
 
@@ -267,8 +265,6 @@ object HttpDirectoryClient {
         object : LinkedHashMap<K, V>(16, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?): Boolean = size > maxEntries
         }
-
-    private class CachedListing(val entries: List<RemoteEntry>, val fetchedAtMillis: Long)
 
     private class RemoteFileMetadata(val sizeBytes: Long, val lastModifiedMillis: Long)
 
