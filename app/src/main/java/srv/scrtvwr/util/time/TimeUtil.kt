@@ -11,11 +11,13 @@ object TimeUtil {
         applicationContext = context.applicationContext
     }
 
+    /** [time] in epoch seconds as a date, or "" when it is unknown, such as a server file not asked yet. */
     fun getDateAndTimeWithWeekDay(time : Long? = 0L) : String {
         val updatedTime = (time?: 0L)*1000L
+        if (updatedTime <= 0L) return ""
         val date = DateUtils.formatDateTime(
             requireContext(),
-            if (updatedTime > 0L) updatedTime else System.currentTimeMillis(),
+            updatedTime,
             DateUtils.FORMAT_SHOW_DATE or
                     DateUtils.FORMAT_SHOW_YEAR or
                     DateUtils.FORMAT_ABBREV_ALL or

@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,6 +39,7 @@ class MediaViewerViewModel(
     @Volatile private var loadedSource: ResolvedSource? = null
     @Volatile private var preparedSource: PreparedSource? = null
     @Volatile private var sortJob: Job? = null
+    private var timeJob: Job? = null
     private val _uiState = MutableStateFlow(
         MediaViewerUiState(
             slideShowStayMillis = preferences.getSlideShowStayMillis(),
@@ -324,6 +326,23 @@ class MediaViewerViewModel(
                 bookmarked = preferences.isMediaBookmarked(selectedPath),
             )
         }
+        fetchTimeOfSelectedPage()
+    }
+
+    /**
+     * Asks the server when the file on screen last changed, if its listing did not say. It waits
+     * until the page has stayed a moment, so swiping or a slide show past pages sends no requests.
+     */
+    private fun fetchTimeOfSelectedPage() {
+        timeJob?.cancel()
+        val state = _uiState.value
+        val item = state.itemForPage(state.selectedPage) ?: return
+        if (item.lastModifiedMillis > 0L || item.path in state.fetchedTimes) return
+        timeJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(TIME_FETCH_DELAY_MILLIS)
+            val time = MediaCatalog.remoteLastModifiedMillis(item) ?: return@launch
+            _uiState.update { it.copy(fetchedTimes = it.fetchedTimes + (item.path to time)) }
+        }
     }
 
     /** Remembers a jump over several pages so it can be undone; page-by-page browsing is ignored. */
@@ -505,6 +524,7 @@ class MediaViewerViewModel(
         const val STATE_SOURCE = "media_source"
         const val STATE_REQUESTED_DIRECTORY = "media_requested_directory"
         const val STATE_REQUESTED_SELECTED = "media_requested_selected"
+        const val TIME_FETCH_DELAY_MILLIS = 300L
     }
 }
 
@@ -548,6 +568,8 @@ data class MediaViewerUiState(
     /** Set while an archive on a server downloads before it can be opened. */
     val downloadProgress: DownloadProgress? = null,
     val errorMessage: String? = null,
+    /** Times of server files whose listing gave none, fetched once shown, by path. */
+    val fetchedTimes: Map<String, Long> = emptyMap(),
 ) {
     val pageCount: Int
         get() = items.size
@@ -653,7 +675,11 @@ data class MediaViewerItem(
     val type: MediaViewerType,
     val lastModifiedMillis: Long,
     val sizeBytes: Long,
-)
+) {
+    /** This item with the time [fetchedTimes] holds for it, when its listing gave none. */
+    fun withFetchedTime(fetchedTimes: Map<String, Long>): MediaViewerItem =
+        fetchedTimes[path]?.takeIf { lastModifiedMillis <= 0L }?.let { copy(lastModifiedMillis = it) } ?: this
+}
 
 enum class MediaViewerType {
     Image,

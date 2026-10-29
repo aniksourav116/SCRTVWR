@@ -96,6 +96,15 @@ object MediaCatalog {
             item.copy(sizeBytes = entry.sizeBytes, lastModifiedMillis = entry.lastModifiedMillis)
         }
 
+    /**
+     * When the server file [item] last changed, from the cache or a HEAD request; null for local
+     * files and archive pages, or when the server won't say.
+     */
+    suspend fun remoteLastModifiedMillis(item: MediaViewerItem): Long? {
+        if (!MediaPaths.isRemote(item.path) || MediaPaths.archiveEntryName(item.path) != null) return null
+        return HttpDirectoryClient.withMetadata(item.toRemoteEntry()).lastModifiedMillis.takeIf { it > 0L }
+    }
+
     /** [items] in [sortOrder], by the names, sizes and times they carry; the same order as their listings. */
     fun sorted(items: List<MediaViewerItem>, sortOrder: DirectorySortOrder): List<MediaViewerItem> =
         items.sortedWith(

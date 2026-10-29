@@ -498,7 +498,9 @@ private fun MediaViewerScreen(
     }
 
     val selectedName =  selectedItem?.name?: stringResource(R.string.no_media_selected)
-    val time = TimeUtil.getDateAndTimeWithWeekDay(selectedItem?.timestampSeconds())
+    val time = TimeUtil.getDateAndTimeWithWeekDay(
+        selectedItem?.withFetchedTime(uiState.fetchedTimes)?.timestampSeconds(),
+    )
 
 
     Scaffold(

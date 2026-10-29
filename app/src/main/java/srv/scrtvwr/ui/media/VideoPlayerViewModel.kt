@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,6 +41,7 @@ class VideoPlayerViewModel(
     private var loadJob: Job? = null
     private var neighbourJob: Job? = null
     @Volatile private var sortJob: Job? = null
+    private var timeJob: Job? = null
     private var neighbourSearchLoadId = -1
     // The folder the current list was read from, for finding the folders around it.
     @Volatile private var loadedFolder: LoadedFolder? = null
@@ -73,11 +75,28 @@ class VideoPlayerViewModel(
 
     /** Records [path] as the video on screen, for the saved session and a recreated screen. */
     fun selectVideo(path: String) {
+        fetchTimeOf(path)
         val state = _uiState.value
         if (state.selectedPath == path) return
         savedStateHandle[STATE_SELECTED] = path
         state.directoryPath?.let { preferences.saveLastMediaSession(it, path) }
         _uiState.update { it.copy(selectedPath = path) }
+    }
+
+    /**
+     * Asks the server when the video at [path] last changed, if its listing did not say. It waits
+     * until the video has stayed a moment, so paging quickly past videos sends no requests.
+     */
+    private fun fetchTimeOf(path: String) {
+        timeJob?.cancel()
+        val state = _uiState.value
+        val item = state.videos.firstOrNull { it.path == path } ?: return
+        if (item.lastModifiedMillis > 0L || path in state.fetchedTimes) return
+        timeJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(TIME_FETCH_DELAY_MILLIS)
+            val time = MediaCatalog.remoteLastModifiedMillis(item) ?: return@launch
+            _uiState.update { it.copy(fetchedTimes = it.fetchedTimes + (path to time)) }
+        }
     }
 
     /**
@@ -239,6 +258,7 @@ class VideoPlayerViewModel(
     private companion object {
         const val STATE_DIRECTORY = "video_directory"
         const val STATE_SELECTED = "video_selected"
+        const val TIME_FETCH_DELAY_MILLIS = 300L
     }
 }
 
@@ -260,6 +280,8 @@ data class VideoPlayerUiState(
     val isSorting: Boolean = false,
     /** Why the server would not list the folder, when that left nothing to play. */
     val listingError: String? = null,
+    /** Times of server videos whose listing gave none, fetched once shown, by path. */
+    val fetchedTimes: Map<String, Long> = emptyMap(),
 )
 
 /** A folder next to the player's, opened at [selectedMediaPath]: in the player, or in the viewer for images. */

@@ -362,7 +362,7 @@ private fun VideoPagerScreen(
                 userScrollEnabled = !controlsLocked,
             ) { page ->
                 val videoIndex = page - firstVideoPageIndex
-                val item = videos.getOrNull(videoIndex)
+                val item = videos.getOrNull(videoIndex)?.withFetchedTime(uiState.fetchedTimes)
                 if (item != null) {
                     VideoPage(
                         item = item,
