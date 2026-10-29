@@ -20,6 +20,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -73,6 +74,10 @@ object MediaPreviewLoader {
 
     /** True while recent server downloads have been slow or failing, so fewer should run at once. */
     val remoteDownloadsSlow: StateFlow<Boolean> = _remoteDownloadsSlow.asStateFlow()
+    private val _forgottenPreviews = MutableStateFlow(0)
+
+    /** Counts calls to [forget], so previews already on screen can load again. */
+    val forgottenPreviews: StateFlow<Int> = _forgottenPreviews.asStateFlow()
     private val diskCacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val diskWritesSinceTrim = AtomicInteger()
     @Volatile private var diskCacheDirectory: File? = null
@@ -332,12 +337,40 @@ object MediaPreviewLoader {
         }
     }
 
+    /**
+     * Drops every cached preview of [paths], in memory and on disk. Server previews are cached
+     * without a modification time, so this is how a file replaced under the same name, or a
+     * folder whose first image changed, gets a new thumbnail. Reads the disk, so call it off the
+     * main thread.
+     */
+    fun forget(paths: Collection<String>) {
+        if (paths.isEmpty()) return
+        val forgotten = paths.toHashSet()
+        cache.snapshot().keys.filter { it.previewPath() in forgotten }.forEach(cache::remove)
+        unreadableRemoteVideos.snapshot().keys.filter { it.previewPath() in forgotten }
+            .forEach(unreadableRemoteVideos::remove)
+        val prefixes = forgotten.mapTo(HashSet(), ::diskCachePrefix)
+        diskCacheDirectory?.listFiles()
+            ?.filter { file -> file.name.substringBefore('-', missingDelimiterValue = "") in prefixes }
+            ?.forEach(File::delete)
+        _forgottenPreviews.update { it + 1 }
+    }
+
+    /** The path in a cache key, which reads "kind:path:modified:maxDimension". */
+    private fun String.previewPath(): String =
+        substringAfter(':').substringBeforeLast(':').substringBeforeLast(':')
+
+    // Named after the previewed path first, so [forget] finds every size of a preview.
     private fun diskCacheFile(key: String): File? {
         val directory = diskCacheDirectory ?: return null
-        val digest = MessageDigest.getInstance("SHA-256").digest(key.toByteArray(Charsets.UTF_8))
-        val name = digest.joinToString(separator = "") { byte -> "%02x".format(byte) }
-        return File(directory, "$name.webp")
+        return File(directory, "${diskCachePrefix(key.previewPath())}-${sha256(key)}.webp")
     }
+
+    private fun diskCachePrefix(path: String): String = sha256(path).take(16)
+
+    private fun sha256(value: String): String =
+        MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+            .joinToString(separator = "") { byte -> "%02x".format(byte) }
 
     private fun trimDiskCache() {
         val files = diskCacheDirectory?.listFiles()?.filter(File::isFile)

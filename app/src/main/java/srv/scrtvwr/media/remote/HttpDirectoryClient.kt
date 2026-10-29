@@ -78,6 +78,13 @@ object HttpDirectoryClient {
         return entries
     }
 
+    /** Drops the cached listings of [directoryUrls], so the next [list] of each asks the server. */
+    fun forgetListings(directoryUrls: Collection<String>) {
+        if (directoryUrls.isEmpty()) return
+        val urls = directoryUrls.mapTo(HashSet(), RemotePaths::directoryUrl)
+        synchronized(listings) { listings.keys.removeAll(urls) }
+    }
+
     /** Whether [entry] needs no HEAD request: a folder, or a file whose size and time are cached. */
     fun hasMetadata(entry: RemoteEntry): Boolean = entry.isDirectory || cachedMetadata(entry.url) != null
 

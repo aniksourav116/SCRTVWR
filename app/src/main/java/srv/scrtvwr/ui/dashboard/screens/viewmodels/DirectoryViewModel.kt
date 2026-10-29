@@ -430,6 +430,7 @@ class DirectoryViewModel(
                     mediaFilter = request.mediaFilter,
                     reload = reload,
                 )
+                if (reload) forgetRemotePreviews(listed)
                 listed to (!request.sortOrder.needsFileMetadata || listed.all(HttpDirectoryClient::hasMetadata))
             }
         } catch (error: IOException) {
@@ -692,6 +693,15 @@ private fun remoteExplorerEntries(
         }
         .toList()
     return HttpDirectoryClient.withCachedMetadata(entries)
+}
+
+/**
+ * After an explicit refresh, [entries] get new thumbnails and their folders' tiles list them again,
+ * since the server may have replaced files under the same names. Reads the disk cache.
+ */
+private fun forgetRemotePreviews(entries: List<RemoteEntry>) {
+    HttpDirectoryClient.forgetListings(entries.filter(RemoteEntry::isDirectory).map(RemoteEntry::url))
+    MediaPreviewLoader.forget(entries.map(RemoteEntry::url))
 }
 
 private fun List<RemoteEntry>.toDirectoryListing(sortOrder: DirectorySortOrder): DirectoryListing =

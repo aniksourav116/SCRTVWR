@@ -1549,11 +1549,15 @@ private fun EntryThumbnail(
     val modified = if (isRemote) 0L else entry.lastModifiedMillis
     // Turning the setting off cancels the server reads of tiles already on screen.
     val readsVideoFrame = entry.mediaType == DirectoryMediaType.Video && (loadVideoFrame || !isRemote)
+    // An explicit refresh forgets server previews; the new revision loads the ones on screen again.
+    val forgottenPreviews by MediaPreviewLoader.forgottenPreviews.collectAsStateWithLifecycle()
+    val previewRevision = if (isRemote) forgottenPreviews else 0
     val preview by produceState<PreviewResult?>(
-        initialValue = null,
-        key1 = entry.path,
-        key2 = modified,
-        key3 = entry.isDirectory to readsVideoFrame,
+        null,
+        entry.path,
+        modified,
+        entry.isDirectory to readsVideoFrame,
+        previewRevision,
     ) {
         value = when {
             entry.isDirectory -> MediaPreviewLoader.loadDirectoryThumbnail(entry.path, modified, size * 2)
