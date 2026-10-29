@@ -50,6 +50,7 @@ object MediaPreviewLoader {
     private const val MAX_DISK_CACHE_BYTES = 64L * 1024L * 1024L
     private const val MAX_DISK_CACHE_DIMENSION = 256
     private const val DISK_WRITES_PER_TRIM = 32
+    private const val HEX_DIGITS = "0123456789abcdef"
     // Servers are expected on the local network. Long videos keep a large frame index, at the end
     // for many camera files and every AVI, so the cap only stops files that are clearly broken.
     private const val REMOTE_VIDEO_MAX_BYTES = 32L * 1024L * 1024L
@@ -368,9 +369,16 @@ object MediaPreviewLoader {
 
     private fun diskCachePrefix(path: String): String = sha256(path).take(16)
 
-    private fun sha256(value: String): String =
-        MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
-            .joinToString(separator = "") { byte -> "%02x".format(byte) }
+    // Hex by table: String.format per byte made forgetting a 30,000-file folder take seconds.
+    private fun sha256(value: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+        val hex = CharArray(digest.size * 2)
+        digest.forEachIndexed { index, byte ->
+            hex[index * 2] = HEX_DIGITS[(byte.toInt() shr 4) and 0xF]
+            hex[index * 2 + 1] = HEX_DIGITS[byte.toInt() and 0xF]
+        }
+        return String(hex)
+    }
 
     private fun trimDiskCache() {
         val files = diskCacheDirectory?.listFiles()?.filter(File::isFile)
