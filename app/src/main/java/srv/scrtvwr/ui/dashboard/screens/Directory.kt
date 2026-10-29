@@ -135,6 +135,7 @@ import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.MediaTypes
 import srv.scrtvwr.media.PreviewResult
 import srv.scrtvwr.preferences.LastMediaSession
+import srv.scrtvwr.preferences.DirectoryVideoPlayer
 import srv.scrtvwr.MediaViewerActivity
 import srv.scrtvwr.VideoPlayerActivity
 import srv.scrtvwr.R
@@ -191,6 +192,21 @@ fun Directory(
             ?.getStringExtra(MediaViewerActivity.RESULT_DIRECTORY_PATH)
             ?.let(viewModel::openDirectoryPath)
     }
+    fun openMedia(directoryPath: String, mediaPath: String?, isVideo: Boolean) {
+        val useVideoPlayer = isVideo && uiState.directoryVideoPlayer == DirectoryVideoPlayer.VideoPlayer
+        val activityClass = if (useVideoPlayer) VideoPlayerActivity::class.java else MediaViewerActivity::class.java
+        val intent = Intent(context, activityClass).apply {
+            if (useVideoPlayer) {
+                putExtra(VideoPlayerActivity.EXTRA_DIRECTORY_PATH, directoryPath)
+                putExtra(VideoPlayerActivity.EXTRA_VIDEO_PATH, mediaPath)
+            } else {
+                putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, directoryPath)
+                putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, mediaPath)
+            }
+        }
+        mediaLauncher.launch(intent)
+    }
+
     LaunchedEffect(targetDirectoryPath) {
         val directoryPath = targetDirectoryPath ?: return@LaunchedEffect
         viewModel.openDirectoryPath(directoryPath)
@@ -215,37 +231,13 @@ fun Directory(
         onOpenDirectory = viewModel::openDirectory,
         onOpenRecentDirectory = viewModel::openDirectoryPath,
         onOpenMedia = { entry ->
-            val activityClass = if (entry.mediaType == DirectoryMediaType.Video) {
-                VideoPlayerActivity::class.java
-            } else {
-                MediaViewerActivity::class.java
-            }
-            val intent = Intent(context, activityClass).apply {
-                    if (entry.mediaType == DirectoryMediaType.Video) {
-                        putExtra(VideoPlayerActivity.EXTRA_DIRECTORY_PATH, uiState.currentPath)
-                        putExtra(VideoPlayerActivity.EXTRA_VIDEO_PATH, entry.path)
-                    } else {
-                        putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, uiState.currentPath)
-                        putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, entry.path)
-                    }
-                }
-            mediaLauncher.launch(intent)
+            openMedia(uiState.currentPath, entry.path, entry.mediaType == DirectoryMediaType.Video)
         },
         onOpenWithOtherApp = { entry -> context.openWithOtherApp(entry.path, entry.name) },
         onResumeMedia = {
             uiState.lastMediaSession?.let { session ->
                 val isVideo = session.mediaPath?.let(MediaTypes::isVideo) == true
-                val activityClass = if (isVideo) VideoPlayerActivity::class.java else MediaViewerActivity::class.java
-                val intent = Intent(context, activityClass).apply {
-                        if (isVideo) {
-                            putExtra(VideoPlayerActivity.EXTRA_DIRECTORY_PATH, session.directoryPath)
-                            putExtra(VideoPlayerActivity.EXTRA_VIDEO_PATH, session.mediaPath)
-                        } else {
-                            putExtra(MediaViewerActivity.EXTRA_DIRECTORY_PATH, session.directoryPath)
-                            putExtra(MediaViewerActivity.EXTRA_MEDIA_PATH, session.mediaPath)
-                        }
-                    }
-                mediaLauncher.launch(intent)
+                openMedia(session.directoryPath, session.mediaPath, isVideo)
             }
         },
         onNavigateUp = viewModel::navigateUp,

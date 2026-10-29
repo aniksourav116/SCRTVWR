@@ -134,6 +134,15 @@ class ScrtvwrPreferences(context: Context) {
         preferences.edit().putBoolean(KEY_LOAD_VIDEO_THUMBNAILS, enabled).apply()
     }
 
+    fun getDirectoryVideoPlayer(): DirectoryVideoPlayer =
+        preferences.getString(KEY_DIRECTORY_VIDEO_PLAYER, null)
+            ?.let { value -> DirectoryVideoPlayer.entries.firstOrNull { it.name == value } }
+            ?: DirectoryVideoPlayer.VideoPlayer
+
+    fun saveDirectoryVideoPlayer(player: DirectoryVideoPlayer) {
+        preferences.edit().putString(KEY_DIRECTORY_VIDEO_PLAYER, player.name).apply()
+    }
+
     fun getThemeMode(): ThemeMode =
         preferences.getString(KEY_THEME_MODE, null)
             ?.let { value -> ThemeMode.entries.firstOrNull { it.name == value } }
@@ -164,6 +173,7 @@ class ScrtvwrPreferences(context: Context) {
             .remove(KEY_SHOW_HIDDEN_FILES)
             .remove(KEY_SHOW_DIRECTORY_FILE_ACTIONS)
             .remove(KEY_LOAD_VIDEO_THUMBNAILS)
+            .remove(KEY_DIRECTORY_VIDEO_PLAYER)
             .remove(KEY_MEDIA_EDGE_DIALOG_STYLE)
             .remove(KEY_SLIDE_SHOW_STAY_MILLIS)
             .remove(KEY_SLIDE_SHOW_DIRECTION)
@@ -404,6 +414,7 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
         const val KEY_SHOW_DIRECTORY_FILE_ACTIONS = "show_directory_file_actions"
         const val KEY_LOAD_VIDEO_THUMBNAILS = "load_video_thumbnails"
+        const val KEY_DIRECTORY_VIDEO_PLAYER = "directory_video_player"
         const val KEY_THEME_MODE = "theme_mode"
         const val KEY_GESTURE_TIPS_VIEWER_SEEN = "gesture_tips_viewer_seen"
         const val KEY_GESTURE_TIPS_PLAYER_SEEN = "gesture_tips_player_seen"

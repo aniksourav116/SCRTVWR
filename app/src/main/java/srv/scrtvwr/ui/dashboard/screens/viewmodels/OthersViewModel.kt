@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import srv.scrtvwr.media.MediaPreviewLoader
+import srv.scrtvwr.preferences.DirectoryVideoPlayer
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
@@ -28,6 +29,7 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
             showHiddenFiles = preferences.getShowHiddenFiles(),
             showDirectoryFileActions = preferences.getShowDirectoryFileActions(),
             loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
+            directoryVideoPlayer = preferences.getDirectoryVideoPlayer(),
         )
 
     fun setThemeMode(mode: ThemeMode) {
@@ -63,6 +65,11 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
         val boundedStayMillis = stayMillis.coerceIn(SLIDE_SHOW_STAY_MILLIS_RANGE)
         preferences.saveSlideShowStayMillis(boundedStayMillis)
         _uiState.update { it.copy(slideShowStayMillis = boundedStayMillis) }
+    }
+
+    fun setDirectoryVideoPlayer(player: DirectoryVideoPlayer) {
+        preferences.saveDirectoryVideoPlayer(player)
+        _uiState.update { it.copy(directoryVideoPlayer = player) }
     }
 
     fun setHoldSlideShowEnabled(enabled: Boolean) {
@@ -108,6 +115,7 @@ data class OthersUiState(
     val showHiddenFiles: Boolean = false,
     val showDirectoryFileActions: Boolean = false,
     val loadVideoThumbnails: Boolean = true,
+    val directoryVideoPlayer: DirectoryVideoPlayer = DirectoryVideoPlayer.VideoPlayer,
     val slideShowStayMillis: Long = 100L,
     val holdSlideShowEnabled: Boolean = false,
     val slideShowDirection: SlideShowDirection = SlideShowDirection.Next,

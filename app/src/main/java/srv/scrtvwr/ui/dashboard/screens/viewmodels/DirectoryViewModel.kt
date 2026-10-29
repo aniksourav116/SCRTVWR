@@ -27,6 +27,7 @@ import srv.scrtvwr.media.remote.RemotePaths
 import srv.scrtvwr.media.remote.remoteEntryComparator
 import srv.scrtvwr.media.remote.serverFor
 import srv.scrtvwr.preferences.LastMediaSession
+import srv.scrtvwr.preferences.DirectoryVideoPlayer
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.components.hasLocalNetworkAccess
 import srv.scrtvwr.ui.sort.DirectorySortOrder
@@ -68,6 +69,7 @@ class DirectoryViewModel(
             showHiddenFiles = preferences.getShowHiddenFiles(),
             showDirectoryFileActions = preferences.getShowDirectoryFileActions(),
             loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
+            directoryVideoPlayer = preferences.getDirectoryVideoPlayer(),
             canNavigateUp = initialDirectory.isDifferentDirectory(initialRoot),
             recentDirectories = preferences.getRecentDirectories().validDirectories(preferences.getConnectedHttpServers()),
             lastMediaSession = preferences.getLastMediaSession()?.takeIfValid(preferences.getConnectedHttpServers()),
@@ -202,6 +204,7 @@ class DirectoryViewModel(
                 // Turning file actions off ends a selection, which has nothing left to act on.
                 selectedPaths = if (preferences.getShowDirectoryFileActions()) it.selectedPaths else emptySet(),
                 loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
+                directoryVideoPlayer = preferences.getDirectoryVideoPlayer(),
                 recentDirectories = preferences.getRecentDirectories().validDirectories(servers),
                 lastMediaSession = preferences.getLastMediaSession()?.takeIfValid(servers),
             )
@@ -492,6 +495,7 @@ data class DirectoryUiState(
     val showDirectoryFileActions: Boolean = false,
     /** Whether server videos show their first frame; local videos always do. */
     val loadVideoThumbnails: Boolean = true,
+    val directoryVideoPlayer: DirectoryVideoPlayer = DirectoryVideoPlayer.VideoPlayer,
     val isLoading: Boolean = false,
     /** Server entries are shown by name while the sizes or dates the sort order needs still load. */
     val isSortPending: Boolean = false,

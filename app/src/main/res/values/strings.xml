@@ -113,6 +113,10 @@
     <string name="show_directory_file_actions">Show file actions</string>
     <string name="show_directory_file_actions_summary">Show copy, move, and delete controls in directory listings.</string>
     <string name="load_video_thumbnails">Load video thumbnails</string>
+    <string name="directory_video_player">Open videos with</string>
+    <string name="directory_video_player_summary">Choose the screen for opening and resuming videos from Directory.</string>
+    <string name="directory_video_player_media_viewer">Media Viewer</string>
+    <string name="directory_video_player_video_player">Video Player</string>
     <string name="load_video_thumbnails_summary">Read the first frame of videos on HTTP servers for listings and the viewer. Turn off if browsing a server gets slow.</string>
     <string name="video_frame_load_warning">Video thumbnails are loading slowly from this server. Turning them off keeps browsing quick.</string>
     <string name="video_frame_load_warning_viewer">Video thumbnails are loading slowly. You can turn off Load video thumbnails in Other options.</string>
