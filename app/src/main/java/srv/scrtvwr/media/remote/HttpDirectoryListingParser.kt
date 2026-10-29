@@ -37,13 +37,18 @@ object HttpDirectoryListingParser {
     fun parse(html: String, directoryUrl: String): List<RemoteEntry> {
         val base = runCatching { URI(RemotePaths.directoryUrl(directoryUrl)) }.getOrNull() ?: return emptyList()
         val basePath = base.path.orEmpty()
-        return anchorPattern.findAll(html)
-            .mapNotNull { match ->
-                val href = match.groupValues.drop(1).firstOrNull(String::isNotEmpty) ?: return@mapNotNull null
-                childEntry(base, basePath, unescapeHtml(href))
-            }
-            .distinctBy(RemoteEntry::url)
-            .toList()
+        val entries = LinkedHashMap<String, RemoteEntry>()
+        // One matcher walks the whole page. Regex.findAll starts a new matcher for every link, and
+        // on Android each one copies the page, so a 30,000-entry listing took minutes to read.
+        val matcher = anchorPattern.toPattern().matcher(html)
+        while (matcher.find()) {
+            val href = (1..matcher.groupCount()).firstNotNullOfOrNull { group ->
+                matcher.group(group)?.takeIf(String::isNotEmpty)
+            } ?: continue
+            val entry = childEntry(base, basePath, unescapeHtml(href)) ?: continue
+            entries.putIfAbsent(entry.url, entry)
+        }
+        return entries.values.toList()
     }
 
     private fun childEntry(base: URI, basePath: String, href: String): RemoteEntry? {
