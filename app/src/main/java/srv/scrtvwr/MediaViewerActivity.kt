@@ -348,6 +348,19 @@ private fun MediaViewerScreen(
         isAnySlideShowRunning && activeSlideShowSkipsVideos &&
             uiState.itemForPage(page)?.type == MediaViewerType.Video
 
+    fun pageKey(page: Int): String? = uiState.itemForPage(page)?.readinessKey
+    fun hasStarted(page: Int): Boolean = pageKey(page)?.let { startedMedia[it] == true } == true
+    fun hasSettled(page: Int): Boolean = pageKey(page)?.let { settledMedia[it] == true } == true
+    fun pageDownloadsFromServer(page: Int): Boolean =
+        uiState.itemForPage(page)?.downloadsFromServer(uiState.loadVideoThumbnails) == true
+    val preloadDistance = minOf(uiState.imagePreloadDistance, uiState.lastPageIndex)
+    // A slow server gets one download at a time, close by, until it speeds up again.
+    fun remotePreloadLimits(): RemotePreloadLimits = if (remoteDownloadsSlow) {
+        RemotePreloadLimits(parallel = 1, distance = minOf(SLOW_SERVER_PRELOAD_DISTANCE, preloadDistance))
+    } else {
+        RemotePreloadLimits(parallel = SERVER_PRELOAD_PARALLEL, distance = preloadDistance)
+    }
+
     fun showEdgeDialog(direction: SourceDirection) {
         if (uiState.items.isNotEmpty()) {
             edgeDialogDirection = direction
@@ -479,24 +492,15 @@ private fun MediaViewerScreen(
     val selectedMediaKey = selectedItem?.readinessKey
     val isCurrentMediaZoomed = selectedMediaKey?.let { zoomedMedia[it] == true } == true
     val isCurrentMediaSettled = selectedMediaKey?.let { settledMedia[it] == true } ?: true
-    fun pageKey(page: Int): String? = uiState.itemForPage(page)?.readinessKey
-    val preloadDistance = minOf(uiState.imagePreloadDistance, uiState.lastPageIndex)
     val loadablePages = pagesAllowedToLoad(
         currentPage = pagerState.currentPage,
         pageCount = uiState.pageCount,
         preloadDistance = preloadDistance,
         isCurrentSettled = isCurrentMediaSettled,
-        // A slow server gets one download at a time, close by, until it speeds up again.
-        remote = if (remoteDownloadsSlow) {
-            RemotePreloadLimits(parallel = 1, distance = minOf(SLOW_SERVER_PRELOAD_DISTANCE, preloadDistance))
-        } else {
-            RemotePreloadLimits(parallel = SERVER_PRELOAD_PARALLEL, distance = preloadDistance)
-        },
-        downloadsFromServer = { page ->
-            uiState.itemForPage(page)?.downloadsFromServer(uiState.loadVideoThumbnails) == true
-        },
-        hasStarted = { page -> pageKey(page)?.let { startedMedia[it] == true } == true },
-        hasSettled = { page -> pageKey(page)?.let { settledMedia[it] == true } == true },
+        remote = remotePreloadLimits(),
+        downloadsFromServer = ::pageDownloadsFromServer,
+        hasStarted = ::hasStarted,
+        hasSettled = ::hasSettled,
         isSkipped = ::isSkippedBySlideShow,
     )
 
