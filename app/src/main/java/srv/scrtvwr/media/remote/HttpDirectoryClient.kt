@@ -2,6 +2,7 @@ package srv.scrtvwr.media.remote
 
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.joinAll
@@ -135,8 +136,8 @@ object HttpDirectoryClient {
      * Streams [url] into [target] without a file-size cap. [onProgress] receives the
      * bytes written so far and the length the server announced, or -1 when it sent none.
      * Only a fixed-size buffer is kept in memory; available disk space limits the file.
-     * Cancelling the calling coroutine closes the connection, so a stalled server cannot keep a
-     * cancelled download alive until the read timeout.
+     * Cancelling the calling coroutine closes the connection, even while the server has yet to
+     * answer, so a stalled server cannot keep a cancelled download alive until the read timeout.
      */
     @Throws(IOException::class)
     suspend fun download(
@@ -144,16 +145,22 @@ object HttpDirectoryClient {
         target: File,
         onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> },
     ): Unit = withContext(Dispatchers.IO) {
-        request<Unit>(url, method = "GET") { connection ->
-            // Blocking socket reads ignore thread interrupts; closing the connection ends them.
-            val disconnectOnCancel = launch(start = CoroutineStart.UNDISPATCHED) {
-                try {
-                    awaitCancellation()
-                } finally {
-                    connection.disconnect()
-                }
-            }
-            try {
+        var disconnectOnCancel: Job? = null
+        try {
+            request<Unit>(
+                url,
+                method = "GET",
+                // Blocking socket reads ignore thread interrupts; closing the connection ends them.
+                beforeResponse = { connection ->
+                    disconnectOnCancel = launch(start = CoroutineStart.UNDISPATCHED) {
+                        try {
+                            awaitCancellation()
+                        } finally {
+                            connection.disconnect()
+                        }
+                    }
+                },
+            ) { connection ->
                 val totalBytes = connection.contentLengthLong
                 onProgress(0L, totalBytes)
                 var downloadedBytes = 0L
@@ -171,13 +178,13 @@ object HttpDirectoryClient {
                     }
                 }
                 if (totalBytes >= 0 && downloadedBytes != totalBytes) throw IOException("Download ended early")
-            } catch (error: IOException) {
-                // A read failing because cancellation closed the connection is a cancellation.
-                ensureActive()
-                throw error
-            } finally {
-                disconnectOnCancel.cancel()
             }
+        } catch (error: IOException) {
+            // A request failing because cancellation closed the connection is a cancellation.
+            ensureActive()
+            throw error
+        } finally {
+            disconnectOnCancel?.cancel()
         }
     }
 
@@ -222,7 +229,16 @@ object HttpDirectoryClient {
         return value
     }
 
-    private fun <T> request(url: String, method: String, read: (HttpURLConnection) -> T): T {
+    /**
+     * Sends [method] to [url] and hands the answer to [read]. [beforeResponse] gets the connection
+     * once it is set up, before the wait for the server to answer.
+     */
+    private fun <T> request(
+        url: String,
+        method: String,
+        beforeResponse: (HttpURLConnection) -> Unit = {},
+        read: (HttpURLConnection) -> T,
+    ): T {
         val connection = try {
             URL(url).openConnection() as HttpURLConnection
         } catch (error: IllegalArgumentException) {
@@ -234,6 +250,7 @@ object HttpDirectoryClient {
             connection.readTimeout = READ_TIMEOUT_MILLIS
             connection.instanceFollowRedirects = true
             HttpServerAuth.authorizationFor(url)?.let { connection.setRequestProperty("Authorization", it) }
+            beforeResponse(connection)
             val status = connection.responseCode
             if (status == HttpURLConnection.HTTP_UNAUTHORIZED) throw HttpAuthenticationException()
             if (status !in 200..299) {
