@@ -319,10 +319,12 @@ private fun MediaViewerScreen(
     var pseudoSlideShowHorizontalFraction by remember { mutableFloatStateOf(0f) }
     var pseudoSlideShowPageOffset by remember { mutableStateOf(1) }
     var pseudoSlideShowStartPage by remember { mutableStateOf<Int?>(null) }
-    // Pages whose load has started, and finished with or without a picture. Keyed by load, not by
-    // list: sorting the list again keeps its pages and what they loaded.
+    // Pages whose load has started, finished with or without a picture, and finished without the
+    // picture they were loading. Keyed by load, not by list: sorting the list again keeps its pages
+    // and what they loaded.
     val startedMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
     val settledMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
+    val failedMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
     val remoteDownloadsSlow by MediaPreviewLoader.remoteDownloadsSlow.collectAsStateWithLifecycle()
     val zoomedMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
     var zoomCommand by remember { mutableStateOf<ZoomCommand?>(null) }
@@ -899,7 +901,14 @@ private fun MediaViewerScreen(
                             onScreen = page == pagerState.currentPage,
                             mayLoad = page in loadablePages,
                             onLoadStarted = { startedMedia[item.readinessKey] = true },
-                            onSettled = { settledMedia[item.readinessKey] = true },
+                            onSettled = { failed ->
+                                settledMedia[item.readinessKey] = true
+                                if (failed) {
+                                    failedMedia[item.readinessKey] = true
+                                } else {
+                                    failedMedia.remove(item.readinessKey)
+                                }
+                            },
                             onZoomChanged = { zoomed ->
                                 if (zoomed) {
                                     zoomedMedia[item.readinessKey] = true
@@ -1240,7 +1249,7 @@ private fun MediaPage(
     onScreen: Boolean,
     mayLoad: Boolean,
     onLoadStarted: () -> Unit,
-    onSettled: () -> Unit,
+    onSettled: (failed: Boolean) -> Unit,
     onZoomChanged: (Boolean) -> Unit,
     onContentClick: () -> Unit,
     onBookmark: () -> Unit,
@@ -1270,7 +1279,8 @@ private fun MediaPage(
         }
 
         LaunchedEffect(preview, item.path, item.contentStamp) {
-            if (preview != null) onSettled()
+            // A video read without its frame shows all it has, so only a frame that did not come failed.
+            preview?.let { onSettled(readsFrame && it.bitmap == null) }
         }
 
         Box(
@@ -1336,7 +1346,7 @@ private fun MediaPage(
     }
 
     LaunchedEffect(preview, item.path, item.contentStamp) {
-        if (preview != null) onSettled()
+        preview?.let { onSettled(it.bitmap == null) }
     }
 
     var imageScale by remember(item.path, item.contentStamp) { mutableFloatStateOf(MIN_IMAGE_ZOOM) }
