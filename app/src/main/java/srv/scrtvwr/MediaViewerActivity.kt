@@ -141,6 +141,7 @@ import srv.scrtvwr.ui.components.openWithOtherApp
 import srv.scrtvwr.ui.components.GestureTip
 import srv.scrtvwr.ui.components.GestureTipsScreen
 import srv.scrtvwr.media.MediaPreviewLoader
+import srv.scrtvwr.media.PrefetchKind
 import srv.scrtvwr.media.remote.DownloadProgress
 import srv.scrtvwr.media.PreviewResult
 import srv.scrtvwr.ui.components.BookmarkFlash
@@ -151,8 +152,11 @@ import srv.scrtvwr.ui.media.MediaViewerSource
 import srv.scrtvwr.ui.media.MediaViewerType
 import srv.scrtvwr.ui.media.MediaViewerUiState
 import srv.scrtvwr.ui.media.MediaViewerViewModel
+import srv.scrtvwr.ui.media.PrefetchItem
+import srv.scrtvwr.ui.media.PrefetchSnapshot
 import srv.scrtvwr.ui.media.RemotePreloadLimits
 import srv.scrtvwr.ui.media.SlideShowDirection
+import srv.scrtvwr.ui.media.SlideShowPrefetcher
 import srv.scrtvwr.ui.media.pageOffset
 import srv.scrtvwr.ui.media.pagesAllowedToLoad
 import srv.scrtvwr.ui.sort.DirectorySortOrder
@@ -325,6 +329,11 @@ private fun MediaViewerScreen(
     val startedMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
     val settledMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
     val remoteDownloadsSlow by MediaPreviewLoader.remoteDownloadsSlow.collectAsStateWithLifecycle()
+    // Server files kept on the device; a page with one decodes it rather than downloading.
+    val viewerCopies by MediaPreviewLoader.viewerCopies.collectAsStateWithLifecycle()
+    // Fetches ahead of a running show. Kept while the viewer is open, so what it learned about
+    // the server's pace carries over to the next show.
+    val slideShowPrefetcher = remember { SlideShowPrefetcher(maxDimension = VIEWER_MAX_DIMENSION) }
     val zoomedMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
     var zoomCommand by remember { mutableStateOf<ZoomCommand?>(null) }
     // The last picture shown on a page the pager came to rest on. A page landed on before its own
@@ -484,25 +493,68 @@ private fun MediaViewerScreen(
     val isCurrentMediaZoomed = selectedMediaKey?.let { zoomedMedia[it] == true } == true
     val isCurrentMediaSettled = selectedMediaKey?.let { settledMedia[it] == true } ?: true
     fun pageKey(page: Int): String? = uiState.itemForPage(page)?.readinessKey
+    fun isPageSettled(page: Int): Boolean = pageKey(page)?.let { settledMedia[it] == true } == true
+    fun prefetchItemFor(page: Int): PrefetchItem? = uiState.itemForPage(page)?.prefetchItem(uiState.loadVideoThumbnails)
+    // Whether loading the page still downloads from a server: a server page without a copy kept.
+    fun needsDownload(page: Int): Boolean {
+        val item = prefetchItemFor(page) ?: return false
+        return !MediaPreviewLoader.isViewerCopy(
+            viewerCopies,
+            item.url,
+            video = item.kind == PrefetchKind.VideoFrame,
+            maxDimension = VIEWER_MAX_DIMENSION,
+        )
+    }
     val preloadDistance = minOf(uiState.imagePreloadDistance, uiState.lastPageIndex)
     val loadablePages = pagesAllowedToLoad(
         currentPage = pagerState.currentPage,
         pageCount = uiState.pageCount,
         preloadDistance = preloadDistance,
         isCurrentSettled = isCurrentMediaSettled,
-        // A slow server gets one download at a time, close by, until it speeds up again.
-        remote = if (remoteDownloadsSlow) {
-            RemotePreloadLimits(parallel = 1, distance = minOf(SLOW_SERVER_PRELOAD_DISTANCE, preloadDistance))
-        } else {
-            RemotePreloadLimits(parallel = SERVER_PRELOAD_PARALLEL, distance = preloadDistance)
+        remote = when {
+            // A show's server pages are fetched by its prefetcher, in the order the show needs
+            // them; nearby pages load once their copy is in.
+            isAnySlideShowRunning -> RemotePreloadLimits(parallel = 0, distance = 0)
+            // A slow server gets one download at a time, close by, until it speeds up again.
+            remoteDownloadsSlow -> RemotePreloadLimits(
+                parallel = 1,
+                distance = minOf(SLOW_SERVER_PRELOAD_DISTANCE, preloadDistance),
+            )
+            else -> RemotePreloadLimits(parallel = SERVER_PRELOAD_PARALLEL, distance = preloadDistance)
         },
-        downloadsFromServer = { page ->
-            uiState.itemForPage(page)?.downloadsFromServer(uiState.loadVideoThumbnails) == true
-        },
+        downloadsFromServer = ::needsDownload,
         hasStarted = { page -> pageKey(page)?.let { startedMedia[it] == true } == true },
-        hasSettled = { page -> pageKey(page)?.let { settledMedia[it] == true } == true },
+        hasSettled = ::isPageSettled,
         isSkipped = ::isSkippedBySlideShow,
     )
+
+    // Fetches ahead of the show, in the direction it moves, for as long as it runs. Restarted
+    // with the show itself, and with a new list, whose pages are other files.
+    LaunchedEffect(
+        isAnySlideShowRunning,
+        activeSlideShowPageOffset,
+        activeSlideShowSkipsVideos,
+        uiState.items,
+        uiState.loadVideoThumbnails,
+        pagerState,
+    ) {
+        if (!isAnySlideShowRunning) return@LaunchedEffect
+        slideShowPrefetcher.run(
+            snapshots = snapshotFlow {
+                val page = pagerState.currentPage
+                PrefetchSnapshot(
+                    currentPage = page,
+                    pageOffset = activeSlideShowPageOffset,
+                    isCurrentSettled = uiState.itemForPage(page) == null || isPageSettled(page),
+                    stayMillis = latestSlideShowStayMillis,
+                )
+            },
+            pageCount = uiState.pageCount,
+            itemFor = ::prefetchItemFor,
+            isSettled = ::isPageSettled,
+            isSkipped = ::isSkippedBySlideShow,
+        )
+    }
 
     // Neighbouring sources are looked for only once the media on screen is done, so walking other
     // folders never competes with it.
@@ -1272,7 +1324,7 @@ private fun MediaPage(
             snapshotFlow { latestMayLoad }.first { it }
             latestOnLoadStarted()
             value = if (readsFrame) {
-                MediaPreviewLoader.loadVideoFrame(item.path, item.contentStamp, 1600, onScreen = latestOnScreen)
+                MediaPreviewLoader.loadVideoFrame(item.path, item.contentStamp, VIEWER_MAX_DIMENSION, onScreen = latestOnScreen)
             } else {
                 PreviewResult()
             }
@@ -1346,7 +1398,7 @@ private fun MediaPage(
     val preview by produceState<PreviewResult?>(initialValue = null, key1 = item.path, key2 = item.contentStamp) {
         snapshotFlow { latestMayLoad }.first { it }
         latestOnLoadStarted()
-        value = MediaPreviewLoader.loadImage(item.path, item.contentStamp, 1600, onScreen = latestOnScreen)
+        value = MediaPreviewLoader.loadImage(item.path, item.contentStamp, VIEWER_MAX_DIMENSION, onScreen = latestOnScreen)
     }
 
     LaunchedEffect(preview, item.path, item.contentStamp) {
@@ -1530,6 +1582,17 @@ private fun MediaViewerItem.downloadsFromServer(loadVideoFrames: Boolean): Boole
     MediaPaths.isRemote(path) &&
         MediaPaths.archiveEntryName(path) == null &&
         (type == MediaViewerType.Image || loadVideoFrames)
+
+/** The server file this page downloads, for fetching ahead of a show, or null when it downloads none. */
+private fun MediaViewerItem.prefetchItem(loadVideoFrames: Boolean): PrefetchItem? =
+    if (downloadsFromServer(loadVideoFrames)) {
+        PrefetchItem(path, if (type == MediaViewerType.Video) PrefetchKind.VideoFrame else PrefetchKind.Image)
+    } else {
+        null
+    }
+
+// Longest side, in pixels, viewer pages decode their pictures at.
+private const val VIEWER_MAX_DIMENSION = 1600
 
 // Server downloads running at once beyond the page on screen, and how far a slow server preloads.
 private const val SERVER_PRELOAD_PARALLEL = 3
