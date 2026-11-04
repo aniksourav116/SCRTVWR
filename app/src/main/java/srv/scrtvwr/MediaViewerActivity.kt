@@ -1291,7 +1291,10 @@ private fun MediaPage(
                     contentScale = if (fillFrame) ContentScale.Crop else ContentScale.Fit,
                 )
             }
-            if (preview != null && preview?.bitmap == null) {
+            if (preview == null) {
+                // Around the play button, so a frame still loading shows as loading, not as black.
+                CircularProgressIndicator(color = Color.White, modifier = Modifier.size(96.dp))
+            } else if (preview?.bitmap == null) {
                 Icon(
                     Icons.Default.ImageNotSupported,
                     contentDescription = null,
