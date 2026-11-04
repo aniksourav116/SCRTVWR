@@ -1,6 +1,8 @@
 package srv.scrtvwr.ui.media
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PageLoadPlanTest {
@@ -93,6 +95,47 @@ class PageLoadPlanTest {
         // 6 is skipped, so the one slot goes to 4.
         assertEquals(setOf(5, 4), allowed)
     }
+
+    @Test
+    fun nothingLoadsBesideAPageOnScreenThatHasNotSettled() {
+        assertFalse(loadsBeside(page = 6, currentPage = 5, isCurrentSettled = false, server = { false }))
+        assertTrue(loadsBeside(page = 5, currentPage = 5, isCurrentSettled = false, server = { true }))
+    }
+
+    @Test
+    fun pagesLoadBesideOnlyWithinThePreloadDistance() {
+        assertTrue(loadsBeside(page = 7, currentPage = 5, preloadDistance = 2, server = { false }))
+        assertFalse(loadsBeside(page = 8, currentPage = 5, preloadDistance = 2, server = { false }))
+        assertFalse(loadsBeside(page = 6, currentPage = 5, preloadDistance = 0, server = { false }))
+    }
+
+    @Test
+    fun serverPagesLoadBesideWithinTheServerDistanceOrOnceStarted() {
+        val slow = RemotePreloadLimits(parallel = 1, distance = 1)
+
+        // Within the server distance a page loads as soon as a download slot is free.
+        assertTrue(loadsBeside(page = 6, currentPage = 5, remote = slow, server = { true }))
+        assertFalse(loadsBeside(page = 7, currentPage = 5, remote = slow, server = { true }))
+        assertTrue(loadsBeside(page = 7, currentPage = 5, remote = slow, server = { true }, started = { it == 7 }))
+    }
+
+    private fun loadsBeside(
+        page: Int,
+        currentPage: Int,
+        preloadDistance: Int = 5,
+        isCurrentSettled: Boolean = true,
+        remote: RemotePreloadLimits = roomy,
+        server: (Int) -> Boolean,
+        started: (Int) -> Boolean = { false },
+    ): Boolean = loadsBesidePage(
+        page = page,
+        currentPage = currentPage,
+        preloadDistance = preloadDistance,
+        isCurrentSettled = isCurrentSettled,
+        remote = remote,
+        downloadsFromServer = server,
+        hasStarted = started,
+    )
 
     private fun plan(
         currentPage: Int,

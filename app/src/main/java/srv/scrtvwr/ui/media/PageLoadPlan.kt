@@ -37,3 +37,23 @@ internal fun pagesAllowedToLoad(
     }
     return allowed
 }
+
+/**
+ * Whether [page], one a slide show does not skip, loads while [currentPage] stays on screen: now,
+ * or once the downloads before it make room, by the rules of [pagesAllowedToLoad].
+ */
+internal fun loadsBesidePage(
+    page: Int,
+    currentPage: Int,
+    preloadDistance: Int,
+    isCurrentSettled: Boolean,
+    remote: RemotePreloadLimits,
+    downloadsFromServer: (page: Int) -> Boolean,
+    hasStarted: (page: Int) -> Boolean,
+): Boolean {
+    val distance = kotlin.math.abs(page - currentPage)
+    if (distance == 0) return true
+    return isCurrentSettled &&
+        distance <= preloadDistance &&
+        (!downloadsFromServer(page) || hasStarted(page) || distance <= remote.distance)
+}

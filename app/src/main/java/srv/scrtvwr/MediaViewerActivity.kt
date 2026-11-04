@@ -152,6 +152,9 @@ import srv.scrtvwr.ui.media.MediaViewerUiState
 import srv.scrtvwr.ui.media.MediaViewerViewModel
 import srv.scrtvwr.ui.media.RemotePreloadLimits
 import srv.scrtvwr.ui.media.SlideShowDirection
+import srv.scrtvwr.ui.media.SlideShowStep
+import srv.scrtvwr.ui.media.loadsBesidePage
+import srv.scrtvwr.ui.media.nextSlideShowStep
 import srv.scrtvwr.ui.media.pageOffset
 import srv.scrtvwr.ui.media.pagesAllowedToLoad
 import srv.scrtvwr.ui.sort.DirectorySortOrder
@@ -353,6 +356,7 @@ private fun MediaViewerScreen(
     fun pageKey(page: Int): String? = uiState.itemForPage(page)?.readinessKey
     fun hasStarted(page: Int): Boolean = pageKey(page)?.let { startedMedia[it] == true } == true
     fun hasSettled(page: Int): Boolean = pageKey(page)?.let { settledMedia[it] == true } == true
+    fun hasFailed(page: Int): Boolean = pageKey(page)?.let { failedMedia[it] == true } == true
     fun pageDownloadsFromServer(page: Int): Boolean =
         uiState.itemForPage(page)?.downloadsFromServer(uiState.loadVideoThumbnails) == true
     val preloadDistance = minOf(uiState.imagePreloadDistance, uiState.lastPageIndex)
@@ -432,6 +436,33 @@ private fun MediaViewerScreen(
     // finger, which changes with every small movement, never starts the page's stay over.
     val latestSlideShowStayMillis by rememberUpdatedState(activeSlideShowStayMillis)
 
+    // The show's next step from [page], or null once something else moves the pager off it.
+    suspend fun awaitSlideShowStep(page: Int, passLoading: Boolean): SlideShowStep? = snapshotFlow {
+        if (pagerState.currentPage != page) {
+            null
+        } else {
+            nextSlideShowStep(
+                upcoming = generateSequence(page + activeSlideShowPageOffset) { it + activeSlideShowPageOffset }
+                    .takeWhile { it in uiState.items.indices }
+                    .filterNot(::isSkippedBySlideShow),
+                loadsBeside = { upcomingPage ->
+                    loadsBesidePage(
+                        page = upcomingPage,
+                        currentPage = page,
+                        preloadDistance = preloadDistance,
+                        isCurrentSettled = hasSettled(page),
+                        remote = remotePreloadLimits(),
+                        downloadsFromServer = ::pageDownloadsFromServer,
+                        hasStarted = ::hasStarted,
+                    )
+                },
+                hasSettled = ::hasSettled,
+                hasFailed = ::hasFailed,
+                passLoading = passLoading,
+            )
+        }
+    }.first { it != SlideShowStep.Wait }
+
     // One loop for the whole show, rather than an effect restarted by each page change: a scroll
     // that something else took over, or a page the viewer moved to by itself, cannot end the show,
     // which goes on from whatever page is on screen.
@@ -454,9 +485,11 @@ private fun MediaViewerScreen(
 
             // A skipped video, such as one the show started on, moves on without a stay.
             if (!isSkippedBySlideShow(currentPage)) {
-                // A page that failed to load counts too, so a broken file never stops the show, and
-                // so does one still loading after a while, so a stalled download cannot hold the
-                // show on an empty page.
+                // Usually loaded already, as the show goes on only to pages that have, except the
+                // page it started on, one something else moved to, or one that loads only once on
+                // screen. A page that failed to load counts too, so a broken file never stops the
+                // show, and so does one still loading after a while, so a stalled download cannot
+                // hold the show on an empty page.
                 withTimeoutOrNull(SLIDE_SHOW_LOAD_WAIT_MILLIS.milliseconds) {
                     snapshotFlow { settledMedia[currentItem.readinessKey] == true }.first { it }
                 }
@@ -465,18 +498,26 @@ private fun MediaViewerScreen(
                 awaitSlideShowStay { latestSlideShowStayMillis }
             }
 
-            // Moved meanwhile by something else: the show goes on from the page now on screen.
-            if (pagerState.currentPage != currentPage) continue
-            val requestedPage = generateSequence(currentPage + activeSlideShowPageOffset) { it + activeSlideShowPageOffset }
-                .takeWhile { it in uiState.items.indices }
-                .firstOrNull { !isSkippedBySlideShow(it) }
-            if (requestedPage == null) {
-                if (isPseudoSlideShowRunning) {
-                    stopPseudoSlideShow()
-                } else {
-                    onSlideShowStop()
+            // The page on screen stays until the next one has loaded, and pages that failed are
+            // passed over, so the show never turns to an empty page. One still loading after a
+            // while gives way to a later page that has loaded, so a stalled download cannot hold
+            // the show either. The first wait's null can also mean the pager moved, which the second
+            // wait then reports at once.
+            val step = withTimeoutOrNull(SLIDE_SHOW_LOAD_WAIT_MILLIS.milliseconds) {
+                awaitSlideShowStep(currentPage, passLoading = false)
+            } ?: awaitSlideShowStep(currentPage, passLoading = true)
+            val requestedPage = when (step) {
+                is SlideShowStep.Show -> step.page
+                SlideShowStep.End -> {
+                    if (isPseudoSlideShowRunning) {
+                        stopPseudoSlideShow()
+                    } else {
+                        onSlideShowStop()
+                    }
+                    return@LaunchedEffect
                 }
-                return@LaunchedEffect
+                // Moved meanwhile by something else: the show goes on from the page now on screen.
+                SlideShowStep.Wait, null -> continue
             }
             try {
                 pagerState.scrollToPage(requestedPage)
@@ -1505,7 +1546,8 @@ private fun MediaViewerItem.downloadsFromServer(loadVideoFrames: Boolean): Boole
 private const val SERVER_PRELOAD_PARALLEL = 3
 private const val SLOW_SERVER_PRELOAD_DISTANCE = 2
 
-// How long a slide show waits for the page on screen to load before going on without it.
+// How long a slide show waits for a page to load before going on without it: the page on screen,
+// or the next one, which then gives way to a later page that has loaded.
 private const val SLIDE_SHOW_LOAD_WAIT_MILLIS = 5_000L
 
 /**
