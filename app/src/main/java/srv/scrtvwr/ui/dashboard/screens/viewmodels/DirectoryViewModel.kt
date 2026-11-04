@@ -32,6 +32,8 @@ import srv.scrtvwr.ui.components.hasLocalNetworkAccess
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.sort.fileComparator
 import srv.scrtvwr.ui.sort.needsFileMetadata
+import srv.scrtvwr.ui.sort.onServer
+import srv.scrtvwr.ui.sort.sortOrdersFor
 import java.io.File
 import java.io.IOException
 
@@ -65,6 +67,7 @@ class DirectoryViewModel(
                 ?.let { value -> DirectoryMediaFilter.entries.firstOrNull { it.name == value } }
                 ?: DirectoryMediaFilter.All,
             sortOrder = preferences.getDirectorySortOrder(),
+            serverDetailSorting = preferences.getServerDetailSorting(),
             showHiddenFiles = preferences.getShowHiddenFiles(),
             showDirectoryFileActions = preferences.getShowDirectoryFileActions(),
             loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
@@ -202,6 +205,7 @@ class DirectoryViewModel(
                 // Turning file actions off ends a selection, which has nothing left to act on.
                 selectedPaths = if (preferences.getShowDirectoryFileActions()) it.selectedPaths else emptySet(),
                 loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
+                serverDetailSorting = preferences.getServerDetailSorting(),
                 recentDirectories = preferences.getRecentDirectories().validDirectories(servers),
                 lastMediaSession = preferences.getLastMediaSession()?.takeIfValid(servers),
             )
@@ -419,8 +423,10 @@ class DirectoryViewModel(
     /**
      * Shows the server listing as soon as it downloads. A date or size order needs every file's
      * HEAD request first, so until those finish the entries are shown by name and then re-sorted.
+     * With server detail sorting off the order is never one of those, so no such request is made.
      */
     private suspend fun scanRemoteDirectory(request: DirectoryUiState, reload: Boolean) {
+        val sortOrder = request.effectiveSortOrder
         val (entries, sortable) = try {
             withContext(Dispatchers.IO) {
                 val listed = remoteExplorerEntries(
@@ -431,14 +437,14 @@ class DirectoryViewModel(
                     reload = reload,
                 )
                 if (reload) forgetRemotePreviews(listed)
-                listed to (!request.sortOrder.needsFileMetadata || listed.all(HttpDirectoryClient::hasMetadata))
+                listed to (!sortOrder.needsFileMetadata || listed.all(HttpDirectoryClient::hasMetadata))
             }
         } catch (error: IOException) {
             publishListing(request, remoteListingFailure(error, app))
             return
         }
         if (sortable) {
-            publishListing(request, withContext(Dispatchers.Default) { entries.toDirectoryListing(request.sortOrder) })
+            publishListing(request, withContext(Dispatchers.Default) { entries.toDirectoryListing(sortOrder) })
             return
         }
         publishListing(
@@ -447,13 +453,14 @@ class DirectoryViewModel(
             isSortPending = true,
         )
         val filled = HttpDirectoryClient.withMetadata(entries)
-        publishListing(request, withContext(Dispatchers.Default) { filled.toDirectoryListing(request.sortOrder) })
+        publishListing(request, withContext(Dispatchers.Default) { filled.toDirectoryListing(sortOrder) })
     }
 
     private fun publishListing(request: DirectoryUiState, listing: DirectoryListing, isSortPending: Boolean = false) {
         _uiState.update { current ->
             if (current.currentPath != request.currentPath ||
-                current.searchQuery != request.searchQuery || current.sortOrder != request.sortOrder ||
+                current.searchQuery != request.searchQuery ||
+                current.effectiveSortOrder != request.effectiveSortOrder ||
                 current.mediaFilter != request.mediaFilter
             ) current else current.copy(
                 directoryListing = listing,
@@ -484,7 +491,10 @@ data class DirectoryUiState(
     val directoryListing: DirectoryListing = DirectoryListing(entries = emptyList()),
     val viewMode: DirectoryViewMode = DirectoryViewMode.List,
     val mediaFilter: DirectoryMediaFilter = DirectoryMediaFilter.All,
+    /** The saved order; [effectiveSortOrder] is the one the listing is in. */
     val sortOrder: DirectorySortOrder = DirectorySortOrder.NameAscending,
+    /** Whether date and size orders apply on servers, see [ScrtvwrPreferences.getServerDetailSorting]. */
+    val serverDetailSorting: Boolean = false,
     val canNavigateUp: Boolean = false,
     val recentDirectories: List<String> = emptyList(),
     val lastMediaSession: LastMediaSession? = null,
@@ -520,6 +530,13 @@ data class DirectoryUiState(
     val isRemote: Boolean
         get() = MediaPaths.isRemote(currentPath)
 
+    val effectiveSortOrder: DirectorySortOrder
+        get() = if (isRemote) sortOrder.onServer(serverDetailSorting) else sortOrder
+
+    /** The orders the sort menu offers here. */
+    val sortOrders: List<DirectorySortOrder>
+        get() = sortOrdersFor(isRemote, serverDetailSorting)
+
     /** Copy, move, and delete only work on device storage; HTTP servers are browsed read-only. */
     val fileActionsAvailable: Boolean
         get() = showDirectoryFileActions && !isRemote
@@ -535,7 +552,7 @@ private data class DirectoryScanKey(
 )
 
 private val DirectoryUiState.scanKey: DirectoryScanKey
-    get() = DirectoryScanKey(currentPath, searchQuery, sortOrder, mediaFilter, showHiddenFiles)
+    get() = DirectoryScanKey(currentPath, searchQuery, effectiveSortOrder, mediaFilter, showHiddenFiles)
 
 /** Each folder from [DirectoryUiState.rootPath] down to [DirectoryUiState.currentPath]. */
 fun DirectoryUiState.pathSegments(): List<String> {

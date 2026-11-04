@@ -344,14 +344,14 @@ fun DirectoryScreen(
                         expanded = sortMenuExpanded,
                         onDismissRequest = { sortMenuExpanded = false },
                     ) {
-                        DirectorySortOrder.entries.forEach { sortOrder ->
+                        uiState.sortOrders.forEach { sortOrder ->
                             DropdownMenuItem(
                                 text = { Text(stringResource(sortOrder.labelResource())) },
                                 onClick = {
                                     onSortOrderChange(sortOrder)
                                     sortMenuExpanded = false
                                 },
-                                trailingIcon = if (sortOrder == uiState.sortOrder) {
+                                trailingIcon = if (sortOrder == uiState.effectiveSortOrder) {
                                     { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
                                 } else {
                                     null
@@ -1481,7 +1481,7 @@ private fun DirectoryFastScroller(
  */
 private fun DirectoryUiState.fastScrollLabel(index: Int): String? {
     val entry = entries.getOrNull(index - if (canNavigateUp) 1 else 0) ?: return null
-    return when (sortOrder) {
+    return when (effectiveSortOrder) {
         DirectorySortOrder.NameAscending,
         DirectorySortOrder.NameDescending -> entry.name.firstOrNull()?.uppercaseChar()?.toString()
         DirectorySortOrder.NewestFirst,

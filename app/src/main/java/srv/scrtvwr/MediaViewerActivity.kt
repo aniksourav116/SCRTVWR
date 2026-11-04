@@ -974,6 +974,7 @@ private fun MediaViewerScreen(
     }
     if (sortDialogVisible) {
         SortDialog(
+            orders = uiState.sortOrders,
             currentOrder = uiState.sortOrder,
             onOrderSelect = {
                 onSortOrderChange(it)
@@ -1775,6 +1776,7 @@ private fun SourceDirection.edgeReachedMessageStringRes(): Int = when (this) {
 
 @Composable
 private fun SortDialog(
+    orders: List<DirectorySortOrder>,
     currentOrder: DirectorySortOrder,
     onOrderSelect: (DirectorySortOrder) -> Unit,
     onDismiss: () -> Unit,
@@ -1784,7 +1786,7 @@ private fun SortDialog(
         title = { Text(stringResource(R.string.sort_order)) },
         text = {
             Column {
-                DirectorySortOrder.entries.forEach { order ->
+                orders.forEach { order ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()

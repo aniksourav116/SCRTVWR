@@ -139,9 +139,9 @@ class VideoPlayerViewModel(
         savedStateHandle[STATE_DIRECTORY] = directoryPath
         savedStateHandle[STATE_SELECTED] = selectedPath
         _uiState.update { it.copy(isLoading = true) }
-        val sortOrder = preferences.getDirectorySortOrder()
+        val isRemote = MediaPaths.isRemote(directoryPath ?: selectedPath)
+        val sortOrder = preferences.getDirectorySortOrder(isRemote)
         loadJob = viewModelScope.launch(Dispatchers.IO) {
-            val isRemote = MediaPaths.isRemote(directoryPath ?: selectedPath)
             // Moving to the next folder finds its list already read; any other load drops it.
             val prepared = preparedFolder
             preparedFolder = null

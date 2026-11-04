@@ -23,6 +23,7 @@ import srv.scrtvwr.media.remote.RemotePaths
 import srv.scrtvwr.media.remote.serverFor
 import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.sort.needsFileMetadata
+import srv.scrtvwr.ui.sort.sortOrdersFor
 import java.io.File
 import kotlin.math.abs
 
@@ -107,7 +108,8 @@ class MediaViewerViewModel(
     }
 
     private suspend fun loadMedia(directoryPath: String?, selectedPath: String?, force: Boolean = false) {
-        val sortOrder = preferences.getDirectorySortOrder()
+        val isRemote = isOnServer(directoryPath, selectedPath)
+        val sortOrder = preferences.getDirectorySortOrder(isRemote)
         // Moving to the next source finds its list already read; any other load drops it.
         val prepared = preparedSource
         preparedSource = null
@@ -160,6 +162,7 @@ class MediaViewerViewModel(
                 loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
                 edgeDialogStyle = preferences.getMediaEdgeDialogStyle(),
                 sortOrder = sortOrder,
+                sortOrders = sortOrdersFor(isRemote, preferences.getServerDetailSorting()),
                 jumpHistory = jumpHistory,
                 bookmarked =preferences.isMediaBookmarked(items.getOrNull(initialPage)?.path ?: selectedPath),
                 isLoading = false,
@@ -373,15 +376,18 @@ class MediaViewerViewModel(
     }
 
     /**
-     * Applies [sortOrder] to the list on screen without reloading it. A load still under way, or
+     * Applies [order] to the list on screen without reloading it. A load still under way, or
      * one that found nothing, is started again instead, since it read the previous order.
      */
-    fun setSortOrder(sortOrder: DirectorySortOrder) {
-        preferences.saveDirectorySortOrder(sortOrder)
+    fun setSortOrder(order: DirectorySortOrder) {
+        preferences.saveDirectorySortOrder(order)
+        val directoryPath = savedStateHandle.get<String>(STATE_REQUESTED_DIRECTORY)
+        val selectedPath = savedStateHandle.get<String>(STATE_REQUESTED_SELECTED)
+        val sortOrder = preferences.getDirectorySortOrder(isOnServer(directoryPath, selectedPath))
         _uiState.update { it.copy(sortOrder = sortOrder) }
         val state = _uiState.value
         if (state.isLoading || state.items.isEmpty()) {
-            load(savedStateHandle[STATE_REQUESTED_DIRECTORY], savedStateHandle[STATE_REQUESTED_SELECTED], force = true)
+            load(directoryPath, selectedPath, force = true)
             return
         }
         sortInPlace(sortOrder)
@@ -513,6 +519,10 @@ class MediaViewerViewModel(
         _uiState.update { it.copy(holdSlideShowSkipsVideos = enabled) }
     }
 
+    /** Whether the source opened from these paths, a folder or an archive, is on a server. */
+    private fun isOnServer(directoryPath: String?, selectedPath: String?): Boolean =
+        MediaPaths.isRemote(directoryPath) || MediaPaths.isRemote(selectedPath)
+
     private fun rememberMediaSession(directoryPath: String?, mediaPath: String?) {
         directoryPath ?: return
         preferences.saveLastMediaSession(directoryPath, mediaPath)
@@ -560,6 +570,8 @@ data class MediaViewerUiState(
     val loadVideoThumbnails: Boolean = true,
     val edgeDialogStyle: MediaEdgeDialogStyle = MediaEdgeDialogStyle.Bottom,
     val sortOrder: DirectorySortOrder = DirectorySortOrder.NameAscending,
+    /** The orders the sort menu offers for this source. */
+    val sortOrders: List<DirectorySortOrder> = DirectorySortOrder.entries,
     /** Page indexes are only valid for [items]; it is kept only when the same source is reopened. */
     val jumpHistory: JumpHistory = JumpHistory(),
     val isLoading: Boolean = false,
