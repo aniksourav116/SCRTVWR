@@ -30,6 +30,7 @@ import srv.scrtvwr.media.remote.HttpAuthenticationException
 import srv.scrtvwr.media.remote.HttpDirectoryClient
 import srv.scrtvwr.media.remote.HttpRangeReader
 import srv.scrtvwr.media.remote.RemoteArchiveCache
+import srv.scrtvwr.media.remote.RemoteMediaStore
 import java.io.File
 import java.io.FilterInputStream
 import java.io.IOException
@@ -56,6 +57,19 @@ object MediaPreviewLoader {
     private const val REMOTE_VIDEO_MAX_BYTES = 32L * 1024L * 1024L
     private const val REMOTE_VIDEO_TIMEOUT_MILLIS = 30_000L
     private const val REMOTE_VIDEO_SETTLE_MILLIS = 200L
+    // Copies of server files viewer pages show. Enough for a slide show's prefetch window to stay
+    // clear of the copies of pages it already showed; see VIEWER_PREFETCH_BUDGET_BYTES.
+    private const val MAX_VIEWER_STORE_BYTES = 512L * 1024L * 1024L
+    private const val VIEWER_STORE_DIRECTORY = "remote_media"
+    private const val VIEWER_IMAGE_COPY = "image"
+    private const val VIEWER_FRAME_QUALITY = 90
+
+    /**
+     * How many bytes of copies a slide show may fetch ahead: well under half the store, since the
+     * copies of pages already shown are used more recently than the farthest ones still ahead.
+     */
+    const val VIEWER_PREFETCH_BUDGET_BYTES = MAX_VIEWER_STORE_BYTES * 2 / 5
+    private val viewerStore = RemoteMediaStore(MAX_VIEWER_STORE_BYTES)
     private val directoryThumbnailSemaphore = Semaphore(2)
     private val comicBookCoverSemaphore = Semaphore(2)
     private val remoteImageSemaphore = Semaphore(4)
@@ -79,6 +93,10 @@ object MediaPreviewLoader {
 
     /** Counts calls to [forget], so previews already on screen can load again. */
     val forgottenPreviews: StateFlow<Int> = _forgottenPreviews.asStateFlow()
+
+    /** Names of the server copies viewer pages decode from; see [isViewerCopy]. */
+    val viewerCopies: StateFlow<Set<String>>
+        get() = viewerStore.names
     private val diskCacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val diskWritesSinceTrim = AtomicInteger()
     @Volatile private var diskCacheDirectory: File? = null
@@ -93,7 +111,8 @@ object MediaPreviewLoader {
      * Image at [path], which may be an entry of a local or server archive. A server archive that is
      * not cached yet is downloaded first, unless [downloadArchive] is false; then the result is
      * empty, so a small thumbnail never costs a whole archive. A server image [onScreen] downloads
-     * through slots of its own.
+     * through slots of its own. A viewer-sized server image keeps its download as a copy, and one
+     * with a copy, such as one a slide show prefetched, decodes from it without a request.
      */
     suspend fun loadImage(
         path: String,
@@ -107,11 +126,76 @@ object MediaPreviewLoader {
             if (entryName != null) {
                 loadArchiveImage(MediaPaths.archivePath(path), entryName, maxDimension, downloadArchive)
             } else if (MediaPaths.isRemote(path)) {
-                remoteSemaphore(remoteImageSemaphore, onScreen).withPermit { decodeRemoteImage(path, maxDimension) }
+                val slots = remoteSemaphore(remoteImageSemaphore, onScreen)
+                if (maxDimension > MAX_DISK_CACHE_DIMENSION) {
+                    decodeViewerImage(path, maxDimension, slots)
+                } else {
+                    slots.withPermit { decodeRemoteImage(path, maxDimension) }
+                }
             } else {
                 decodeFile(path, maxDimension)
             }
         }
+
+    /**
+     * Whether [copies], a value of [viewerCopies], holds the copy a viewer page of the server file
+     * at [url] decodes from, so showing it needs no download: the image itself, or for a [video],
+     * its first frame at [maxDimension].
+     */
+    fun isViewerCopy(copies: Set<String>, url: String, video: Boolean, maxDimension: Int): Boolean =
+        viewerStore.name(url, if (video) viewerFrameCopy(maxDimension) else VIEWER_IMAGE_COPY) in copies
+
+    /**
+     * Downloads the server image at [url] as a viewer copy, for a slide show about to reach it.
+     * Returns the bytes downloaded, or null when this call downloaded nothing: the copy was there
+     * already, or another load was fetching it. Throws what the download threw.
+     */
+    suspend fun prefetchImage(url: String): Long? {
+        var downloadedBytes: Long? = null
+        viewerStore.file(url, VIEWER_IMAGE_COPY) { target ->
+            downloadImageCopy(url, target)
+            downloadedBytes = target.length()
+        }
+        return downloadedBytes
+    }
+
+    /**
+     * Reads the first frame of the server video at [url] at [maxDimension] into a viewer copy, for
+     * a slide show about to reach it; [modified] is the stamp its page loads it with. Returns the
+     * bytes stored, or null when nothing was read: the frame was there already, another load was
+     * reading it, or the video cannot give one. Throws when storing the frame failed.
+     */
+    suspend fun prefetchVideoFrame(url: String, modified: Long, maxDimension: Int): Long? =
+        withContext(Dispatchers.IO) {
+            val key = "video:$url:$modified:$maxDimension"
+            if (cache.get(key) != null || !HttpRangeReader.supportsRanges(url) || unreadableRemoteVideos.get(key) != null) {
+                return@withContext null
+            }
+            var storedBytes: Long? = null
+            try {
+                viewerStore.file(url, viewerFrameCopy(maxDimension)) { target ->
+                    val frame = decodeRemoteVideoFrame(url, key, maxDimension).bitmap ?: throw NoFrameException()
+                    try {
+                        val written = target.outputStream().buffered().use { output ->
+                            frame.compress(Bitmap.CompressFormat.JPEG, VIEWER_FRAME_QUALITY, output)
+                        }
+                        if (!written) throw IOException("Unable to store the video frame")
+                    } finally {
+                        // Never shown: the page decodes the copy when it comes up.
+                        frame.recycle()
+                    }
+                    storedBytes = target.length()
+                }
+            } catch (_: NoFrameException) {
+                return@withContext null
+            }
+            storedBytes
+        }
+
+    private fun viewerFrameCopy(maxDimension: Int): String = "frame-$maxDimension"
+
+    /** Thrown inside a frame prefetch when the video gave no frame, which is no failure to retry. */
+    private class NoFrameException : Exception()
 
     suspend fun loadVideoFrame(path: String, modified: Long, maxDimension: Int, onScreen: Boolean = false): PreviewResult {
         if (MediaPaths.isRemote(path)) return loadRemoteVideoFrame(path, modified, maxDimension, onScreen)
@@ -139,10 +223,26 @@ object MediaPreviewLoader {
             if (!HttpRangeReader.supportsRanges(url) || unreadableRemoteVideos.get(key) != null) {
                 return@loadCached PreviewResult()
             }
+            // A frame a slide show prefetched, or is prefetching now, decodes from its copy.
+            if (maxDimension > MAX_DISK_CACHE_DIMENSION) {
+                storedVideoFrame(url, maxDimension)?.let { return@loadCached it }
+                if (unreadableRemoteVideos.get(key) != null) return@loadCached PreviewResult()
+            }
             // Tiles that only flash past during a fling are cancelled here, before any request.
             delay(REMOTE_VIDEO_SETTLE_MILLIS)
             remoteSemaphore(remoteVideoSemaphore, onScreen).withPermit { decodeRemoteVideoFrame(url, key, maxDimension) }
         }
+    }
+
+    private suspend fun storedVideoFrame(url: String, maxDimension: Int): PreviewResult? {
+        val variant = viewerFrameCopy(maxDimension)
+        val copy = viewerStore.existing(url, variant) ?: return null
+        coroutineContext.ensureActive()
+        val result = decodeFile(copy.path, maxDimension)
+        if (result.bitmap != null) return result
+        // A damaged copy is dropped, so the frame is read from the server instead.
+        viewerStore.remove(url, variant)
+        return null
     }
 
     private fun remoteSemaphore(shared: Semaphore, onScreen: Boolean): Semaphore =
@@ -354,6 +454,7 @@ object MediaPreviewLoader {
         diskCacheDirectory?.listFiles()
             ?.filter { file -> file.name.substringBefore('-', missingDelimiterValue = "") in prefixes }
             ?.forEach(File::delete)
+        viewerStore.forget(forgotten)
         _forgottenPreviews.update { it + 1 }
     }
 
@@ -405,7 +506,14 @@ object MediaPreviewLoader {
             onFailure = { PreviewResult(error = it.readableMessage("Unable to read image")) },
         )
 
+    /** A small preview of the server image at [url], from its viewer copy when there is one. */
     private suspend fun decodeRemoteImage(url: String, maxDimension: Int): PreviewResult {
+        // Only a glance: a grid of thumbnails would otherwise keep every copy it passes over.
+        viewerStore.cachedFile(url, VIEWER_IMAGE_COPY, touch = false)?.let { copy ->
+            val result = decodeFile(copy.path, maxDimension)
+            if (result.bitmap != null) return result
+            viewerStore.remove(url, VIEWER_IMAGE_COPY)
+        }
         var temporary: File? = null
         return try {
             val directory = imageDownloadDirectory ?: throw IOException("Image cache is not ready")
@@ -413,17 +521,7 @@ object MediaPreviewLoader {
             val download = File.createTempFile("image-", ".part", directory)
             temporary = download
             // Avoid holding the entire compressed file in memory before decoding it.
-            val startedAt = SystemClock.elapsedRealtime()
-            try {
-                HttpDirectoryClient.download(url, download)
-            } catch (error: IOException) {
-                // A wrong password fails fast and says nothing about the server's pace.
-                if (error !is HttpAuthenticationException) {
-                    noteRemoteDownload(SystemClock.elapsedRealtime() - startedAt, failed = true)
-                }
-                throw error
-            }
-            noteRemoteDownload(SystemClock.elapsedRealtime() - startedAt, failed = false)
+            downloadRemote(url, download)
             coroutineContext.ensureActive()
             decodeFile(download.path, maxDimension)
         } catch (error: CancellationException) {
@@ -433,6 +531,55 @@ object MediaPreviewLoader {
         } finally {
             temporary?.delete()
         }
+    }
+
+    /**
+     * A viewer-sized picture of the server image at [url], decoded from its copy, which is
+     * downloaded first through [slots] when there is none and nobody else is fetching it.
+     */
+    private suspend fun decodeViewerImage(url: String, maxDimension: Int, slots: Semaphore): PreviewResult {
+        // A copy that no longer decodes, such as one cut short on disk, is dropped and downloaded once more.
+        repeat(2) { attempt ->
+            val copy = try {
+                viewerStore.file(url, VIEWER_IMAGE_COPY) { target -> slots.withPermit { downloadImageCopy(url, target) } }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: IOException) {
+                return PreviewResult(error = error.readableMessage("Unable to download image"))
+            }
+            coroutineContext.ensureActive()
+            val result = decodeFile(copy.path, maxDimension)
+            if (result.bitmap == null) viewerStore.remove(url, VIEWER_IMAGE_COPY)
+            if (result.bitmap != null || attempt == 1) return result
+        }
+        error("Unreachable")
+    }
+
+    /**
+     * Downloads the server image at [url] into [target], to keep as its viewer copy. What does not
+     * read as an image, such as an error page a server sent with a success code, is refused, so
+     * it is never kept.
+     */
+    private suspend fun downloadImageCopy(url: String, target: File) {
+        downloadRemote(url, target)
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(target.path, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IOException("Unsupported or damaged image")
+    }
+
+    /** Downloads [url] into [target], noting how long it took for the server's pace. */
+    private suspend fun downloadRemote(url: String, target: File) {
+        val startedAt = SystemClock.elapsedRealtime()
+        try {
+            HttpDirectoryClient.download(url, target)
+        } catch (error: IOException) {
+            // A wrong password fails fast and says nothing about the server's pace.
+            if (error !is HttpAuthenticationException) {
+                noteRemoteDownload(SystemClock.elapsedRealtime() - startedAt, failed = true)
+            }
+            throw error
+        }
+        noteRemoteDownload(SystemClock.elapsedRealtime() - startedAt, failed = false)
     }
 
     private suspend fun loadArchiveImage(
@@ -544,11 +691,21 @@ object MediaPreviewLoader {
         val downloads = File(cacheDirectory, "remote_images")
         downloads.listFiles()?.filter { it.name.endsWith(".part") }?.forEach(File::delete)
         imageDownloadDirectory = downloads
+        // Viewer copies last as long as the process, as pictures in memory do, so a server file
+        // replaced under the same name is downloaded again after a restart. The last run's are
+        // moved aside at once, a single rename, and deleted in the background.
+        val copies = File(cacheDirectory, VIEWER_STORE_DIRECTORY)
+        if (copies.exists()) copies.renameTo(File(cacheDirectory, "$VIEWER_STORE_DIRECTORY-old-${System.currentTimeMillis()}"))
+        // Copies are written in the downloads folder first, so leftovers are removed above too.
+        viewerStore.initialize(copies, partialDirectory = downloads)
         val directory = File(cacheDirectory, "media_thumbnails")
         diskCacheDirectory = directory
         diskCacheScope.launch {
             directory.mkdirs()
             trimDiskCache()
+            cacheDirectory.listFiles()
+                ?.filter { it.name.startsWith("$VIEWER_STORE_DIRECTORY-old-") }
+                ?.forEach(File::deleteRecursively)
         }
     }
 }
