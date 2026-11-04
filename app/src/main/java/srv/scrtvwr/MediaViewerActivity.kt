@@ -1,6 +1,7 @@
 package srv.scrtvwr
 
 import android.app.Activity
+import android.graphics.Bitmap
 import android.os.Bundle
 import android.os.SystemClock
 import android.content.Intent
@@ -326,6 +327,9 @@ private fun MediaViewerScreen(
     val remoteDownloadsSlow by MediaPreviewLoader.remoteDownloadsSlow.collectAsStateWithLifecycle()
     val zoomedMedia = remember(uiState.loadId) { mutableStateMapOf<String, Boolean>() }
     var zoomCommand by remember { mutableStateOf<ZoomCommand?>(null) }
+    // The last picture shown on a page the pager came to rest on. A page landed on before its own
+    // picture has loaded keeps showing this one under its spinner, rather than a black screen.
+    var lastShownPicture by remember { mutableStateOf<Bitmap?>(null) }
     var bookmarkFlashId by remember { mutableIntStateOf(0) }
     val isAnySlideShowRunning = uiState.isSlideShowRunning || isPseudoSlideShowRunning
     val activeSlideShowStayMillis = if (isPseudoSlideShowRunning) {
@@ -883,6 +887,7 @@ private fun MediaViewerScreen(
                         },
                 ) { page ->
                     val item = uiState.itemForPage(page)
+                    val landed = page == pagerState.settledPage
                     when {
                         item != null -> MediaPage(
                             item = item,
@@ -893,6 +898,9 @@ private fun MediaViewerScreen(
                             zoomCommand = zoomCommand,
                             loadVideoFrame = uiState.loadVideoThumbnails,
                             onScreen = page == pagerState.currentPage,
+                            landed = landed,
+                            keptPicture = if (landed) lastShownPicture else null,
+                            onPictureShown = { lastShownPicture = it },
                             mayLoad = page in loadablePages,
                             onLoadStarted = { startedMedia[item.readinessKey] = true },
                             onSettled = { settledMedia[item.readinessKey] = true },
@@ -1234,6 +1242,11 @@ private fun MediaPage(
     zoomCommand: ZoomCommand?,
     loadVideoFrame: Boolean,
     onScreen: Boolean,
+    // Whether the pager has come to rest on this page. Such a page reports its picture once shown,
+    // and shows keptPicture, the last one shown before it, while its own still loads.
+    landed: Boolean,
+    keptPicture: Bitmap?,
+    onPictureShown: (Bitmap) -> Unit,
     mayLoad: Boolean,
     onLoadStarted: () -> Unit,
     onSettled: () -> Unit,
@@ -1269,6 +1282,10 @@ private fun MediaPage(
             if (preview != null) onSettled()
         }
 
+        LaunchedEffect(landed, preview) {
+            if (landed) preview?.bitmap?.let(onPictureShown)
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1292,6 +1309,7 @@ private fun MediaPage(
                 )
             }
             if (preview == null) {
+                keptPicture?.let { KeptPicture(it, fillFrame, rotation, flipped) }
                 // Around the play button, so a frame still loading shows as loading, not as black.
                 CircularProgressIndicator(color = Color.White, modifier = Modifier.size(96.dp))
             } else if (preview?.bitmap == null) {
@@ -1333,6 +1351,10 @@ private fun MediaPage(
 
     LaunchedEffect(preview, item.path, item.contentStamp) {
         if (preview != null) onSettled()
+    }
+
+    LaunchedEffect(landed, preview) {
+        if (landed) preview?.bitmap?.let(onPictureShown)
     }
 
     var imageScale by remember(item.path, item.contentStamp) { mutableFloatStateOf(MIN_IMAGE_ZOOM) }
@@ -1438,6 +1460,7 @@ private fun MediaPage(
     ) {
         val previewResult = preview
         if (previewResult == null) {
+            keptPicture?.let { KeptPicture(it, fillFrame, rotation, flipped) }
             CircularProgressIndicator(color = Color.White)
         } else if (previewResult.bitmap == null) {
             Icon(
@@ -1466,6 +1489,27 @@ private fun MediaPage(
             )
         }
     }
+}
+
+/**
+ * The last picture shown, drawn as it was shown, unzoomed, under the spinner of a page still
+ * loading.
+ */
+@Composable
+private fun KeptPicture(bitmap: Bitmap, fillFrame: Boolean, rotation: Int, flipped: Boolean) {
+    val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
+    Image(
+        bitmap = imageBitmap,
+        contentDescription = null,
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer(
+                rotationZ = rotation.toFloat(),
+                scaleX = if (flipped) -1f else 1f,
+                clip = true,
+            ),
+        contentScale = if (fillFrame) ContentScale.Crop else ContentScale.Fit,
+    )
 }
 
 private val MediaViewerItem.readinessKey: String
