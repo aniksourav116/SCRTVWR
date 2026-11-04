@@ -24,8 +24,14 @@ enum class PrefetchKind {
  * Depth never covers more than [budgetBytes] of fetched files, even below [minDepth], so pages
  * fetched ahead do not push each other out of storage before the show reaches them.
  *
- * Fetches at once rise by one after a run of quick fetches and halve on a slow or failed one, so
- * a struggling server gets fewer requests competing with the page on screen.
+ * Fetches at once are found by trying. After [samplesToJudge] fetches at the current count, it
+ * tries one more, or one fewer, and measures what all fetches together then bring in a second.
+ * One more stays only if that is at least a tenth more; one fewer stays if it is nearly as much,
+ * since fewer fetches sharing the link bring the page the show needs next sooner. A step that paid
+ * off is followed by another the same way; one that did not is undone, and the next try waits
+ * [restFetches] fetches and goes the other way, so the count keeps following a network that
+ * changes. It settles where more fetches stop bringing more, rather than piling on fetches that
+ * only slow each other. A failed or slow fetch halves the count at once.
  */
 internal class PrefetchTuner(
     private val initialDepth: Int = 32,
@@ -42,15 +48,25 @@ internal class PrefetchTuner(
     private val headroom: Double = 2.0,
     private val budgetBytes: Long = Long.MAX_VALUE,
     private val warmUpFetches: Int = 3,
+    private val samplesToJudge: Int = 6,
+    private val restFetches: Int = 24,
 ) {
     private var depthValue = initialDepth.coerceIn(minDepth, maxDepth)
     private var parallelValue = initialParallel.coerceIn(1, maxParallel)
     private var finishedFetches = 0
-    private var quickStreak = 0
     private var fetchMillis: Double? = null
     private val kindMillis = HashMap<PrefetchKind, Double>()
     private var fileBytes: Double? = null
     private var stayMillis = DEFAULT_STAY_MILLIS
+
+    // What all fetches together brought, in bytes a millisecond, by how many were running.
+    private val throughput = HashMap<Int, Double>()
+    private val throughputSamples = HashMap<Int, Int>()
+    // The count a step being tried left, or 0 while none is; and the fetches since it began.
+    private var probeFrom = 0
+    private var probeFetches = 0
+    private var fetchesUntilProbe = samplesToJudge
+    private var probeUpNext = true
 
     /** How many pages ahead of the show to fetch. */
     val depth: Int
@@ -80,22 +96,27 @@ internal class PrefetchTuner(
 
     /**
      * Records a fetch of [kind] that took [elapsedMillis] and stored [bytes], or a negative count
-     * when unknown, or that [failed]. For a video frame the bytes are its stored copy, not what
-     * was read, so they count toward storage only.
+     * when unknown, or that [failed], while [concurrent] fetches, itself included, were running.
+     * For a video frame the bytes are its stored copy, not what was read, so they count toward
+     * storage only, and say nothing about throughput.
      */
     @Synchronized
-    fun recordFetch(kind: PrefetchKind, elapsedMillis: Long, bytes: Long, failed: Boolean) {
+    fun recordFetch(kind: PrefetchKind, elapsedMillis: Long, bytes: Long, failed: Boolean, concurrent: Int = parallelValue) {
         val elapsed = elapsedMillis.coerceAtLeast(1L)
         val slow = failed || when (kind) {
             PrefetchKind.Image -> elapsed >= slowMillis && (bytes <= 0L || bytes * 1_000L / elapsed < slowBytesPerSecond)
             PrefetchKind.VideoFrame -> elapsed >= slowFrameMillis
         }
         if (slow) {
+            // What was measured before no longer holds; measure again before trying more.
             parallelValue = (parallelValue / 2).coerceAtLeast(1)
-            quickStreak = 0
-        } else if (++quickStreak >= parallelValue * 2) {
-            parallelValue = (parallelValue + 1).coerceAtMost(maxParallel)
-            quickStreak = 0
+            throughput.clear()
+            throughputSamples.clear()
+            probeFrom = 0
+            fetchesUntilProbe = restFetches
+            probeUpNext = true
+        } else if (kind == PrefetchKind.Image && bytes > 0L) {
+            learnThroughput(concurrent, bytes / elapsed.toDouble())
         }
         // A failure, often quick, says nothing about how long a fetch takes.
         if (failed) return
@@ -122,6 +143,58 @@ internal class PrefetchTuner(
         }
     }
 
+    private fun learnThroughput(concurrent: Int, bytesPerMilli: Double) {
+        val level = concurrent.coerceIn(1, maxParallel)
+        // Fetches running together share the link about equally.
+        throughput[level] = smoothed(throughput[level], bytesPerMilli * level)
+        throughputSamples[level] = (throughputSamples[level] ?: 0) + 1
+        if (probeFrom != 0) {
+            judgeProbe()
+        } else if (level == parallelValue && --fetchesUntilProbe <= 0) {
+            startProbe()
+        }
+    }
+
+    private fun startProbe() {
+        val up = when {
+            parallelValue >= maxParallel -> false
+            parallelValue <= 1 -> true
+            else -> probeUpNext
+        }
+        val target = parallelValue + if (up) 1 else -1
+        if (target !in 1..maxParallel) {
+            fetchesUntilProbe = restFetches
+            return
+        }
+        // Measured afresh: the network may have changed since that count last ran.
+        throughput.remove(target)
+        throughputSamples.remove(target)
+        probeFrom = parallelValue
+        parallelValue = target
+        probeFetches = 0
+    }
+
+    private fun judgeProbe() {
+        probeFetches++
+        val target = parallelValue
+        if ((throughputSamples[target] ?: 0) < samplesToJudge) {
+            // A show that never keeps that many fetches busy gives nothing to judge by.
+            if (probeFetches >= samplesToJudge * 3) endProbe(keep = false)
+            return
+        }
+        val now = throughput.getValue(target)
+        val before = throughput[probeFrom] ?: return endProbe(keep = true)
+        endProbe(keep = if (target > probeFrom) now >= before * (1 + MIN_GAIN) else now >= before * (1 - MAX_LOSS))
+    }
+
+    private fun endProbe(keep: Boolean) {
+        val up = parallelValue > probeFrom
+        if (!keep) parallelValue = probeFrom
+        probeFrom = 0
+        probeUpNext = if (keep) up else !up
+        fetchesUntilProbe = if (keep) samplesToJudge else restFetches
+    }
+
     private fun isWarmedUp(): Boolean = finishedFetches >= warmUpFetches
 
     private fun neededDepth(): Int {
@@ -144,6 +217,9 @@ internal class PrefetchTuner(
     private companion object {
         const val SMOOTHING = 0.3
         const val MIN_DEPTH_STEP = 2
+        // One more fetch at once has to bring this much more to stay; one fewer may lose this much.
+        const val MIN_GAIN = 0.10
+        const val MAX_LOSS = 0.05
         // A page also needs a frame or so to render before its stay begins.
         const val FRAME_MILLIS = 16L
         const val DEFAULT_STAY_MILLIS = 100L

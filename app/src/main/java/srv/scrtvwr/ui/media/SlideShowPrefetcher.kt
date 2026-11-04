@@ -269,9 +269,11 @@ internal class SlideShowPrefetcher(
                                 log("fetch page=$page kind=${item.kind} ms=$elapsed result=none")
                                 return@launch
                             }
-                            tuner.recordFetch(item.kind, elapsed, bytes, failed = false)
+                            val parallelBefore = tuner.parallel
+                            tuner.recordFetch(item.kind, elapsed, bytes, failed = false, concurrent = running.size)
                             stats.fetched(elapsed, bytes)
-                            log("fetch page=$page kind=${item.kind} ms=$elapsed bytes=$bytes result=ok")
+                            log("fetch page=$page kind=${item.kind} ms=$elapsed bytes=$bytes concurrent=${running.size} result=ok")
+                            logParallel(parallelBefore)
                         } catch (error: CancellationException) {
                             stats.cancelled()
                             throw error
@@ -281,7 +283,9 @@ internal class SlideShowPrefetcher(
                             log("fetch page=$page refused; prefetching stops for this show")
                         } catch (error: Exception) {
                             val elapsed = clock() - startedAt
+                            val parallelBefore = tuner.parallel
                             tuner.recordFetch(item.kind, elapsed, bytes = -1L, failed = true)
+                            logParallel(parallelBefore)
                             stats.failed()
                             val attempts = (failures[item.url] ?: 0) + 1
                             failures[item.url] = attempts
@@ -361,6 +365,11 @@ internal class SlideShowPrefetcher(
 
     private fun log(message: String) {
         Timber.tag(LOG_TAG).d(message)
+    }
+
+    private fun logParallel(before: Int) {
+        val after = tuner.parallel
+        if (after != before) log("parallel $before->$after")
     }
 
     private companion object {

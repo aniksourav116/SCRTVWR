@@ -114,17 +114,97 @@ class PrefetchTunerTest {
     }
 
     @Test
-    fun recordFetch_aRunOfQuickFetchesAddsOneFetchAtOnceUpToTheMaximum() {
-        val tuner = PrefetchTuner(initialParallel = 2, maxParallel = 3)
+    fun recordFetch_triesOneMoreFetchAtOnceAfterMeasuringTheCurrentCount() {
+        val tuner = probing()
 
-        repeat(3) { tuner.recordFetch(PrefetchKind.Image, elapsedMillis = 100, bytes = 1_000, failed = false) }
+        tuner.fetches(2, concurrent = 2, millis = 100)
         assertEquals(2, tuner.parallel)
 
-        tuner.recordFetch(PrefetchKind.Image, elapsedMillis = 100, bytes = 1_000, failed = false)
+        tuner.fetches(1, concurrent = 2, millis = 100)
+        assertEquals(3, tuner.parallel)
+    }
+
+    @Test
+    fun recordFetch_keepsOneMoreFetchWhenAllTogetherBringMoreAndTriesAnother() {
+        val tuner = probing()
+        tuner.fetches(3, concurrent = 2, millis = 100)
+
+        // Each fetch is as quick with three running, so together they bring half as much again.
+        tuner.fetches(3, concurrent = 3, millis = 100)
         assertEquals(3, tuner.parallel)
 
-        repeat(20) { tuner.recordFetch(PrefetchKind.Image, elapsedMillis = 100, bytes = 1_000, failed = false) }
+        tuner.fetches(3, concurrent = 3, millis = 100)
+        assertEquals(4, tuner.parallel)
+    }
+
+    @Test
+    fun recordFetch_undoesOneMoreFetchThatBringsNoMore() {
+        val tuner = probing()
+        tuner.fetches(3, concurrent = 2, millis = 100)
+
+        // Three share what two brought: each takes half as long again.
+        tuner.fetches(3, concurrent = 3, millis = 150)
+
+        assertEquals(2, tuner.parallel)
+    }
+
+    @Test
+    fun recordFetch_afterAStepThatBroughtNothingLaterTriesOneFewerAndKeepsItWhenAsFast() {
+        val tuner = probing()
+        tuner.fetches(3, concurrent = 2, millis = 100)
+        tuner.fetches(3, concurrent = 3, millis = 150)
+
+        tuner.fetches(4, concurrent = 2, millis = 100)
+        assertEquals(2, tuner.parallel)
+        tuner.fetches(1, concurrent = 2, millis = 100)
+        assertEquals(1, tuner.parallel)
+
+        // One fetch alone brings what two did.
+        tuner.fetches(3, concurrent = 1, millis = 50)
+        assertEquals(1, tuner.parallel)
+    }
+
+    @Test
+    fun recordFetch_undoesOneFewerFetchThatBringsLess() {
+        val tuner = probing(initialParallel = 3, maxParallel = 3)
+        tuner.fetches(3, concurrent = 3, millis = 100)
+        assertEquals(2, tuner.parallel)
+
+        // Each fetch is no quicker with two running, so together they bring a third less.
+        tuner.fetches(3, concurrent = 2, millis = 100)
+
         assertEquals(3, tuner.parallel)
+    }
+
+    @Test
+    fun recordFetch_undoesAStepTheShowNeverKeepsBusy() {
+        val tuner = probing()
+        tuner.fetches(3, concurrent = 2, millis = 100)
+        assertEquals(3, tuner.parallel)
+
+        tuner.fetches(8, concurrent = 2, millis = 100)
+        assertEquals(3, tuner.parallel)
+
+        tuner.fetches(1, concurrent = 2, millis = 100)
+        assertEquals(2, tuner.parallel)
+    }
+
+    @Test
+    fun recordFetch_videoFramesDoNotCountTowardThroughput() {
+        val tuner = probing()
+
+        repeat(10) { tuner.recordFetch(PrefetchKind.VideoFrame, elapsedMillis = 100, bytes = 100_000, failed = false, concurrent = 2) }
+
+        assertEquals(2, tuner.parallel)
+    }
+
+    private fun probing(initialParallel: Int = 2, maxParallel: Int = 4): PrefetchTuner =
+        PrefetchTuner(initialParallel = initialParallel, maxParallel = maxParallel, samplesToJudge = 3, restFetches = 5)
+
+    private fun PrefetchTuner.fetches(count: Int, concurrent: Int, millis: Long) {
+        repeat(count) {
+            recordFetch(PrefetchKind.Image, elapsedMillis = millis, bytes = 100_000, failed = false, concurrent = concurrent)
+        }
     }
 
     @Test
