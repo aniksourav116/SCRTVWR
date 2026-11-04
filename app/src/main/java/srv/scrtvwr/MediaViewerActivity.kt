@@ -2,6 +2,7 @@ package srv.scrtvwr
 
 import android.app.Activity
 import android.os.Bundle
+import android.os.SystemClock
 import android.content.Intent
 import android.view.WindowManager
 import android.widget.Toast
@@ -125,8 +126,10 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -394,7 +397,9 @@ private fun MediaViewerScreen(
     }
 
     LaunchedEffect(uiState.selectedPage, uiState.pageCount) {
-        if (uiState.items.isNotEmpty()) {
+        // During a show the pager leads and the selected page follows it a frame or so behind, so
+        // scrolling to that selection would undo the show's latest step.
+        if (uiState.items.isNotEmpty() && !isAnySlideShowRunning) {
             val selectedPage = uiState.selectedPage.coerceIn(0, uiState.lastPageIndex)
             if (pagerState.currentPage != selectedPage) {
                 pagerState.scrollToPage(selectedPage)
@@ -408,16 +413,23 @@ private fun MediaViewerScreen(
             .collect(onPageChanged)
     }
 
+    // Read by the running show rather than restarting it, so a speed changed by sliding a held
+    // finger, which changes with every small movement, never starts the page's stay over.
+    val latestSlideShowStayMillis by rememberUpdatedState(activeSlideShowStayMillis)
+
+    // One loop for the whole show, rather than an effect restarted by each page change: a scroll
+    // that something else took over, or a page the viewer moved to by itself, cannot end the show,
+    // which goes on from whatever page is on screen.
     LaunchedEffect(
         isAnySlideShowRunning,
-        activeSlideShowStayMillis,
         activeSlideShowPageOffset,
         activeSlideShowSkipsVideos,
         isPseudoSlideShowRunning,
         uiState.items,
-        pagerState.currentPage,
+        pagerState,
     ) {
-        if (isAnySlideShowRunning) {
+        if (!isAnySlideShowRunning) return@LaunchedEffect
+        while (true) {
             val currentPage = pagerState.currentPage
             val currentItem = uiState.itemForPage(currentPage)
             if (currentItem == null) {
@@ -427,27 +439,38 @@ private fun MediaViewerScreen(
 
             // A skipped video, such as one the show started on, moves on without a stay.
             if (!isSkippedBySlideShow(currentPage)) {
-                // A page that failed to load counts too, so a broken file never stops the show.
-                snapshotFlow { settledMedia[currentItem.readinessKey] == true }
-                    .first { it }
+                // A page that failed to load counts too, so a broken file never stops the show, and
+                // so does one still loading after a while, so a stalled download cannot hold the
+                // show on an empty page.
+                withTimeoutOrNull(SLIDE_SHOW_LOAD_WAIT_MILLIS.milliseconds) {
+                    snapshotFlow { settledMedia[currentItem.readinessKey] == true }.first { it }
+                }
                 // Give the loaded bitmap a render frame before even a very short stay begins.
                 withFrameNanos { }
-                delay(activeSlideShowStayMillis.milliseconds)
+                awaitSlideShowStay { latestSlideShowStayMillis }
             }
 
-            if (pagerState.currentPage == currentPage) {
-                val requestedPage = generateSequence(currentPage + activeSlideShowPageOffset) { it + activeSlideShowPageOffset }
-                    .takeWhile { it in uiState.items.indices }
-                    .firstOrNull { !isSkippedBySlideShow(it) }
-                if (requestedPage == null) {
-                    if (isPseudoSlideShowRunning) {
-                        stopPseudoSlideShow()
-                    } else {
-                        onSlideShowStop()
-                    }
+            // Moved meanwhile by something else: the show goes on from the page now on screen.
+            if (pagerState.currentPage != currentPage) continue
+            val requestedPage = generateSequence(currentPage + activeSlideShowPageOffset) { it + activeSlideShowPageOffset }
+                .takeWhile { it in uiState.items.indices }
+                .firstOrNull { !isSkippedBySlideShow(it) }
+            if (requestedPage == null) {
+                if (isPseudoSlideShowRunning) {
+                    stopPseudoSlideShow()
                 } else {
-                    pagerState.scrollToPage(requestedPage)
+                    onSlideShowStop()
                 }
+                return@LaunchedEffect
+            }
+            try {
+                pagerState.scrollToPage(requestedPage)
+            } catch (_: CancellationException) {
+                // Another scroll took the pager over, unless the show itself was stopped. The show
+                // goes on from the page that scroll lands on, a frame later so a skipped page on
+                // screen cannot make it retry without pause.
+                ensureActive()
+                withFrameNanos { }
             }
         }
     }
@@ -1464,6 +1487,22 @@ private fun MediaViewerItem.downloadsFromServer(loadVideoFrames: Boolean): Boole
 // Server downloads running at once beyond the page on screen, and how far a slow server preloads.
 private const val SERVER_PRELOAD_PARALLEL = 3
 private const val SLOW_SERVER_PRELOAD_DISTANCE = 2
+
+// How long a slide show waits for the page on screen to load before going on without it.
+private const val SLIDE_SHOW_LOAD_WAIT_MILLIS = 5_000L
+
+/**
+ * Waits out a slide show stay of [stayMillis] from now. A new length set while it runs, such as a
+ * hold show's speed, applies at once: the stay ends when that length has passed since it began.
+ */
+private suspend fun awaitSlideShowStay(stayMillis: () -> Long) {
+    val startMillis = SystemClock.uptimeMillis()
+    while (true) {
+        val remainingMillis = stayMillis() - (SystemClock.uptimeMillis() - startMillis)
+        if (remainingMillis <= 0L) return
+        withTimeoutOrNull(remainingMillis.milliseconds) { snapshotFlow(stayMillis).drop(1).first() }
+    }
+}
 
 private fun adjustedPseudoStayMillis(baseStayMillis: Long, horizontalFraction: Float): Long {
     val speedMultiplier = 4.0.pow(horizontalFraction.toDouble())
