@@ -7,6 +7,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.PrefetchKind
@@ -24,7 +25,7 @@ internal data class PrefetchSnapshot(
     val currentPage: Int,
     /** 1 for a show moving to later pages, -1 for one moving to earlier pages. */
     val pageOffset: Int,
-    /** Whether the page on screen has finished loading; nothing is prefetched until it has. */
+    /** Whether the page on screen has finished loading. */
     val isCurrentSettled: Boolean,
     val stayMillis: Long,
 )
@@ -86,16 +87,20 @@ internal fun planPrefetch(
 
 /**
  * Fetches server pages ahead of a running slide show, in the direction it moves, so the show
- * finds them on the device rather than waiting on downloads. The page on screen stays first: no
- * fetch starts while it is still loading, and it downloads through slots of its own. How far
- * ahead, and how many fetches at once, [tuner] decides from how fetches go. One prefetcher
- * serves a viewer for as long as it is open, so what it learned carries over to the next show.
+ * finds them on the device rather than waiting on downloads. The page on screen stays first: while
+ * it downloads by itself no fetch starts, and it downloads through slots of its own. A page on
+ * screen that only decodes its copy, or waits for a fetch already started here, needs nothing more
+ * from the server, so fetching goes on. How far ahead, and how many fetches at once, [tuner]
+ * decides from how fetches go. One prefetcher serves a viewer for as long as it is open, so what
+ * it learned carries over to the next show. [copyChanges] emits when a copy is stored, such as
+ * the one the page on screen downloaded, so fetching resumes without waiting for it to decode.
  */
 internal class SlideShowPrefetcher(
     private val tuner: PrefetchTuner,
     private val fetch: suspend (PrefetchItem) -> Long?,
     private val hasCopy: (PrefetchItem) -> Boolean,
     private val clock: () -> Long = SystemClock::elapsedRealtime,
+    private val copyChanges: Flow<Any?> = emptyFlow(),
 ) {
     /** A prefetcher for viewer pages decoded at [maxDimension], fetching into the viewer's copies. */
     constructor(maxDimension: Int) : this(
@@ -115,6 +120,7 @@ internal class SlideShowPrefetcher(
                 maxDimension = maxDimension,
             )
         },
+        copyChanges = MediaPreviewLoader.viewerCopies,
     )
 
     /**
@@ -171,6 +177,7 @@ internal class SlideShowPrefetcher(
                 wake.trySend(Unit)
             }
         }
+        launch { copyChanges.collect { wake.trySend(Unit) } }
 
         try {
             while (true) {
@@ -237,8 +244,13 @@ internal class SlideShowPrefetcher(
                     }
                 }
 
-                // The page on screen has the server to itself until it has loaded.
-                if (!show.isCurrentSettled || refused.get()) continue
+                // The page on screen has the server to itself while it downloads by itself: no copy
+                // yet, and no fetch here bringing one. Decoding a copy, or waiting for a fetch
+                // already running, it needs nothing more from the server.
+                val onScreen = itemFor(show.currentPage)
+                val onScreenDownloadsAlone = !show.isCurrentSettled && onScreen != null && !hasCopy(onScreen) &&
+                    running[show.currentPage]?.isActive != true
+                if (onScreenDownloadsAlone || refused.get()) continue
                 for (page in plan.order) {
                     if (running.size >= tuner.parallel) break
                     val item = itemFor(page) ?: continue
