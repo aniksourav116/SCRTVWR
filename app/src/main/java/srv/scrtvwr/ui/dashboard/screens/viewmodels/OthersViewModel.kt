@@ -28,6 +28,7 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
             showHiddenFiles = preferences.getShowHiddenFiles(),
             showDirectoryFileActions = preferences.getShowDirectoryFileActions(),
             loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
+            serverDetailSorting = preferences.getServerDetailSorting(),
         )
 
     fun setThemeMode(mode: ThemeMode) {
@@ -57,6 +58,11 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
         // Turning frames back on starts the slow-loading check over.
         if (enabled) MediaPreviewLoader.resetVideoFrameLoadWarning()
         _uiState.update { it.copy(loadVideoThumbnails = enabled) }
+    }
+
+    fun setServerDetailSorting(enabled: Boolean) {
+        preferences.saveServerDetailSorting(enabled)
+        _uiState.update { it.copy(serverDetailSorting = enabled) }
     }
 
     fun setSlideShowStayMillis(stayMillis: Long) {
@@ -108,6 +114,7 @@ data class OthersUiState(
     val showHiddenFiles: Boolean = false,
     val showDirectoryFileActions: Boolean = false,
     val loadVideoThumbnails: Boolean = true,
+    val serverDetailSorting: Boolean = false,
     val slideShowStayMillis: Long = 100L,
     val holdSlideShowEnabled: Boolean = false,
     val slideShowDirection: SlideShowDirection = SlideShowDirection.Next,

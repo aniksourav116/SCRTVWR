@@ -18,6 +18,7 @@ import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
 import srv.scrtvwr.ui.media.VideoCompletionAction
 import srv.scrtvwr.ui.sort.DirectorySortOrder
+import srv.scrtvwr.ui.sort.onServer
 import srv.scrtvwr.ui.theme.ThemeMode
 
 class ScrtvwrPreferences(context: Context) {
@@ -134,6 +135,17 @@ class ScrtvwrPreferences(context: Context) {
         preferences.edit().putBoolean(KEY_LOAD_VIDEO_THUMBNAILS, enabled).apply()
     }
 
+    /**
+     * Whether date and size orders apply on HTTP servers. Listings carry neither, so sorting by them
+     * asks the server about every file; while this is off, server folders sort by name instead.
+     */
+    fun getServerDetailSorting(): Boolean =
+        preferences.getBoolean(KEY_SERVER_DETAIL_SORTING, false)
+
+    fun saveServerDetailSorting(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_SERVER_DETAIL_SORTING, enabled).apply()
+    }
+
     fun getThemeMode(): ThemeMode =
         preferences.getString(KEY_THEME_MODE, null)
             ?.let { value -> ThemeMode.entries.firstOrNull { it.name == value } }
@@ -164,6 +176,7 @@ class ScrtvwrPreferences(context: Context) {
             .remove(KEY_SHOW_HIDDEN_FILES)
             .remove(KEY_SHOW_DIRECTORY_FILE_ACTIONS)
             .remove(KEY_LOAD_VIDEO_THUMBNAILS)
+            .remove(KEY_SERVER_DETAIL_SORTING)
             .remove(KEY_MEDIA_EDGE_DIALOG_STYLE)
             .remove(KEY_SLIDE_SHOW_STAY_MILLIS)
             .remove(KEY_SLIDE_SHOW_DIRECTION)
@@ -250,6 +263,10 @@ class ScrtvwrPreferences(context: Context) {
         preferences.getString(KEY_DIRECTORY_SORT_ORDER, null)
             ?.let { value -> DirectorySortOrder.entries.firstOrNull { it.name == value } }
             ?: DirectorySortOrder.NameAscending
+
+    /** The saved sort order as it applies to a listing, on a server when [isRemote], see [onServer]. */
+    fun getDirectorySortOrder(isRemote: Boolean): DirectorySortOrder =
+        getDirectorySortOrder().let { order -> if (isRemote) order.onServer(getServerDetailSorting()) else order }
 
     fun saveDirectorySortOrder(sortOrder: DirectorySortOrder) {
         preferences.edit()
@@ -404,6 +421,7 @@ class ScrtvwrPreferences(context: Context) {
         const val KEY_SHOW_HIDDEN_FILES = "show_hidden_files"
         const val KEY_SHOW_DIRECTORY_FILE_ACTIONS = "show_directory_file_actions"
         const val KEY_LOAD_VIDEO_THUMBNAILS = "load_video_thumbnails"
+        const val KEY_SERVER_DETAIL_SORTING = "server_detail_sorting"
         const val KEY_THEME_MODE = "theme_mode"
         const val KEY_GESTURE_TIPS_VIEWER_SEEN = "gesture_tips_viewer_seen"
         const val KEY_GESTURE_TIPS_PLAYER_SEEN = "gesture_tips_player_seen"

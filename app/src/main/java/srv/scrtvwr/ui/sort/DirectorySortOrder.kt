@@ -15,6 +15,17 @@ enum class DirectorySortOrder(val label: String) {
 val DirectorySortOrder.needsFileMetadata: Boolean
     get() = this != DirectorySortOrder.NameAscending && this != DirectorySortOrder.NameDescending
 
+/**
+ * This order for a listing on an HTTP server. Sizes and times there cost a request per file, so a
+ * date or size order reads as name A-Z unless [detailsAllowed].
+ */
+fun DirectorySortOrder.onServer(detailsAllowed: Boolean): DirectorySortOrder =
+    if (needsFileMetadata && !detailsAllowed) DirectorySortOrder.NameAscending else this
+
+/** The orders a sort menu offers: on a server, only those [onServer] keeps. */
+fun sortOrdersFor(isRemote: Boolean, detailsAllowed: Boolean): List<DirectorySortOrder> =
+    DirectorySortOrder.entries.filter { order -> !isRemote || order.onServer(detailsAllowed) == order }
+
 fun DirectorySortOrder.fileComparator(directoriesFirst: Boolean = true): Comparator<File> =
     entryComparator(
         directoriesFirst = directoriesFirst,

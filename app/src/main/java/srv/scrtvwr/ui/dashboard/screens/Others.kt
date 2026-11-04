@@ -13,6 +13,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.TouchApp
@@ -78,6 +79,7 @@ fun Others(
         onShowHiddenFilesChange = viewModel::setShowHiddenFiles,
         onShowDirectoryFileActionsChange = viewModel::setShowDirectoryFileActions,
         onLoadVideoThumbnailsChange = viewModel::setLoadVideoThumbnails,
+        onServerDetailSortingChange = viewModel::setServerDetailSorting,
         onSlideShowStayMillisChange = viewModel::setSlideShowStayMillis,
         onHoldSlideShowEnabledChange = viewModel::setHoldSlideShowEnabled,
         onSlideShowDirectionChange = viewModel::setSlideShowDirection,
@@ -104,6 +106,7 @@ fun OthersScreen(
     onVideoPreloadDistanceChange: (Int) -> Unit,
     onMediaEdgeDialogStyleChange: (MediaEdgeDialogStyle) -> Unit,
     modifier: Modifier = Modifier,
+    onServerDetailSortingChange: (Boolean) -> Unit = {},
     onShowGestureTipsAgain: () -> Unit = {},
     onThemeModeChange: (ThemeMode) -> Unit = {},
     onResetToDefaults: () -> Unit = {},
@@ -176,6 +179,20 @@ fun OthersScreen(
                     Switch(
                         checked = uiState.loadVideoThumbnails,
                         onCheckedChange = onLoadVideoThumbnailsChange,
+                    )
+                },
+            )
+        }
+        item {
+            ListItem(
+                modifier = Modifier.fillMaxWidth(),
+                headlineContent = { Text(stringResource(R.string.server_detail_sorting)) },
+                supportingContent = { Text(stringResource(R.string.server_detail_sorting_summary)) },
+                leadingContent = { Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null) },
+                trailingContent = {
+                    Switch(
+                        checked = uiState.serverDetailSorting,
+                        onCheckedChange = onServerDetailSortingChange,
                     )
                 },
             )
