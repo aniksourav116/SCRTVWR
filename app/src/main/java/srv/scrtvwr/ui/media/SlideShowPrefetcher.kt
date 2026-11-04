@@ -151,6 +151,9 @@ internal class SlideShowPrefetcher(
         var arrivedAt = 0L
         // Whether the page the show just moved on to has yet to finish loading, for its wait.
         var awaitingSettle = false
+        // Whether, since the show last moved on, every page within depth was fetched or being
+        // fetched with a slot to spare: depth, rather than the server, held fetching back.
+        var ranOutOfPages = false
 
         fun isReady(page: Int): Boolean {
             val item = itemFor(page) ?: return true
@@ -194,16 +197,17 @@ internal class SlideShowPrefetcher(
                     if (movedOn && !isSkipped(show.currentPage)) {
                         itemFor(show.currentPage)?.let { item ->
                             val ready = hasCopy(item) || isSettled(show.currentPage)
-                            tuner.recordArrival(ready)
+                            tuner.recordArrival(ready, ranOutOfPages)
                             stats.arrival(ready)
                             awaitingSettle = true
                             log(
                                 "arrive page=${show.currentPage} ready=$ready " +
                                     "readyAhead=${readyAhead(show.currentPage, show.pageOffset, tuner.depth)} " +
                                     "depth=${tuner.depth} parallel=${tuner.parallel} running=${running.size} " +
-                                    "stay=${show.stayMillis}",
+                                    "outOfPages=$ranOutOfPages stay=${show.stayMillis}",
                             )
                         }
+                        ranOutOfPages = false
                     } else if (previousPage == null) {
                         log(
                             "start page=${show.currentPage} offset=${show.pageOffset} stay=${show.stayMillis} " +
@@ -295,6 +299,7 @@ internal class SlideShowPrefetcher(
                     }
                     job.start()
                 }
+                if (running.size < tuner.parallel) ranOutOfPages = true
             }
         } finally {
             log(stats.summary(clock(), tuner.depth, tuner.parallel))

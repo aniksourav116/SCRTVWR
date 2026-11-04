@@ -62,21 +62,30 @@ class PrefetchTunerTest {
     }
 
     @Test
-    fun recordArrival_aPageNotReadyRaisesDepthByAQuarterAndAtLeastTwo() {
+    fun recordArrival_aPageNotReadyAfterFetchingRanOutOfPagesRaisesDepthByAQuarterAndAtLeastTwo() {
         val deep = PrefetchTuner(initialDepth = 16)
-        deep.recordArrival(ready = false)
+        deep.recordArrival(ready = false, ranOutOfPages = true)
         assertEquals(20, deep.depth)
 
         val shallow = PrefetchTuner(initialDepth = 4, minDepth = 4)
-        shallow.recordArrival(ready = false)
+        shallow.recordArrival(ready = false, ranOutOfPages = true)
         assertEquals(6, shallow.depth)
+    }
+
+    @Test
+    fun recordArrival_aPageNotReadyWhileEveryFetchWasBusyKeepsDepth() {
+        val tuner = PrefetchTuner(initialDepth = 16)
+
+        repeat(3) { tuner.recordArrival(ready = false, ranOutOfPages = false) }
+
+        assertEquals(16, tuner.depth)
     }
 
     @Test
     fun recordArrival_depthNeverPassesItsMaximum() {
         val tuner = PrefetchTuner(initialDepth = 60, maxDepth = 64)
 
-        repeat(3) { tuner.recordArrival(ready = false) }
+        repeat(3) { tuner.recordArrival(ready = false, ranOutOfPages = true) }
 
         assertEquals(64, tuner.depth)
     }

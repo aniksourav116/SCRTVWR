@@ -16,9 +16,11 @@ enum class PrefetchKind {
  *
  * Depth follows the lead the show needs. A fetch has to start about as many pages ahead as the
  * show passes while it runs, so depth aims at [headroom] times the fetch time over the time per
- * page, plus the fetches running. Slower fetches or a faster show raise it at once, and so does a
- * page the show reached before its fetch finished, by a quarter. It falls one page at a time, and
- * only while the show finds its pages ready, so a burst of quick fetches cannot strip the cushion.
+ * page, plus the fetches running. Slower fetches or a faster show raise it at once. A page the
+ * show reached before its fetch finished raises it by a quarter when fetching had run out of pages
+ * to start; when every fetch was busy instead, the server is the limit, which a longer lead cannot
+ * help, so depth stays. It falls one page at a time, and only while the show finds its pages
+ * ready, so a burst of quick fetches cannot strip the cushion.
  * Depth never covers more than [budgetBytes] of fetched files, even below [minDepth], so pages
  * fetched ahead do not push each other out of storage before the show reaches them.
  *
@@ -104,15 +106,19 @@ internal class PrefetchTuner(
         if (isWarmedUp()) depthValue = maxOf(depthValue, neededDepth())
     }
 
-    /** Records the show reaching a page whose file was already fetched, when [ready], or was not. */
+    /**
+     * Records the show reaching a page whose file was already fetched, when [ready], or was not.
+     * [ranOutOfPages] says whether fetching, since the show last moved on, had every page within
+     * depth fetched or under way with a fetch to spare, so depth was what held it back.
+     */
     @Synchronized
-    fun recordArrival(ready: Boolean) {
-        depthValue = if (!ready) {
-            (depthValue + maxOf(MIN_DEPTH_STEP, depthValue / 4)).coerceAtMost(maxDepth)
-        } else if (isWarmedUp() && depthValue > neededDepth()) {
-            depthValue - 1
-        } else {
-            depthValue
+    fun recordArrival(ready: Boolean, ranOutOfPages: Boolean = false) {
+        depthValue = when {
+            !ready && ranOutOfPages -> (depthValue + maxOf(MIN_DEPTH_STEP, depthValue / 4)).coerceAtMost(maxDepth)
+            // Every fetch was busy: the server is the limit, and a longer lead would not help.
+            !ready -> depthValue
+            isWarmedUp() && depthValue > neededDepth() -> depthValue - 1
+            else -> depthValue
         }
     }
 
