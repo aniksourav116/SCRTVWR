@@ -62,6 +62,7 @@ import srv.scrtvwr.ui.dashboard.screens.viewmodels.OthersViewModel
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.PRELOAD_DISTANCE_RANGE
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.SLIDE_SHOW_STAY_MILLIS_RANGE
 import srv.scrtvwr.ui.components.SimpleDropdown
+import srv.scrtvwr.preferences.DirectoryVideoPlayer
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
@@ -80,6 +81,7 @@ fun Others(
         onShowDirectoryFileActionsChange = viewModel::setShowDirectoryFileActions,
         onLoadVideoThumbnailsChange = viewModel::setLoadVideoThumbnails,
         onServerDetailSortingChange = viewModel::setServerDetailSorting,
+        onDirectoryVideoPlayerChange = viewModel::setDirectoryVideoPlayer,
         onSlideShowStayMillisChange = viewModel::setSlideShowStayMillis,
         onHoldSlideShowEnabledChange = viewModel::setHoldSlideShowEnabled,
         onSlideShowDirectionChange = viewModel::setSlideShowDirection,
@@ -110,6 +112,7 @@ fun OthersScreen(
     onShowGestureTipsAgain: () -> Unit = {},
     onThemeModeChange: (ThemeMode) -> Unit = {},
     onResetToDefaults: () -> Unit = {},
+    onDirectoryVideoPlayerChange: (DirectoryVideoPlayer) -> Unit = {},
 ) {
     var resetConfirmationVisible by rememberSaveable { mutableStateOf(false) }
     val shortSlideShowWarning = stringResource(R.string.short_slideshow_warning)
@@ -141,6 +144,31 @@ fun OthersScreen(
             )
         }
         item { SettingsSectionHeader(stringResource(R.string.settings_section_browsing)) }
+        item {
+            val mediaViewerLabel = stringResource(R.string.directory_video_player_media_viewer)
+            val videoPlayerLabel = stringResource(R.string.directory_video_player_video_player)
+            ListItem(
+                modifier = Modifier.fillMaxWidth(),
+                headlineContent = { Text(stringResource(R.string.directory_video_player)) },
+                supportingContent = { Text(stringResource(R.string.directory_video_player_summary)) },
+                leadingContent = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
+                trailingContent = {
+                    SimpleDropdown(
+                        label = stringResource(R.string.directory_video_player),
+                        items = DirectoryVideoPlayer.entries,
+                        selected = uiState.directoryVideoPlayer,
+                        onSelected = onDirectoryVideoPlayerChange,
+                        modifier = Modifier.fillMaxWidth(0.46f),
+                        itemLabel = { player ->
+                            when (player) {
+                                DirectoryVideoPlayer.MediaViewer -> mediaViewerLabel
+                                DirectoryVideoPlayer.VideoPlayer -> videoPlayerLabel
+                            }
+                        },
+                    )
+                },
+            )
+        }
         item {
             ListItem(
                 modifier = Modifier.fillMaxWidth(),
