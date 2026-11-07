@@ -146,6 +146,8 @@ import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryListing
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryMediaFilter
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryMediaType
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryScrollPosition
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectorySearchOptions
+import srv.scrtvwr.ui.dashboard.screens.viewmodels.isSearching
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewModel
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.DirectoryViewMode
@@ -225,13 +227,14 @@ fun Directory(
         onScrollPositionRequested = viewModel::scrollPositionFor,
         onSaveScrollPosition = viewModel::saveScrollPosition,
         onSearchQueryChange = viewModel::updateSearchQuery,
+        onSearchOptionsChange = viewModel::setSearchOptions,
         onViewModeChange = viewModel::setViewMode,
         onMediaFilterChange = viewModel::setMediaFilter,
         onSortOrderChange = viewModel::setSortOrder,
         onOpenDirectory = viewModel::openDirectory,
         onOpenRecentDirectory = viewModel::openDirectoryPath,
         onOpenMedia = { entry ->
-            openMedia(uiState.currentPath, entry.path, entry.mediaType == DirectoryMediaType.Video)
+            openMedia(MediaPaths.parent(entry.path) ?: uiState.currentPath, entry.path, entry.mediaType == DirectoryMediaType.Video)
         },
         onOpenWithOtherApp = { entry -> context.openWithOtherApp(entry.path, entry.name) },
         onResumeMedia = {
@@ -298,11 +301,12 @@ fun DirectoryScreen(
     onCopySelected: () -> Unit = {},
     onMoveSelected: () -> Unit = {},
     onDeleteSelected: () -> Unit = {},
+    onSearchOptionsChange: (DirectorySearchOptions) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var moreMenuExpanded by remember { mutableStateOf(false) }
     var sortMenuExpanded by remember { mutableStateOf(false) }
-    var searchVisible by remember { mutableStateOf(false) }
+    var searchVisible by remember { mutableStateOf(uiState.isSearching) }
     var entryPendingDeletion by remember { mutableStateOf<DirectoryEntry?>(null) }
     var selectionPendingDeletion by remember { mutableStateOf(false) }
     BaseScaffold(
@@ -402,18 +406,36 @@ fun DirectoryScreen(
             onOpenDirectory = onOpenRecentDirectory,
         )
 
-        if (searchVisible) {
+        if (searchVisible || uiState.isSearching) {
             DirectorySearchField(
                 query = uiState.searchQuery,
                 onQueryChange = onSearchQueryChange,
-                onDismiss = { searchVisible = false },
+                onDismiss = {
+                    onSearchQueryChange("")
+                    onSearchOptionsChange(DirectorySearchOptions(uiState.searchOptions.includeSubfolders))
+                    searchVisible = false
+                },
             )
+            if (uiState.isSearching) {
+                if (uiState.isLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                Text(
+                    text = if (uiState.isLoading) stringResource(R.string.search_progress, uiState.searchedDirectories)
+                        else stringResource(R.string.search_results_count, uiState.entries.size),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (uiState.directoryListing.skippedDirectories > 0) {
+                    Text(stringResource(R.string.search_skipped_folders, uiState.directoryListing.skippedDirectories))
+                }
+            }
         }
 
         Row(
             modifier = Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            if (searchVisible || uiState.isSearching) {
+                DirectorySearchControls(uiState.searchOptions, onSearchOptionsChange)
+            }
             DirectoryMediaFilter.entries.forEach { filter ->
                 FilterChip(
                     selected = uiState.mediaFilter == filter,
@@ -485,7 +507,10 @@ fun DirectoryScreen(
                     onCopyLink = onCopyLink,
                     onLoadEntryDetails = onLoadEntryDetails,
                     onRetry = onRefresh,
-                    onClearSearch = { onSearchQueryChange("") },
+                    onClearSearch = {
+                        onSearchQueryChange("")
+                        onSearchOptionsChange(DirectorySearchOptions(uiState.searchOptions.includeSubfolders))
+                    },
                     onToggleSelection = onToggleSelection,
                 )
 
@@ -503,7 +528,10 @@ fun DirectoryScreen(
                     onRequestDeleteEntry = { entryPendingDeletion = it },
                     onCopyLink = onCopyLink,
                     onRetry = onRefresh,
-                    onClearSearch = { onSearchQueryChange("") },
+                    onClearSearch = {
+                        onSearchQueryChange("")
+                        onSearchOptionsChange(DirectorySearchOptions(uiState.searchOptions.includeSubfolders))
+                    },
                     onToggleSelection = onToggleSelection,
                 )
             }
@@ -1110,7 +1138,9 @@ private fun DirectoryList(
                 val style = entry.entryVisualStyle()
                 DirectoryListRow(
                     title = entry.name,
-                    subtitle = entry.supportingText(),
+                    subtitle = if (uiState.isSearching && uiState.searchOptions.includeSubfolders)
+                        "${MediaPaths.parent(entry.path).orEmpty()} · ${entry.supportingText()}"
+                        else entry.supportingText(),
                     thumbnail = { EntryThumbnail(entry, size = 48, style = style, loadVideoFrame = uiState.loadVideoThumbnails) },
                     style = style,
                     onClick = {
@@ -1300,7 +1330,8 @@ private fun DirectoryGrid(
                 val style = entry.entryVisualStyle()
                 DirectoryGridCard(
                     title = entry.name,
-                    subtitle = entry.typeText(),
+                    subtitle = if (uiState.isSearching && uiState.searchOptions.includeSubfolders)
+                        MediaPaths.parent(entry.path).orEmpty() else entry.typeText(),
                     thumbnail = {
                         EntryThumbnail(
                             entry = entry,
@@ -1761,7 +1792,7 @@ private fun EmptyDirectoryMessage(
     onClearSearch: () -> Unit,
 ) {
     val isError = uiState.errorMessage != null || !uiState.canReadCurrentDirectory
-    val isSearch = !isError && uiState.searchQuery.isNotBlank()
+    val isSearch = !isError && uiState.isSearching
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1783,6 +1814,7 @@ private fun EmptyDirectoryMessage(
             text = when {
                 uiState.errorMessage != null -> uiState.errorMessage
                 !uiState.canReadCurrentDirectory -> stringResource(R.string.directory_unreadable)
+                isSearch && uiState.searchQuery.isBlank() -> stringResource(R.string.search_no_filter_results)
                 isSearch -> stringResource(R.string.no_search_results, uiState.searchQuery)
                 else -> stringResource(R.string.directory_empty)
             },

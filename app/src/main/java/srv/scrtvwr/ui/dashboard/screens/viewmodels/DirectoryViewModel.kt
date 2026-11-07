@@ -61,6 +61,12 @@ class DirectoryViewModel(
             rootLabel = rootLabelFor(initialRoot),
             currentPath = initialDirectory,
             searchQuery = savedStateHandle[STATE_SEARCH] ?: "",
+            searchOptions = DirectorySearchOptions(
+                includeSubfolders = savedStateHandle[STATE_SUBFOLDERS] ?: true,
+                minimumSizeMiB = savedStateHandle[STATE_MIN_SIZE],
+                maximumSizeMiB = savedStateHandle[STATE_MAX_SIZE],
+                modifiedWithinDays = savedStateHandle[STATE_MODIFIED_DAYS],
+            ),
             viewMode = savedStateHandle.get<String>(STATE_VIEW_MODE)
                 ?.let { value -> DirectoryViewMode.entries.firstOrNull { it.name == value } }
                 ?: DirectoryViewMode.List,
@@ -98,6 +104,21 @@ class DirectoryViewModel(
     fun setViewMode(mode: DirectoryViewMode) {
         savedStateHandle[STATE_VIEW_MODE] = mode.name
         _uiState.update { it.copy(viewMode = mode) }
+    }
+
+    fun setSearchOptions(options: DirectorySearchOptions) {
+        val minimum = options.minimumSizeMiB?.coerceIn(0L, 1_000_000_000L)
+        val bounded = options.copy(
+            minimumSizeMiB = minimum,
+            maximumSizeMiB = options.maximumSizeMiB?.coerceIn(minimum ?: 0L, 1_000_000_000L),
+            modifiedWithinDays = options.modifiedWithinDays?.coerceIn(1, 3650),
+        )
+        savedStateHandle[STATE_SUBFOLDERS] = bounded.includeSubfolders
+        savedStateHandle[STATE_MIN_SIZE] = bounded.minimumSizeMiB
+        savedStateHandle[STATE_MAX_SIZE] = bounded.maximumSizeMiB
+        savedStateHandle[STATE_MODIFIED_DAYS] = bounded.modifiedWithinDays
+        _uiState.update { it.copy(searchOptions = bounded) }
+        scanDirectory()
     }
 
     fun setMediaFilter(filter: DirectoryMediaFilter) {
@@ -406,7 +427,23 @@ class DirectoryViewModel(
         scanJob = viewModelScope.launch {
             if (delayMillis > 0) delay(delayMillis)
             val request = _uiState.value
-            _uiState.update { it.copy(isLoading = true, isSortPending = false, errorMessage = null) }
+            _uiState.update { it.copy(isLoading = true, isSortPending = false, searchedDirectories = 0, errorMessage = null) }
+            if (request.isSearching) {
+                val listing = try {
+                    withContext(Dispatchers.IO) {
+                        searchDirectory(request, reload) { count ->
+                            _uiState.update { it.copy(searchedDirectories = count) }
+                        }
+                    }
+                } catch (error: IOException) {
+                    if (request.isRemote) remoteListingFailure(error, app) else
+                        DirectoryListing(emptyList(), canRead = false, errorMessage = error.message)
+                } catch (_: SecurityException) {
+                    DirectoryListing(emptyList(), canRead = false)
+                }
+                publishListing(request, listing)
+                return@launch
+            }
             if (request.isRemote) {
                 scanRemoteDirectory(request, reload)
                 return@launch
@@ -463,6 +500,7 @@ class DirectoryViewModel(
         _uiState.update { current ->
             if (current.currentPath != request.currentPath ||
                 current.searchQuery != request.searchQuery ||
+                current.searchOptions != request.searchOptions ||
                 current.effectiveSortOrder != request.effectiveSortOrder ||
                 current.mediaFilter != request.mediaFilter
             ) current else current.copy(
@@ -479,6 +517,10 @@ class DirectoryViewModel(
     private companion object {
         const val STATE_DIRECTORY = "directory_path"
         const val STATE_SEARCH = "directory_search"
+        const val STATE_SUBFOLDERS = "search_subfolders"
+        const val STATE_MIN_SIZE = "search_min_size"
+        const val STATE_MAX_SIZE = "search_max_size"
+        const val STATE_MODIFIED_DAYS = "search_modified_days"
         const val STATE_VIEW_MODE = "directory_view_mode"
         const val STATE_MEDIA_FILTER = "directory_media_filter"
     }
@@ -491,6 +533,8 @@ data class DirectoryUiState(
     val rootLabel: String? = null,
     val currentPath: String = rootPath,
     val searchQuery: String = "",
+    val searchOptions: DirectorySearchOptions = DirectorySearchOptions(),
+    val searchedDirectories: Int = 0,
     val directoryListing: DirectoryListing = DirectoryListing(entries = emptyList()),
     val viewMode: DirectoryViewMode = DirectoryViewMode.List,
     val mediaFilter: DirectoryMediaFilter = DirectoryMediaFilter.All,
@@ -553,10 +597,11 @@ private data class DirectoryScanKey(
     val sortOrder: DirectorySortOrder,
     val mediaFilter: DirectoryMediaFilter,
     val showHiddenFiles: Boolean,
+    val searchOptions: DirectorySearchOptions,
 )
 
 private val DirectoryUiState.scanKey: DirectoryScanKey
-    get() = DirectoryScanKey(currentPath, searchQuery, effectiveSortOrder, mediaFilter, showHiddenFiles)
+    get() = DirectoryScanKey(currentPath, searchQuery, effectiveSortOrder, mediaFilter, showHiddenFiles, searchOptions)
 
 /** Each folder from [DirectoryUiState.rootPath] down to [DirectoryUiState.currentPath]. */
 fun DirectoryUiState.pathSegments(): List<String> {
@@ -573,6 +618,7 @@ data class DirectoryListing(
     val entries: List<DirectoryEntry>,
     val canRead: Boolean = true,
     val errorMessage: String? = null,
+    val skippedDirectories: Int = 0,
 )
 
 data class DirectoryScrollPosition(

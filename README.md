@@ -50,6 +50,16 @@ may remain cached. Archives need a complete local copy for ZIP/RAR random access
 1 GiB cache budget; the archive being opened is retained even if it exceeds that budget.
 The existing 128 MiB limit on each decompressed archive image remains in place.
 
+## Search and viewer actions
+
+Tap Search in the directory browser to search file and folder names, including subfolders by
+default. Turn off **Include subfolders** to search just the open folder. Combine the existing
+media-type chips with **Size and date filters** to filter by minimum/maximum file size in MiB
+and modification date. Size and date filters also work with an empty search query. Searches
+stay inside the open folder, skip hidden folders unless enabled, and do not expand archives.
+HTTP searches visit the server's folder listings and request metadata only for matching files
+when a filter or sort needs it. Files without the required metadata are excluded.
+
 ## Verification
 
 From the repository folder, run these when you want to verify changes:

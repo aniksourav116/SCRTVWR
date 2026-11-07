@@ -345,4 +345,19 @@
     <string name="notification_channel_general_id" translatable="false">scrtvwr_general</string>
     <string name="notification_channel_general_name">General</string>
     <string name="notification_channel_general_description">Announcements and updates about SCRTVWR.</string>
+    <string name="search_subfolders">Include subfolders</string>
+    <string name="search_size_date">Size and date filters</string>
+    <string name="search_reset_filters">Reset filters</string>
+    <string name="search_filter_summary">Search the open folder and optionally its subfolders. Size and date filters apply to files. Server files without the required metadata are excluded. Archives are not searched inside.</string>
+    <string name="search_min_size">Minimum size (MiB, optional)</string>
+    <string name="search_max_size">Maximum size (MiB, optional)</string>
+    <string name="search_invalid_size">Enter sizes from 0 to 1000000000 MiB. Maximum must be at least the minimum.</string>
+    <string name="search_modified">Modified</string>
+    <string name="search_any_time">Any time</string>
+    <string name="search_last_days">Last %1$d days</string>
+    <string name="search_apply">Apply</string>
+    <string name="search_progress">Searching… %1$d folders visited</string>
+    <string name="search_results_count">%1$d results</string>
+    <string name="search_no_filter_results">No files match these filters.</string>
+    <string name="search_skipped_folders">%1$d folders could not be read. Results may be incomplete.</string>
 </resources>
