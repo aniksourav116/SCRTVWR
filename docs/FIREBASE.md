@@ -1,7 +1,8 @@
 # Firebase
 
-The app uses Crashlytics, Cloud Messaging (FCM) and Analytics, and ships test builds
-through App Distribution.
+The `personal` flavor uses Crashlytics, Cloud Messaging (FCM) and Analytics, and ships test builds
+through App Distribution. The `play` flavor excludes these SDKs and skips Firebase/Google services
+tasks. See [PLAY_RELEASE.md](PLAY_RELEASE.md).
 
 Project: `srvgallery-41cc2` · Android app id: `1:715397747565:android:860aca1cb7adf184014064`
 
@@ -12,9 +13,9 @@ Project: `srvgallery-41cc2` · Android app id: `1:715397747565:android:860aca1cb
 | Config | [`app/google-services.json`](../app/google-services.json) — must live in the module dir, not the repo root |
 | Versions | [`gradle/libs.versions.toml`](../gradle/libs.versions.toml) (`firebaseBom` pins the SDK versions) |
 | Plugins | `google-services`, `firebase-crashlytics`, `firebase-appdistribution` in [`app/build.gradle.kts`](../app/build.gradle.kts) |
-| Runtime policy | [`ScrtvwrFirebase`](../app/src/main/java/srv/scrtvwr/firebase/ScrtvwrFirebase.kt) |
-| Push handling | [`ScrtvwrMessagingService`](../app/src/main/java/srv/scrtvwr/firebase/ScrtvwrMessagingService.kt) |
-| Crash breadcrumbs | [`CrashlyticsTree`](../app/src/main/java/srv/scrtvwr/util/logs/CrashlyticsTree.kt) |
+| Runtime policy | [`ScrtvwrFirebase`](../app/src/personal/java/srv/scrtvwr/firebase/ScrtvwrFirebase.kt) |
+| Push handling | [`ScrtvwrMessagingService`](../app/src/personal/java/srv/scrtvwr/firebase/ScrtvwrMessagingService.kt) |
+| Crash breadcrumbs | [`CrashlyticsTree`](../app/src/personal/java/srv/scrtvwr/util/logs/CrashlyticsTree.kt) |
 
 Crashlytics and Analytics collection are **off in debug builds** and on in release, so local
 runs never show up in the console. Timber routes to `CustomLogger` in debug and to
@@ -41,14 +42,14 @@ Uploads need credentials, resolved in this order:
 Distribute a build:
 
 ```bash
-./gradlew assembleRelease appDistributionUploadRelease
+./gradlew assemblePersonalRelease appDistributionUploadPersonalRelease
 ```
 
 Add testers with `-PfirebaseTesterGroups=<group aliases>`; without it the release uploads
 without being assigned to anyone. Release notes come from
 [`distribution/release-notes.txt`](../distribution/release-notes.txt).
 
-Debug builds distribute the same way with `assembleDebug appDistributionUploadDebug`.
+Debug builds distribute the same way with `assemblePersonalDebug appDistributionUploadPersonalDebug`.
 
 This project has `org.gradle.configuration-cache=true`. If an upload task reports a
 configuration-cache problem, run that invocation with `--no-configuration-cache`; it only

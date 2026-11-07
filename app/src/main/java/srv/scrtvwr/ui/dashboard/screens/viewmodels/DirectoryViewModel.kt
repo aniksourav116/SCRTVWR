@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import srv.scrtvwr.R
+import srv.scrtvwr.BuildConfig
+import srv.scrtvwr.media.DocumentMedia
 import srv.scrtvwr.media.MediaPaths
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.MediaTypes
@@ -43,14 +45,16 @@ class DirectoryViewModel(
     private val savedStateHandle: SavedStateHandle,
 ) : AndroidViewModel(application) {
     private val app = application
-    private val defaultRootDirectory = Environment.getExternalStorageDirectory()
+    private val defaultRootDirectory = if (BuildConfig.PERSONAL_EDITION) Environment.getExternalStorageDirectory() else application.filesDir
     private val preferences = ScrtvwrPreferences(application)
     private val initialDirectory = savedStateHandle.get<String>(STATE_DIRECTORY)
         ?.takeIf(::isOpenableDirectory)
         ?: preferences.getLastDirectory()
         ?.takeIf(::isOpenableDirectory)
+        ?: (if (BuildConfig.PERSONAL_EDITION) null else DocumentMedia.roots().firstOrNull())
         ?: defaultRootDirectory.absolutePath
     private val initialRoot = when {
+        DocumentMedia.isDocument(initialDirectory) -> DocumentMedia.root(initialDirectory)
         MediaPaths.isRemote(initialDirectory) -> serverRootFor(initialDirectory)
         File(initialDirectory).isSameOrChildOf(defaultRootDirectory) -> defaultRootDirectory.absolutePath
         else -> initialDirectory
@@ -140,7 +144,9 @@ class DirectoryViewModel(
     }
 
     fun openDirectoryPath(path: String) {
-        val directory = if (MediaPaths.isRemote(path)) {
+        val directory = if (DocumentMedia.isDocument(path)) {
+            path.takeIf(DocumentMedia::hasAccess) ?: return
+        } else if (MediaPaths.isRemote(path)) {
             // A server that is offline still opens; its listing explains why nothing loaded. A
             // disconnected one does not, until it is connected again from the storage screen.
             if (preferences.getConnectedHttpServers().serverFor(path) == null) return
@@ -151,6 +157,7 @@ class DirectoryViewModel(
         val state = _uiState.value
         val root = when {
             directory.isSameOrChildOf(state.rootPath) -> state.rootPath
+            DocumentMedia.isDocument(directory) -> DocumentMedia.root(directory)
             MediaPaths.isRemote(directory) -> serverRootFor(directory)
             else -> directory
         }
@@ -404,7 +411,9 @@ class DirectoryViewModel(
 
     /** Whether a remembered directory can be reopened: a local folder, or a folder on a connected server. */
     private fun isOpenableDirectory(path: String): Boolean =
-        if (MediaPaths.isRemote(path)) {
+        if (DocumentMedia.isDocument(path)) {
+            DocumentMedia.hasAccess(path)
+        } else if (MediaPaths.isRemote(path)) {
             preferences.getConnectedHttpServers().serverFor(path) != null
         } else {
             File(path).let { it.exists() && it.isDirectory }
@@ -446,6 +455,25 @@ class DirectoryViewModel(
             }
             if (request.isRemote) {
                 scanRemoteDirectory(request, reload)
+                return@launch
+            }
+            if (DocumentMedia.isDocument(request.currentPath)) {
+                val listing = withContext(Dispatchers.IO) {
+                    try {
+                        DocumentMedia.list(request.currentPath)
+                            .filter { request.showHiddenFiles || !it.isHidden }
+                            .filter { entry -> when (request.mediaFilter) {
+                                DirectoryMediaFilter.All -> true
+                                DirectoryMediaFilter.Folders -> entry.isDirectory
+                                DirectoryMediaFilter.Images -> entry.mediaType() == DirectoryMediaType.Image
+                                DirectoryMediaFilter.Videos -> entry.mediaType() == DirectoryMediaType.Video
+                                DirectoryMediaFilter.Archives -> entry.mediaType() == DirectoryMediaType.Archive
+                            } }.toDirectoryListing(request.sortOrder)
+                    } catch (error: IOException) {
+                        DirectoryListing(emptyList(), canRead = false, errorMessage = error.message)
+                    }
+                }
+                publishListing(request, listing)
                 return@launch
             }
             val listing = withContext(Dispatchers.IO) {
@@ -587,7 +615,7 @@ data class DirectoryUiState(
 
     /** Copy, move, and delete only work on device storage; HTTP servers are browsed read-only. */
     val fileActionsAvailable: Boolean
-        get() = showDirectoryFileActions && !isRemote
+        get() = showDirectoryFileActions && !isRemote && !DocumentMedia.isDocument(currentPath)
 }
 
 /** What a scan lists. A refresh while a scan for the same key still runs leaves that scan running. */
@@ -798,12 +826,14 @@ private fun remoteListingFailure(error: IOException, app: Application): Director
     )
 
 private fun String.isSameOrChildOf(root: String): Boolean = when {
+    DocumentMedia.isDocument(this) || DocumentMedia.isDocument(root) -> DocumentMedia.isSameOrChildOf(this, root)
     MediaPaths.isRemote(this) && MediaPaths.isRemote(root) -> RemotePaths.isSameOrChildOf(this, root)
     MediaPaths.isRemote(this) || MediaPaths.isRemote(root) -> false
     else -> File(this).isSameOrChildOf(File(root))
 }
 
 private fun String.isDifferentDirectory(other: String): Boolean = when {
+    DocumentMedia.isDocument(this) || DocumentMedia.isDocument(other) -> this != other
     MediaPaths.isRemote(this) && MediaPaths.isRemote(other) -> !RemotePaths.isSameDirectory(this, other)
     MediaPaths.isRemote(this) || MediaPaths.isRemote(other) -> true
     else -> File(this).isDifferentDirectory(File(other))
@@ -998,12 +1028,15 @@ private fun Throwable.userMessage(app: Application): String =
 
 private fun List<String>.validDirectories(servers: List<HttpServer>): List<String> =
     filter { path ->
-        if (MediaPaths.isRemote(path)) servers.serverFor(path) != null else File(path).exists() && File(path).isDirectory
+        if (DocumentMedia.isDocument(path)) DocumentMedia.hasAccess(path)
+        else if (MediaPaths.isRemote(path)) servers.serverFor(path) != null else File(path).exists() && File(path).isDirectory
     }
 
 private fun LastMediaSession.takeIfValid(servers: List<HttpServer>): LastMediaSession? =
     takeIf {
         // Checking a server would mean a request on every resume, so trust sessions on saved servers.
+        if (DocumentMedia.isDocument(directoryPath)) return@takeIf DocumentMedia.hasAccess(directoryPath) &&
+            (mediaPath == null || DocumentMedia.hasAccess(mediaPath.substringBefore("::")))
         if (MediaPaths.isRemote(directoryPath)) return@takeIf servers.serverFor(directoryPath) != null
         File(directoryPath).exists() &&
             File(directoryPath).isDirectory &&

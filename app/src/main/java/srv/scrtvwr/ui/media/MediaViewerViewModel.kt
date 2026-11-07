@@ -25,6 +25,7 @@ import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.sort.needsFileMetadata
 import srv.scrtvwr.ui.sort.sortOrdersFor
 import java.io.File
+import srv.scrtvwr.media.DocumentMedia
 import kotlin.math.abs
 
 class MediaViewerViewModel(
@@ -227,6 +228,16 @@ class MediaViewerViewModel(
                 },
             )
         }
+        val documentDirectory = directoryPath?.takeIf(DocumentMedia::isDocument)
+            ?: selectedPath?.takeIf(DocumentMedia::isDocument)?.let(DocumentMedia::parent)
+        if (documentDirectory != null) {
+            val items = DocumentMedia.mediaItems(documentDirectory, sortOrder)
+            return ResolvedSource(
+                items = items, sourceDirectoryPath = documentDirectory,
+                initialPage = items.indexOfFirst { it.path == selectedPath }.coerceAtLeast(0),
+                findNeighbour = { next, order -> DocumentMedia.neighbour(documentDirectory, next, order) },
+            )
+        }
         val directory = directoryPath?.let(::File)
         val sourceDirectory = when {
             directory?.isDirectory == true -> directory
@@ -284,7 +295,7 @@ class MediaViewerViewModel(
     /** Reads the list of [source] ahead, for [loadMedia] to use when the viewer moves to it. */
     private suspend fun prepareSource(source: MediaViewerSource, sortOrder: DirectorySortOrder) {
         // A server archive would have to be downloaded whole just to be listed.
-        if (source.isArchive && MediaPaths.isRemote(source.path)) return
+        if (source.isArchive && (MediaPaths.isRemote(source.path) || DocumentMedia.isDocument(source.path))) return
         val (directoryPath, selectedPath) = source.loadPaths
         val resolved = try {
             resolveSource(directoryPath, selectedPath, sortOrder) {}

@@ -3,6 +3,18 @@
 Made this Media Viewer Application to brush up my Kotlin skills.
 Nothing out of the ordinary here.
 
+## Personal and Google Play editions
+
+The `personal` build keeps the existing package (`srv.scrtvwr`), broad device-storage access,
+file operations and Firebase services. The `play` build (`srv.scrtvwr.play`) installs alongside
+it, reads folders selected through Android's folder picker, requires HTTPS, and excludes Firebase.
+Both protect stored passwords, restrict file sharing, exclude private data from backup/transfer,
+and reserve device storage during downloads. See [the release guide](docs/PLAY_RELEASE.md) for
+the differences, remaining publishing steps and verification commands.
+
+The public privacy policy source is [docs/privacy-policy.html](docs/privacy-policy.html).
+It still needs to be hosted and entered into Play Console before submission.
+
 ## Serving media from a PC
 
 From the repository folder, run:
@@ -14,9 +26,9 @@ python tools/media_http_server.py 8000 --bind 0.0.0.0 --directory "D:\Media"
 Replace `D:\Media` with the folder you want to browse. Stop any other server using port 8000
 first. Add `http://<PC-LAN-IP>:8000/` as an HTTP server in SCRTVWR.
 
-To require a password, pass it with `--password`. Browsers then ask for a username and
-password; enter the same ones in SCRTVWR when adding the server, or tap the key on its card
-later. Any username works unless you also pass `--user`.
+To require a password, pass it with `--password`. Any username works unless you also pass
+`--user`. SCRTVWR requires HTTPS before sending credentials, including in personal builds;
+put this server behind HTTPS with a valid certificate before adding sign-in details to the app.
 
 ```powershell
 python tools/media_http_server.py 8000 --bind 0.0.0.0 --directory "D:\Media" --password "your-password"
@@ -43,7 +55,9 @@ target and no video file or persistent video cache on the phone. Consumed playba
 discarded; finishing, stopping, or closing the player releases its buffers. A slow read may wait up to
 60 seconds before failing; total playback duration is unrestricted.
 
-Remote images and archives also have no download-size cap, subject to available disk space.
+Personal builds have no fixed download-size cap for remote images and archives. Play builds
+limit each image/archive download to 1 GiB. Both check known lengths before downloading,
+enforce limits while streaming, and leave at least 128 MiB of free storage.
 Images download to a temporary file, decode at the requested resolution, and delete the
 original temporary file after decoding, failure, or cancellation. Small decoded thumbnails
 may remain cached. Archives need a complete local copy for ZIP/RAR random access and use a
@@ -82,7 +96,7 @@ are preserved. Screens that remain active can create new cached files afterward.
 From the repository folder, run these when you want to verify changes:
 
 ```powershell
-.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug
+.\gradlew.bat :app:testPersonalDebugUnitTest :app:testPlayDebugUnitTest :app:assemblePersonalDebug :app:assemblePlayDebug
 python -m unittest discover -s tools/tests
 ```
 

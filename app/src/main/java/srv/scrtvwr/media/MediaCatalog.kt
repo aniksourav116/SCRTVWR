@@ -240,11 +240,23 @@ object MediaCatalog {
 
     /** [nextArchive] for a local archive path or an archive URL. */
     suspend fun nextArchive(path: String, sortOrder: DirectorySortOrder): MediaViewerSource? =
-        if (MediaPaths.isRemote(path)) adjacentRemoteArchive(path, sortOrder, step = 1) else nextArchive(File(path), sortOrder)
+        if (DocumentMedia.isDocument(path)) adjacentDocumentArchive(path, sortOrder, 1)
+        else if (MediaPaths.isRemote(path)) adjacentRemoteArchive(path, sortOrder, step = 1) else nextArchive(File(path), sortOrder)
 
     /** [previousArchive] for a local archive path or an archive URL. */
     suspend fun previousArchive(path: String, sortOrder: DirectorySortOrder): MediaViewerSource? =
-        if (MediaPaths.isRemote(path)) adjacentRemoteArchive(path, sortOrder, step = -1) else previousArchive(File(path), sortOrder)
+        if (DocumentMedia.isDocument(path)) adjacentDocumentArchive(path, sortOrder, -1)
+        else if (MediaPaths.isRemote(path)) adjacentRemoteArchive(path, sortOrder, step = -1) else previousArchive(File(path), sortOrder)
+
+    private fun adjacentDocumentArchive(path: String, order: DirectorySortOrder, step: Int): MediaViewerSource? {
+        val parent = DocumentMedia.parent(path) ?: return null
+        val archives = DocumentMedia.list(parent).filter { !it.isDirectory && MediaTypes.isArchive(it.name) }
+            .sortedWith(order.remoteEntryComparator(false))
+        val index = archives.indexOfFirst { it.url == path }
+        if (index < 0) return null
+        val target = archives.getOrNull(index + step) ?: return null
+        return MediaViewerSource(target.name, target.url, isArchive = true)
+    }
 
     /**
      * The archive [step] places away from [archiveUrl] in its server folder. Unlike local archives,
@@ -326,7 +338,7 @@ object MediaCatalog {
         path: String,
         onDownloadProgress: (DownloadProgress) -> Unit = {},
     ): List<MediaViewerItem> =
-        if (MediaPaths.isRemote(path)) {
+        if (MediaPaths.isRemote(path) || DocumentMedia.isDocument(path)) {
             // Server files have no local timestamp; the copy's time only says when it was last read.
             RemoteArchiveCache.withFile(path, onProgress = onDownloadProgress) {
                 readArchive(it, archivePath = path, modifiedMillis = 0L)

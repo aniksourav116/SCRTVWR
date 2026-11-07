@@ -19,6 +19,7 @@ object RemotePaths {
         val trimmed = input.trim()
         if (trimmed.isEmpty()) return null
         val uri = runCatching { URI(if ("://" in trimmed) trimmed else "http://$trimmed") }.getOrNull() ?: return null
+        if (uri.rawUserInfo != null || uri.rawQuery != null || uri.rawFragment != null) return null
         val scheme = uri.scheme?.lowercase()?.takeIf { it == "http" || it == "https" } ?: return null
         val host = uri.host?.lowercase()?.takeIf(String::isNotBlank) ?: return null
         // IPv6 literals would put "::" into every path, which already marks archive entries.

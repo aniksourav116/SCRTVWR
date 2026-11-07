@@ -103,7 +103,15 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
                     val cleared = withContext(Dispatchers.IO) {
                         val previews = MediaPreviewLoader.clearCaches()
                         val archives = RemoteArchiveCache.clear()
-                        previews && archives
+                        val context = getApplication<Application>()
+                        val shared = java.io.File(context.cacheDir, "shared_media").listFiles()?.filter { it.isFile }
+                            ?.map { file ->
+                                val uri = androidx.core.content.FileProvider.getUriForFile(context,
+                                    "${context.packageName}.fileprovider", file)
+                                context.revokeUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                file.delete() || !file.exists()
+                            }?.all { it } ?: true
+                        previews && archives && shared
                     }
                     refreshCacheUsage()
                     _uiState.update { it.copy(cacheMessage = getApplication<Application>().getString(

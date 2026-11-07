@@ -123,6 +123,11 @@ import srv.scrtvwr.ui.dashboard.screens.viewmodels.StorageViewModel
 import srv.scrtvwr.ui.components.hasLocalNetworkAccess
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.R
+import srv.scrtvwr.BuildConfig
+import srv.scrtvwr.media.DocumentMedia
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import android.widget.Toast
 import java.text.DecimalFormat
 import srv.scrtvwr.ui.components.copyCommand
 import kotlinx.coroutines.delay
@@ -137,6 +142,20 @@ fun Storage(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val folderScope = rememberCoroutineScope()
+    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) folderScope.launch {
+            try {
+                val path = withContext(Dispatchers.IO) { DocumentMedia.rememberTree(uri) }
+                viewModel.refresh()
+                onOpenDirectory(path)
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                Toast.makeText(context, R.string.folder_access_failed, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     var pendingDirectoryPath by remember { mutableStateOf<String?>(null) }
     var hasStorageAccess by remember { mutableStateOf(context.hasRequiredStorageAccess()) }
     val legacyPermissions = remember {
@@ -219,6 +238,15 @@ fun Storage(
         onRefresh = viewModel::refresh,
         hasStorageAccess = hasStorageAccess,
         onGrantStorageAccess = requestStorageAccess,
+        onChooseFolder = { folderPicker.launch(null) },
+        onForgetFolder = { path ->
+            folderScope.launch {
+                try {
+                    withContext(Dispatchers.IO) { DocumentMedia.forgetTree(path) }
+                    viewModel.refresh()
+                } catch (_: SecurityException) { viewModel.refresh() }
+            }
+        },
         onOpenDevice = { device ->
             if (!context.hasRequiredStorageAccess()) {
                 pendingDirectoryPath = device.rootPath
@@ -268,6 +296,8 @@ fun StorageScreen(
     onOpenDevice: (StorageDevice) -> Unit,
     hasStorageAccess: Boolean = true,
     onGrantStorageAccess: () -> Unit = {},
+    onChooseFolder: () -> Unit = {},
+    onForgetFolder: (String) -> Unit = {},
     onOpenHttpServer: (HttpServer) -> Unit = {},
     onAddHttpServer: (name: String, address: String, credentials: HttpCredentials?) -> HttpServerInputError? =
         { _, _, _ -> null },
@@ -281,7 +311,7 @@ fun StorageScreen(
         credentials: HttpCredentials?,
         autoReconnect: Boolean,
     ) -> HttpServerInputError? = { _, _, _, _, _ -> null },
-    onHttpServerCredentialsChange: (HttpServer, HttpCredentials?) -> Unit = { _, _ -> },
+    onHttpServerCredentialsChange: (HttpServer, HttpCredentials?) -> HttpServerInputError? = { _, _ -> null },
     hasLocalNetworkAccess: Boolean = true,
     onGrantLocalNetworkAccess: () -> Unit = {},
     onOpenAppSettings: () -> Unit = {},
@@ -316,7 +346,15 @@ fun StorageScreen(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            if (!hasStorageAccess) {
+            if (!BuildConfig.PERSONAL_EDITION) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(stringResource(R.string.selected_folders_help))
+                        OutlinedButton(onClick = onChooseFolder) { Text(stringResource(R.string.choose_folder)) }
+                    }
+                }
+            }
+            if (BuildConfig.PERSONAL_EDITION && !hasStorageAccess) {
                 item {
                     ElevatedCard(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -345,6 +383,9 @@ fun StorageScreen(
                     device = device,
                     onClick = { onOpenDevice(device) },
                 )
+                if (DocumentMedia.isDocument(device.rootPath)) {
+                    TextButton(onClick = { onForgetFolder(device.rootPath) }) { Text(stringResource(R.string.forget_folder)) }
+                }
             }
 
             item(key = "http_servers_header") {
@@ -437,8 +478,9 @@ fun StorageScreen(
             server = server,
             onDismiss = { serverSigningIn = null },
             onSave = { credentials ->
-                onHttpServerCredentialsChange(server, credentials)
-                serverSigningIn = null
+                onHttpServerCredentialsChange(server, credentials).also { error ->
+                    if (error == null) serverSigningIn = null
+                }
             },
         )
     }
@@ -490,6 +532,8 @@ private fun LocalNetworkAccessCard(
 @Composable
 private fun HttpServerHelp() {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(if (BuildConfig.PERSONAL_EDITION) R.string.personal_network_help else R.string.play_network_help))
+        if (!BuildConfig.PERSONAL_EDITION) return@Column
         Text(
             stringResource(R.string.http_server_help),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -660,7 +704,7 @@ private fun AddHttpServerDialog(
     onAdd: (name: String, address: String, credentials: HttpCredentials?) -> HttpServerInputError?,
 ) {
     var name by remember { mutableStateOf("") }
-    var splitInput by remember { mutableStateOf(true) }
+    var splitInput by remember { mutableStateOf(BuildConfig.PERSONAL_EDITION) }
     var splitAddress by remember { mutableStateOf(Ipv4ServerAddress.Default) }
     var address by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
@@ -892,11 +936,12 @@ private fun EditHttpServerSheet(
 private fun HttpServerSignInDialog(
     server: HttpServer,
     onDismiss: () -> Unit,
-    onSave: (HttpCredentials?) -> Unit,
+    onSave: (HttpCredentials?) -> HttpServerInputError?,
 ) {
     var username by remember { mutableStateOf(server.credentials?.username.orEmpty()) }
     var password by remember { mutableStateOf(server.credentials?.password.orEmpty()) }
-    val save = { onSave(HttpCredentials.of(username, password)) }
+    var error by remember { mutableStateOf<HttpServerInputError?>(null) }
+    val save = { error = onSave(HttpCredentials.of(username, password)) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -913,6 +958,7 @@ private fun HttpServerSignInDialog(
                     onPasswordChange = { password = it },
                     onDone = save,
                 )
+                if (error != null) Text(error.message(false), color = MaterialTheme.colorScheme.error)
             }
         },
         confirmButton = {
@@ -1109,12 +1155,13 @@ private fun HttpServerInputError?.message(splitInput: Boolean): String = stringR
         HttpServerInputError.InvalidAddress ->
             if (splitInput) R.string.http_server_invalid_ip_port else R.string.http_server_invalid_address
         HttpServerInputError.AlreadyAdded -> R.string.http_server_already_added
+        HttpServerInputError.InsecureConnection -> R.string.secure_server_required
         null -> R.string.http_server_address_help
     },
 )
 
 private fun android.content.Context.hasRequiredStorageAccess(): Boolean =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+    if (!BuildConfig.PERSONAL_EDITION) true else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         Environment.isExternalStorageManager()
     } else {
         ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED &&
@@ -1149,15 +1196,17 @@ private fun StorageDeviceCard(
                     )
                 }
             }
-            Text(stringResource(R.string.storage_used, formatBytes(device.usedBytes), formatBytes(device.totalBytes)))
-            LinearProgressIndicator(
-                progress = { device.usedFraction },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Text(
-                stringResource(R.string.storage_available, formatBytes(device.availableBytes)),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (!DocumentMedia.isDocument(device.rootPath)) {
+                Text(stringResource(R.string.storage_used, formatBytes(device.usedBytes), formatBytes(device.totalBytes)))
+                LinearProgressIndicator(
+                    progress = { device.usedFraction },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    stringResource(R.string.storage_available, formatBytes(device.availableBytes)),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
                 stringResource(R.string.tap_open_directory),
                 color = MaterialTheme.colorScheme.primary,

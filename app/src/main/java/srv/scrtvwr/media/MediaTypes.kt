@@ -32,5 +32,6 @@ object MediaTypes {
     }
 
     private fun extensionOf(path: String): String =
-        path.substringAfterLast('/').substringAfterLast('\\').substringAfterLast('.', "").lowercase()
+        (if (DocumentMedia.isDocument(path)) MediaPaths.archiveEntryName(path) ?: DocumentMedia.name(path) else path)
+            .substringAfterLast('/').substringAfterLast('\\').substringAfterLast('.', "").lowercase()
 }

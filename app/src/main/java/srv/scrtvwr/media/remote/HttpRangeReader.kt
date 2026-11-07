@@ -2,7 +2,6 @@ package srv.scrtvwr.media.remote
 
 import java.io.IOException
 import java.net.HttpURLConnection
-import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 
@@ -93,20 +92,11 @@ class HttpRangeReader(
         val end = (start + blockBytes - 1).let { end ->
             totalSize?.takeIf { it >= 0 }?.let { minOf(end, it - 1) } ?: end
         }
-        val connection = try {
-            URL(url).openConnection() as HttpURLConnection
-        } catch (error: IllegalArgumentException) {
-            throw IOException("Invalid server address: $url", error)
-        }
-        this.connection = connection
+        val connection = SafeHttpConnection.open(url,
+            headers = mapOf("Range" to "bytes=$start-$end", "Accept-Encoding" to "identity"),
+            connectTimeoutMillis = CONNECT_TIMEOUT_MILLIS, readTimeoutMillis = READ_TIMEOUT_MILLIS,
+            beforeResponse = { this.connection = it; ensureRunning() })
         try {
-            connection.connectTimeout = CONNECT_TIMEOUT_MILLIS
-            connection.readTimeout = READ_TIMEOUT_MILLIS
-            connection.instanceFollowRedirects = true
-            connection.setRequestProperty("Range", "bytes=$start-$end")
-            // Offsets count the file's own bytes, so the body must not be compressed in transit.
-            connection.setRequestProperty("Accept-Encoding", "identity")
-            HttpServerAuth.authorizationFor(url)?.let { connection.setRequestProperty("Authorization", it) }
             // A cancel that came before this connection was published could not close it.
             ensureRunning()
             val status = connection.responseCode

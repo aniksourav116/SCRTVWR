@@ -138,6 +138,8 @@ object MediaPreviewLoader {
                 } else {
                     slots.withPermit { decodeRemoteImage(path, maxDimension) }
                 }
+            } else if (DocumentMedia.isDocument(path)) {
+                decodeDocument(path, maxDimension)
             } else {
                 decodeFile(path, maxDimension)
             }
@@ -206,7 +208,10 @@ object MediaPreviewLoader {
     suspend fun loadVideoFrame(path: String, modified: Long, maxDimension: Int, onScreen: Boolean = false): PreviewResult {
         if (MediaPaths.isRemote(path)) return loadRemoteVideoFrame(path, modified, maxDimension, onScreen)
         return loadCached("video:$path:$modified:$maxDimension", maxDimension) {
-            runCatching { retrieveFrame(maxDimension) { setDataSource(path) } }.fold(
+            runCatching { retrieveFrame(maxDimension) {
+                if (DocumentMedia.isDocument(path)) setDataSource(DocumentMedia.applicationContext(), DocumentMedia.uri(path))
+                else setDataSource(path)
+            } }.fold(
                 onSuccess = { PreviewResult(bitmap = it) },
                 onFailure = { PreviewResult(error = it.readableMessage("Unable to read video preview")) },
             )
@@ -354,6 +359,12 @@ object MediaPreviewLoader {
                     } ?: return@withPermit PreviewResult()
                     return@withPermit remoteImageSemaphore.withPermit { decodeRemoteImage(image.url, maxDimension) }
                 }
+                if (DocumentMedia.isDocument(path)) {
+                    val image = runCatching { DocumentMedia.list(path) }.getOrNull()?.firstOrNull {
+                        !it.isDirectory && MediaTypes.isImage(it.name)
+                    } ?: return@withPermit PreviewResult()
+                    return@withPermit decodeDocument(image.url, maxDimension)
+                }
                 val image = File(path).listFiles()?.firstOrNull { file ->
                     coroutineContext.ensureActive()
                     file.isFile && MediaTypes.isImage(file.name)
@@ -498,6 +509,15 @@ object MediaPreviewLoader {
         }
     }
 
+    private fun decodeDocument(path: String, maxDimension: Int): PreviewResult = runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        DocumentMedia.open(path).use { BitmapFactory.decodeStream(it, null, bounds) }
+        require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Unsupported or damaged image" }
+        val options = BitmapFactory.Options().apply { inSampleSize = bounds.sampleSize(maxDimension) }
+        DocumentMedia.open(path).use { BitmapFactory.decodeStream(it, null, options) }
+            ?: error("Image decoder returned no bitmap")
+    }.fold({ PreviewResult(bitmap = it) }, { PreviewResult(error = it.readableMessage("Unable to read image")) })
+
     private fun decodeFile(path: String, maxDimension: Int): PreviewResult =
         runCatching {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -620,7 +640,7 @@ object MediaPreviewLoader {
      */
     private suspend fun <T> withArchiveFile(
         archivePath: String, download: Boolean, block: suspend (File) -> T,
-    ): T? = if (MediaPaths.isRemote(archivePath)) {
+    ): T? = if (MediaPaths.isRemote(archivePath) || DocumentMedia.isDocument(archivePath)) {
         RemoteArchiveCache.withFile(archivePath, download = download, block = block)
     } else block(File(archivePath))
 

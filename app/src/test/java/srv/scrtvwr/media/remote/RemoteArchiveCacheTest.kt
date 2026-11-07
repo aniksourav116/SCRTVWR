@@ -71,26 +71,14 @@ class RemoteArchiveCacheTest {
     }
 
     @Test
-    fun file_acceptsMultiGigabyteLengthAndCleansUpWhenTheCallerStops() = runBlocking {
+    fun file_rejectsDownloadsThatWouldConsumeTheStorageReserveAndCleansUp() = runBlocking {
         val cacheDirectory = temporaryFolder.newFolder("large-cache")
         RemoteArchiveCache.initialize(cacheDirectory)
-        val declaredLength = 3L * 1024L * 1024L * 1024L
+        val declaredLength = cacheDirectory.usableSpace
         TestHttpServer(mapOf("large.cbz" to ByteArray(0)), declaredFileLength = declaredLength).use { server ->
             val url = server.url("large.cbz")
-            var reportedLength: Long? = null
-            val stoppedByCaller = IOException("Stop after headers")
-
-            val error = runCatching {
-                RemoteArchiveCache.file(url) { progress ->
-                    reportedLength = progress.totalBytes
-                    throw stoppedByCaller
-                }
-            }.exceptionOrNull()
-
-            assertEquals(declaredLength, reportedLength ?: -1L)
-            // With assertions on, kotlinx.coroutines recovers stack traces by rethrowing a copy of
-            // an exception that crosses withContext, keeping the original as its cause.
-            assertTrue(error === stoppedByCaller || error?.cause === stoppedByCaller)
+            val error = runCatching { RemoteArchiveCache.file(url) }.exceptionOrNull()
+            assertTrue(error is IOException)
             assertNull(RemoteArchiveCache.cachedFile(url))
             assertTrue(File(cacheDirectory, "remote_archives").list().orEmpty().isEmpty())
         }

@@ -62,7 +62,7 @@ class DashboardActivity : ComponentActivity() {
                 )
             }
             SCRTVWRTheme(darkTheme = darkTheme) {
-                NotificationPermissionRequest()
+                if (BuildConfig.PERSONAL_EDITION) NotificationPermissionRequest()
                 ScrtvwrApp()
             }
         }

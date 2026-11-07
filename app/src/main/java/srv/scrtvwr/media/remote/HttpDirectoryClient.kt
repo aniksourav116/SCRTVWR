@@ -15,7 +15,7 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
-import java.net.URL
+import srv.scrtvwr.media.DownloadSafety
 import java.nio.charset.Charset
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
@@ -152,6 +152,7 @@ object HttpDirectoryClient {
                 method = "GET",
                 // Blocking socket reads ignore thread interrupts; closing the connection ends them.
                 beforeResponse = { connection ->
+                    disconnectOnCancel?.cancel()
                     disconnectOnCancel = launch(start = CoroutineStart.UNDISPATCHED) {
                         try {
                             awaitCancellation()
@@ -162,6 +163,7 @@ object HttpDirectoryClient {
                 },
             ) { connection ->
                 val totalBytes = connection.contentLengthLong
+                DownloadSafety.check(target, remainingBytes = totalBytes.coerceAtLeast(0L))
                 onProgress(0L, totalBytes)
                 var downloadedBytes = 0L
                 connection.inputStream.use { input ->
@@ -172,6 +174,7 @@ object HttpDirectoryClient {
                             val read = input.read(buffer)
                             if (read < 0) break
                             downloadedBytes += read
+                            DownloadSafety.check(target, downloadedBytes, writeBytes = read.toLong())
                             output.write(buffer, 0, read)
                             onProgress(downloadedBytes, totalBytes)
                         }
@@ -239,18 +242,8 @@ object HttpDirectoryClient {
         beforeResponse: (HttpURLConnection) -> Unit = {},
         read: (HttpURLConnection) -> T,
     ): T {
-        val connection = try {
-            URL(url).openConnection() as HttpURLConnection
-        } catch (error: IllegalArgumentException) {
-            throw IOException("Invalid server address: $url", error)
-        }
+        val connection = SafeHttpConnection.open(url, method = method, beforeResponse = beforeResponse)
         try {
-            connection.requestMethod = method
-            connection.connectTimeout = CONNECT_TIMEOUT_MILLIS
-            connection.readTimeout = READ_TIMEOUT_MILLIS
-            connection.instanceFollowRedirects = true
-            HttpServerAuth.authorizationFor(url)?.let { connection.setRequestProperty("Authorization", it) }
-            beforeResponse(connection)
             val status = connection.responseCode
             if (status == HttpURLConnection.HTTP_UNAUTHORIZED) throw HttpAuthenticationException()
             if (status !in 200..299) {

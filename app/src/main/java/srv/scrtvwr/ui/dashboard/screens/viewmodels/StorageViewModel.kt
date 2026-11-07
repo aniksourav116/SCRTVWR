@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import srv.scrtvwr.R
+import srv.scrtvwr.BuildConfig
+import srv.scrtvwr.media.DocumentMedia
+import srv.scrtvwr.media.TransportSafety
 import srv.scrtvwr.media.remote.HttpAuthenticationException
 import srv.scrtvwr.media.remote.HttpCredentials
 import srv.scrtvwr.media.remote.HttpDirectoryClient
@@ -45,7 +48,7 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
     fun refresh() {
         val context = getApplication<Application>()
         val storageManager = context.getSystemService(StorageManager::class.java)
-        val volumes = storageManager.storageVolumes.mapNotNull { volume ->
+        val volumes = (if (BuildConfig.PERSONAL_EDITION) storageManager.storageVolumes else emptyList()).mapNotNull { volume ->
             val directory = volume.directory(context, storageManager) ?: return@mapNotNull null
             if (!directory.exists() || volume.state != Environment.MEDIA_MOUNTED) {
                 return@mapNotNull null
@@ -79,11 +82,18 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
         serverChecks.values.forEach { it.cancel() }
         serverChecks.clear()
         _uiState.value.httpServers.filter(HttpServerDevice::isConnected).forEach { checkHttpServer(it.server) }
+        if (!BuildConfig.PERSONAL_EDITION) viewModelScope.launch(Dispatchers.IO) {
+            val folders = DocumentMedia.roots().map { path ->
+                StorageDevice(path, DocumentMedia.name(path), context.getString(R.string.selected_folder), path, 0, 0, false)
+            }
+            _uiState.update { it.copy(devices = folders) }
+        }
     }
 
     /** Saves a new server, or returns why [address] cannot be added. */
     fun addHttpServer(name: String, address: String, credentials: HttpCredentials?): HttpServerInputError? {
-        val baseUrl = RemotePaths.normalizeServerUrl(address) ?: return HttpServerInputError.InvalidAddress
+        val baseUrl = normalizeAddress(address) ?: return HttpServerInputError.InvalidAddress
+        if (!TransportSafety.isAllowed(baseUrl, credentials != null)) return HttpServerInputError.InsecureConnection
         val servers = preferences.getHttpServers()
         if (servers.any { it.baseUrl == baseUrl }) return HttpServerInputError.AlreadyAdded
 
@@ -130,7 +140,8 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
         credentials: HttpCredentials?,
         autoReconnect: Boolean,
     ): HttpServerInputError? {
-        val baseUrl = RemotePaths.normalizeServerUrl(address) ?: return HttpServerInputError.InvalidAddress
+        val baseUrl = normalizeAddress(address) ?: return HttpServerInputError.InvalidAddress
+        if (!TransportSafety.isAllowed(baseUrl, credentials != null)) return HttpServerInputError.InsecureConnection
         val servers = preferences.getHttpServers()
         if (servers.any { it.id != server.id && it.baseUrl == baseUrl }) return HttpServerInputError.AlreadyAdded
 
@@ -156,7 +167,8 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /** Saves [credentials], or none for an open server, and checks a connected server again with them. */
-    fun setHttpServerCredentials(server: HttpServer, credentials: HttpCredentials?) {
+    fun setHttpServerCredentials(server: HttpServer, credentials: HttpCredentials?): HttpServerInputError? {
+        if (!TransportSafety.isAllowed(server.baseUrl, credentials != null)) return HttpServerInputError.InsecureConnection
         preferences.saveHttpServers(
             preferences.getHttpServers().map { if (it.id == server.id) it.copy(credentials = credentials) else it },
         )
@@ -172,6 +184,7 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
             updateServerStatus(server.id, HttpServerStatus.Checking)
             checkHttpServer(updated)
         }
+        return null
     }
 
     /**
@@ -219,6 +232,10 @@ class StorageViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private fun normalizeAddress(address: String): String? = RemotePaths.normalizeServerUrl(
+        if (!BuildConfig.PERSONAL_EDITION && "://" !in address) "https://${address.trim()}" else address,
+    )
+
     private companion object {
         const val FIRST_RECONNECT_DELAY_MILLIS = 10_000L
         const val MAX_RECONNECT_DELAY_MILLIS = 5 * 60_000L
@@ -258,6 +275,7 @@ sealed interface HttpServerStatus {
 enum class HttpServerInputError {
     InvalidAddress,
     AlreadyAdded,
+    InsecureConnection,
 }
 
 data class StorageDevice(

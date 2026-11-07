@@ -205,7 +205,7 @@
     <string name="http_server_local_network_blocked">Can\'t connect: local network access isn\'t allowed</string>
     <string name="http_server_username">Username</string>
     <string name="http_server_password">Password</string>
-    <string name="http_server_credentials_help">Only if the server asks for a password. Leave both empty otherwise.</string>
+    <string name="http_server_credentials_help">Only if the HTTPS server asks for sign-in. Passwords cannot be sent over plain HTTP. Leave both empty otherwise.</string>
     <string name="http_server_show_password">Show password</string>
     <string name="http_server_hide_password">Hide password</string>
     <string name="http_server_sign_in">Sign in</string>
@@ -378,4 +378,16 @@
     <string name="cache_viewer_summary">Downloaded images and video previews. Videos themselves are streamed.</string>
     <string name="cache_archive_limit">Archive cache limit</string>
     <string name="cache_archive_summary">Downloaded ZIP, RAR, CBZ, and CBR files.</string>
+    <string name="selected_folder">Selected folder · read only</string>
+    <string name="selected_folders_help">Choose the media folders you want SCRTVWR to read. Only those folders and their subfolders are accessible. Android may prevent selecting a storage root, Download root, or protected folders. Choose a media subfolder instead.</string>
+    <string name="choose_folder">Choose folder</string>
+    <string name="forget_folder">Remove folder access</string>
+    <string name="folder_access_failed">Unable to keep access to this folder. Choose an available media folder.</string>
+    <string name="secure_server_required">Use an https:// server with a valid certificate. The personal edition also supports private IPv4 HTTP servers without sign-in. Passwords always require HTTPS.</string>
+    <string name="play_network_help">Add an HTTPS directory-listing server with a valid certificate. Sign-in details are encrypted on this device and sent only over HTTPS. Plain HTTP servers are not supported.</string>
+    <string name="personal_network_help">Personal edition: plain HTTP is limited to private IPv4 or loopback addresses without sign-in. Anyone on the network may be able to see HTTP media and requests. Use HTTPS for private media and passwords.</string>
+    <string name="privacy_policy_title">Privacy policy</string>
+    <string name="privacy_policy_close">Close</string>
+    <string name="privacy_policy_play">SCRTVWR Play privacy policy — updated November 7, 2026.\n\nSCRTVWR Play reads only media folders you select using Android’s folder picker. It can display images, play videos, and read images in supported archives. Folder access is read only and can be removed from Storage.\n\nYour viewing history, bookmarks, server addresses, and preferences stay in this app’s private storage. Saved server passwords are encrypted using Android Keystore. The app does not send your media, history, or server settings to the developer. It contains no advertising, analytics, crash reporting, or push messaging SDKs.\n\nNetwork access: when you open a server or enable automatic reconnection, the app contacts that server over HTTPS. The server receives your IP address, requested paths, and any sign-in details you configured for it. Document providers you select may fetch files from their own cloud services. Their privacy practices apply.\n\nOpen with gives only the selected file or URL to the app you choose. That app’s privacy practices apply. Media copies and thumbnails may remain in this app’s cache until cleared or removed by Android.\n\nRetention and deletion: use Clear history, remove favorites or servers, and Clear cache to remove those records and copies. Remove folder access to revoke a saved folder grant. Clearing app storage or uninstalling removes the app’s local settings, history, credentials, and caches. It does not delete original media or records kept by your servers or other apps. App data is excluded from cloud backup and device transfer.\n\nContact: use App support on the SCRTVWR Play Google Play listing to contact the developer identified there.</string>
+    <string name="privacy_policy_personal">Personal edition differences: this privately distributed build can request all-files access and perform file operations. It permits unencrypted HTTP only for private IPv4 or loopback servers without sign-in. Release builds also use Firebase Analytics, Crashlytics, and Cloud Messaging; those services may collect app interactions, installation identifiers, device metadata, and diagnostics. Debug builds disable Analytics and Crashlytics collection. This personal build is not the Google Play edition described above.</string>
 </resources>

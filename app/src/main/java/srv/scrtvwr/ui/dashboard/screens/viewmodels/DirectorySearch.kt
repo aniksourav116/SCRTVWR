@@ -3,6 +3,7 @@ package srv.scrtvwr.ui.dashboard.screens.viewmodels
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import srv.scrtvwr.media.MediaTypes
+import srv.scrtvwr.media.DocumentMedia
 import srv.scrtvwr.media.remote.HttpDirectoryClient
 import srv.scrtvwr.media.remote.RemoteEntry
 import srv.scrtvwr.media.remote.RemotePaths
@@ -39,14 +40,15 @@ internal suspend fun searchDirectory(
     val pending = ArrayDeque<String>().apply { add(request.currentPath) }
     val visited = HashSet<String>()
     val results = ArrayList<DirectoryEntry>()
-    val localRoot = if (request.isRemote) null else File(request.currentPath).canonicalFile
+    val isDocument = DocumentMedia.isDocument(request.currentPath)
+    val localRoot = if (request.isRemote || isDocument) null else File(request.currentPath).canonicalFile
     var skipped = 0
     var readableDirectories = 0
 
     while (pending.isNotEmpty()) {
         context.ensureActive()
         val path = pending.removeLast()
-        val identity = if (request.isRemote) path else {
+        val identity = if (isDocument) DocumentMedia.key(path) else if (request.isRemote) path else {
             try { File(path).canonicalPath } catch (_: IOException) { skipped++; continue }
         }
         // Do not follow local symbolic links out of the selected tree, or visit a loop twice.
@@ -56,7 +58,12 @@ internal suspend fun searchDirectory(
         onProgress(visited.size)
 
         val entries = try {
-            if (request.isRemote) {
+            if (isDocument) {
+                DocumentMedia.list(path).filter { request.showHiddenFiles || !it.isHidden }.map { entry ->
+                    DirectoryEntry(entry.name, entry.url, entry.isDirectory, entry.sizeBytes,
+                        entry.lastModifiedMillis, searchMediaType(entry.url, entry.isDirectory))
+                }
+            } else if (request.isRemote) {
                 HttpDirectoryClient.list(path, refresh = reload)
                     .filter { RemotePaths.isSameOrChildOf(it.url, path) && it.url != path }
                     .filter { request.showHiddenFiles || !it.isHidden }

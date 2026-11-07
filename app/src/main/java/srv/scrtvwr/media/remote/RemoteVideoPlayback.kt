@@ -4,8 +4,7 @@ import android.content.Context
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.datasource.DataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.LoadControl
@@ -15,17 +14,8 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 @OptIn(UnstableApi::class)
 object RemoteVideoPlayback {
     fun player(context: Context, loadControl: LoadControl = loadControl()): ExoPlayer {
-        val http = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(HttpDirectoryClient.CONNECT_TIMEOUT_MILLIS)
-            .setReadTimeoutMs(HttpDirectoryClient.READ_TIMEOUT_MILLIS)
-            .setDefaultRequestProperties(mapOf("Cache-Control" to "no-store"))
-        // Looked up per request, since a playlist can move between servers.
-        val authenticated = ResolvingDataSource.Factory(http) { dataSpec ->
-            HttpServerAuth.authorizationFor(dataSpec.uri.toString())
-                ?.let { dataSpec.withAdditionalHeaders(mapOf("Authorization" to it)) }
-                ?: dataSpec
-        }
-        val sources = DefaultMediaSourceFactory(DefaultDataSource.Factory(context, authenticated))
+        val http = DataSource.Factory { SafeMediaDataSource() }
+        val sources = DefaultMediaSourceFactory(DefaultDataSource.Factory(context, http))
         return ExoPlayer.Builder(context)
             .setMediaSourceFactory(sources)
             .setLoadControl(loadControl)

@@ -508,7 +508,11 @@ private fun VideoPage(
     var savedPlaybackPosition by rememberSaveable(item.path) { mutableLongStateOf(0L) }
     val mediaItem = remember(item.path) {
         // Server files stream through ExoPlayer's HTTP data source straight from their URL.
-        MediaItem.fromUri(if (MediaPaths.isRemote(item.path)) Uri.parse(item.path) else Uri.fromFile(File(item.path)))
+        MediaItem.fromUri(when {
+            srv.scrtvwr.media.DocumentMedia.isDocument(item.path) -> srv.scrtvwr.media.DocumentMedia.uri(item.path)
+            MediaPaths.isRemote(item.path) -> Uri.parse(item.path)
+            else -> Uri.fromFile(File(item.path))
+        })
     }
     val preBufferControl = remember(item.path) {
         PreBufferLoadControl(

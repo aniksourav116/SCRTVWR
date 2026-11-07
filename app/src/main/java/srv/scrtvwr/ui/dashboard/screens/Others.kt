@@ -75,6 +75,8 @@ import srv.scrtvwr.ui.media.SlideShowDirection
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
 import srv.scrtvwr.ui.theme.ThemeMode
 import srv.scrtvwr.R
+import srv.scrtvwr.BuildConfig
+import srv.scrtvwr.ui.components.PrivacyPolicyButton
 
 @Composable
 fun Others(
@@ -145,6 +147,7 @@ fun OthersScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item { SettingsSectionHeader(stringResource(R.string.settings_section_appearance), isFirst = true) }
+        item { PrivacyPolicyButton() }
         item {
             val themeLabels = ThemeMode.entries.associateWith { mode -> stringResource(mode.labelResource()) }
             ListItem(
@@ -204,7 +207,7 @@ fun OthersScreen(
                 },
             )
         }
-        item {
+        if (BuildConfig.PERSONAL_EDITION) item {
             ListItem(
                 modifier = Modifier.fillMaxWidth(),
                 headlineContent = { Text(stringResource(R.string.show_directory_file_actions)) },

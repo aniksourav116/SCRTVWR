@@ -11,7 +11,8 @@ class RemotePathsTest {
     fun normalizeServerUrl_defaultsToHttpAndEndsWithSlash() {
         assertEquals("http://192.168.1.20:8000/", RemotePaths.normalizeServerUrl(" 192.168.1.20:8000 "))
         assertEquals("http://nas.local:8000/media/", RemotePaths.normalizeServerUrl("HTTP://NAS.local:8000/media"))
-        assertEquals("https://example.com/", RemotePaths.normalizeServerUrl("https://example.com/?sort=name#top"))
+        assertNull(RemotePaths.normalizeServerUrl("https://example.com/?sort=name#top"))
+        assertNull(RemotePaths.normalizeServerUrl("https://user:password@example.com/"))
     }
 
     @Test

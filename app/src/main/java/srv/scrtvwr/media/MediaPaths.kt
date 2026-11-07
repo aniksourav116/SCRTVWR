@@ -33,12 +33,17 @@ object MediaPaths {
     fun link(path: String?): String? = path?.let(::archivePath)?.takeIf(::isRemote)
 
     /** Directory holding [path]: an absolute local path, or a directory URL ending with `/`. */
-    fun parent(path: String): String? =
-        if (isRemote(path)) RemotePaths.parent(path) else File(path).parentFile?.absolutePath
+    fun parent(path: String): String? = when {
+        DocumentMedia.isDocument(path) -> DocumentMedia.parent(path)
+        isRemote(path) -> RemotePaths.parent(path)
+        else -> File(path).parentFile?.absolutePath
+    }
 
-    fun name(path: String): String =
-        if (isRemote(path)) RemotePaths.name(path) else File(path).name.ifBlank { path }
+    fun name(path: String): String = when {
+        DocumentMedia.isDocument(path) -> DocumentMedia.name(path)
+        isRemote(path) -> RemotePaths.name(path)
+        else -> File(path).name.ifBlank { path }
+    }
 
-    fun extension(path: String): String =
-        if (isRemote(path)) RemotePaths.extension(path) else File(path).extension.lowercase()
+    fun extension(path: String): String = name(path).substringAfterLast('.', "").lowercase()
 }

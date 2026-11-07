@@ -26,6 +26,7 @@ import srv.scrtvwr.ui.sort.DirectorySortOrder
 import srv.scrtvwr.ui.sort.fileComparator
 import srv.scrtvwr.ui.sort.needsFileMetadata
 import java.io.File
+import srv.scrtvwr.media.DocumentMedia
 import java.io.IOException
 
 /**
@@ -199,7 +200,14 @@ class VideoPlayerViewModel(
     }
 
     private suspend fun readFolder(directoryPath: String?, selectedPath: String?, sortOrder: DirectorySortOrder): VideoFolder =
-        if (MediaPaths.isRemote(directoryPath ?: selectedPath)) {
+        if (DocumentMedia.isDocument(directoryPath ?: selectedPath)) {
+            val directory = directoryPath ?: selectedPath?.let(DocumentMedia::parent)
+            try {
+                VideoFolder(directory, directory?.let { DocumentMedia.mediaItems(it, sortOrder).videos() }.orEmpty())
+            } catch (error: IOException) {
+                VideoFolder(directory, emptyList(), listingError = error.message)
+            }
+        } else if (MediaPaths.isRemote(directoryPath ?: selectedPath)) {
             loadRemoteVideoFolder(directoryPath, selectedPath, sortOrder)
         } else {
             loadVideoFolder(directoryPath, selectedPath, sortOrder)
@@ -220,9 +228,15 @@ class VideoPlayerViewModel(
         preparedFolder = PreparedFolder(target.path, target.selectedMediaPath, sortOrder, folder)
     }
 
-    private suspend fun findNeighbour(folder: LoadedFolder, next: Boolean): VideoDirectoryTarget? =
-        try {
-            if (folder.isRemote) {
+    private suspend fun findNeighbour(folder: LoadedFolder, next: Boolean): VideoDirectoryTarget? {
+        return try {
+            if (DocumentMedia.isDocument(folder.path)) {
+                val target = DocumentMedia.neighbour(folder.path, next, folder.sortOrder) ?: return null
+                val items = DocumentMedia.mediaItems(target.path, folder.sortOrder)
+                val item = items.videos().firstOrNull() ?: items.firstOrNull() ?: return null
+                VideoDirectoryTarget(target.name, target.path,
+                    if (item.type == MediaViewerType.Video) VideoDirectoryType.Video else VideoDirectoryType.Image, item.path)
+            } else if (folder.isRemote) {
                 val root = RemotePaths.resolveRoot(
                     folder.path,
                     preferences.getHttpServers().serverFor(folder.path)?.baseUrl,
@@ -254,6 +268,7 @@ class VideoPlayerViewModel(
             // A folder that cannot be walked from simply has no neighbour to offer.
             null
         }
+    }
 
     private companion object {
         const val STATE_DIRECTORY = "video_directory"

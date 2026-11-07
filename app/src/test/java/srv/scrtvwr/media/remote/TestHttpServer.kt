@@ -24,7 +24,12 @@ class TestHttpServer(
     private val declaredFileLength: Long? = null,
     private val requiredAuthorization: String? = null,
     private val supportsRanges: Boolean = false,
+    private val redirects: Map<String, String> = emptyMap(),
 ) : Closeable {
+    init {
+        // Loopback HTTP fixtures exercise personal-only transport. Play rejects HTTP before I/O.
+        org.junit.Assume.assumeTrue("Plain HTTP fixture belongs to the personal edition", srv.scrtvwr.BuildConfig.PERSONAL_EDITION)
+    }
     private val serverSocket = ServerSocket(0, 50, InetAddress.getLoopbackAddress())
     private val fileRequestCount = AtomicInteger()
 
@@ -76,6 +81,7 @@ class TestHttpServer(
         val path = URI(requestLine.substringAfter(' ').substringBefore(' ')).path.removePrefix("/")
         val file = files[path]
         val (status, contentType, body) = when {
+            path in redirects -> Triple("302 Found\r\nLocation: ${redirects.getValue(path)}", "text/plain", ByteArray(0))
             requiredAuthorization != null && authorization != requiredAuthorization ->
                 Triple("401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"media\"", "text/plain", ByteArray(0))
             path.isEmpty() || path.endsWith("/") ->

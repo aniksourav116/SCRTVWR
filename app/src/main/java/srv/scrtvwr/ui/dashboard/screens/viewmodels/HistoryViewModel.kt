@@ -13,6 +13,7 @@ import srv.scrtvwr.media.remote.serverFor
 import srv.scrtvwr.preferences.MediaHistorySnapshot
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import java.io.File
+import srv.scrtvwr.media.DocumentMedia
 
 class HistoryViewModel(
     application: Application,
@@ -161,6 +162,15 @@ private fun List<srv.scrtvwr.preferences.LastMediaSession>.mediaHistoryItems(
 ): List<HistoryDirectoryItem> =
     mapNotNull { session ->
         val mediaPath = session.mediaPath ?: return@mapNotNull null
+        if (DocumentMedia.isDocument(session.directoryPath)) {
+            if (!DocumentMedia.isDirectory(session.directoryPath) || !DocumentMedia.exists(mediaPath.substringBefore("::"))) {
+                return@mapNotNull null
+            }
+            return@mapNotNull HistoryDirectoryItem(
+                name = MediaPaths.name(if (mediaPath.contains("::")) mediaPath.substringBefore("::") else session.directoryPath),
+                path = session.directoryPath, mediaPath = mediaPath, viewedAtMillis = session.viewedAtMillis,
+            )
+        }
         if (MediaPaths.isRemote(session.directoryPath)) {
             // Checking every entry would mean a request per row; keep those on connected servers.
             if (servers.serverFor(session.directoryPath) == null) return@mapNotNull null

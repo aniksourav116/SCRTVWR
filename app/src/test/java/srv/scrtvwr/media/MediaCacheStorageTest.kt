@@ -20,13 +20,14 @@ class MediaCacheStorageTest {
         write("remote_archives/book.zip", 30)
         write("remote_archives/download.part", 40)
         write("remote_images/copy.part", 50)
+        write("shared_media/selected.mp4", 60)
         write("unrelated/file", 100)
 
         val usage = mediaCacheUsage(root)
         assertEquals(10L, usage.thumbnailsBytes)
         assertEquals(20L, usage.viewerBytes)
         assertEquals(30L, usage.archivesBytes)
-        assertEquals(90L, usage.temporaryBytes)
-        assertEquals(150L, usage.totalBytes)
+        assertEquals(150L, usage.temporaryBytes)
+        assertEquals(210L, usage.totalBytes)
     }
 }

@@ -1,6 +1,7 @@
 package srv.scrtvwr
 
 import android.app.Application
+import srv.scrtvwr.media.DocumentMedia
 import srv.scrtvwr.firebase.ScrtvwrFirebase
 import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.remote.HttpServerAuth
@@ -15,6 +16,7 @@ import timber.log.Timber
 class ScrtvwrApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        DocumentMedia.initialize(this)
         TimeUtil.initialize(this)
         if (BuildConfig.DEBUG) {
             Timber.plant(CustomLogger())

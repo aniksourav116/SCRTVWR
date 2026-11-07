@@ -4,10 +4,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import srv.scrtvwr.media.CacheAccess
 import java.io.File
+import srv.scrtvwr.media.DocumentMedia
+import srv.scrtvwr.media.MediaPaths
+import srv.scrtvwr.media.DownloadSafety
 import java.io.IOException
 import java.security.MessageDigest
 
@@ -111,13 +115,30 @@ object RemoteArchiveCache {
         val temporary = File.createTempFile("download-", PARTIAL_SUFFIX, cache)
         try {
             var reportedAtMillis = 0L
-            HttpDirectoryClient.download(archiveUrl, temporary) { downloadedBytes, totalBytes ->
+            val progress: (Long, Long) -> Unit = { downloadedBytes, totalBytes ->
                 val now = System.currentTimeMillis()
                 if (now - reportedAtMillis >= PROGRESS_INTERVAL_MILLIS || downloadedBytes == totalBytes) {
                     reportedAtMillis = now
                     onProgress(DownloadProgress(downloadedBytes, totalBytes))
                 }
             }
+            if (DocumentMedia.isDocument(archiveUrl)) {
+                DocumentMedia.open(archiveUrl).use { input ->
+                    temporary.outputStream().use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        var received = 0L
+                        while (true) {
+                            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            received += count
+                            DownloadSafety.check(temporary, received, writeBytes = count.toLong())
+                            output.write(buffer, 0, count)
+                            progress(received, -1L)
+                        }
+                    }
+                }
+            } else HttpDirectoryClient.download(archiveUrl, temporary, progress)
             if (!temporary.renameTo(target)) throw IOException("Unable to store the downloaded archive")
         } finally {
             temporary.delete()
@@ -137,7 +158,7 @@ object RemoteArchiveCache {
     fun fileName(archiveUrl: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(archiveUrl.toByteArray(Charsets.UTF_8))
         val hash = digest.joinToString(separator = "") { byte -> "%02x".format(byte) }
-        val extension = RemotePaths.extension(archiveUrl)
+        val extension = MediaPaths.extension(archiveUrl)
             .filter { it in 'a'..'z' || it in '0'..'9' }
             .take(MAX_EXTENSION_LENGTH)
         return if (extension.isEmpty()) hash else "$hash.$extension"

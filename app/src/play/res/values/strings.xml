@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SCRTVWR Play</string>
+    <string name="storage_devices">Media folders</string>
+    <string name="no_storage_devices">No media folders selected. Use Choose folder above.</string>
+    <string name="http_servers">Media servers</string>
+    <string name="add_http_server">Add media server</string>
+    <string name="http_server_address_help">For example: https://media.example.com/photos/</string>
+    <string name="http_server_invalid_address">Enter an HTTPS address with a host name or IPv4 address.</string>
+</resources>

@@ -22,7 +22,7 @@ fun mediaCacheUsage(cacheDirectory: File): MediaCacheUsage {
         viewerBytes = bytes("remote_media"),
         archivesBytes = File(cacheDirectory, "remote_archives").listFiles()
             ?.filter { it.isFile && !it.name.endsWith(".part") }?.sumOf(File::length) ?: 0L,
-        temporaryBytes = bytes("remote_images") + (File(cacheDirectory, "remote_archives").listFiles()
+        temporaryBytes = bytes("remote_images") + bytes("shared_media") + (File(cacheDirectory, "remote_archives").listFiles()
             ?.filter { it.isFile && it.name.endsWith(".part") }?.sumOf(File::length) ?: 0L),
         availableBytes = cacheDirectory.usableSpace,
     )

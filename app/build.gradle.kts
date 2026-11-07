@@ -10,8 +10,8 @@ plugins {
     alias(libs.plugins.firebase.appdistribution)
 }
 
-// Release signing is optional: builds still work without a keystore, they just stay
-// debug-signed. Values come from the environment first (CI) then keystore.properties.
+// Release signing comes from the environment first, then keystore.properties.
+// Without an upload key, release stays unsigned and never uses the debug key.
 val keystoreProperties = Properties().apply {
     val file = rootProject.file("keystore.properties")
     if (file.exists()) {
@@ -62,6 +62,19 @@ android {
         }
     }
 
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("personal") {
+            dimension = "distribution"
+            buildConfigField("boolean", "PERSONAL_EDITION", "true")
+        }
+        create("play") {
+            dimension = "distribution"
+            applicationIdSuffix = ".play"
+            buildConfigField("boolean", "PERSONAL_EDITION", "false")
+        }
+    }
+
     buildTypes {
         debug {
             signingConfig = signingConfigs.getByName("debug")
@@ -105,7 +118,7 @@ firebaseAppDistribution {
 
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
-    implementation(platform(libs.firebase.bom))
+    "personalImplementation"(platform(libs.firebase.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material3.adaptive.navigation.suite)
@@ -117,9 +130,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
-    implementation(libs.firebase.analytics)
-    implementation(libs.firebase.crashlytics)
-    implementation(libs.firebase.messaging)
+    "personalImplementation"(libs.firebase.analytics)
+    "personalImplementation"(libs.firebase.crashlytics)
+    "personalImplementation"(libs.firebase.messaging)
     implementation(libs.timber)
     implementation(libs.junrar)
     implementation(libs.androidx.media3.exoplayer)
@@ -131,4 +144,22 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+}
+
+// Play has no Firebase SDKs or Firebase application registration.
+tasks.configureEach {
+    if (name.contains("Play") &&
+        (name.endsWith("GoogleServices") || name.contains("Crashlytics") || name.startsWith("appDistribution"))) {
+        enabled = false
+    }
+    if (name in setOf("packagePlayRelease", "packagePlayReleaseBundle", "bundlePlayRelease", "assemblePlayRelease")) {
+        doFirst {
+            val configuredKeystore = releaseKeystore
+            check(configuredKeystore != null && configuredKeystore.canonicalFile != file("debug.keystore").canonicalFile &&
+                listOf("storePassword" to "SCRTVWR_STORE_PASSWORD", "keyAlias" to "SCRTVWR_KEY_ALIAS",
+                    "keyPassword" to "SCRTVWR_KEY_PASSWORD").all { (property, env) -> !signingValue(property, env).isNullOrBlank() }) {
+                "Configure a production upload keystore before packaging Play release. See docs/PLAY_RELEASE.md."
+            }
+        }
+    }
 }
