@@ -258,6 +258,13 @@ private fun VideoPagerScreen(
     val videos = uiState.videos
     val previousDirectory = uiState.previousDirectory
     val nextDirectory = uiState.nextDirectory
+    fun moveToDirectory(directory: VideoDirectoryTarget) {
+        if (directory.type == VideoDirectoryType.Video) {
+            viewModel.moveTo(directory)
+        } else {
+            onOpenImageDirectory(directory.path, directory.selectedMediaPath)
+        }
+    }
     // A folder page always sits at each end, searching until the neighbouring folder is known, so
     // the videos never shift when the answer arrives.
     val firstVideoPageIndex = 1
@@ -306,6 +313,15 @@ private fun VideoPagerScreen(
                     viewModel.findNeighbourDirectories()
                 }
             }
+    }
+
+    LaunchedEffect(uiState.loadId, uiState.isLoading, videos.size, pagerState.settledPage, nextDirectory) {
+        // Wait until the forward swipe settles; folder pages are also composed off screen.
+        if (!uiState.isLoading && videos.size == 1 &&
+            pagerState.settledPage == firstVideoPageIndex + videos.size && nextDirectory != null
+        ) {
+            moveToDirectory(nextDirectory)
+        }
     }
 
     // The next video in the swipe direction is prepared paused, its first seconds buffered, once
@@ -421,22 +437,25 @@ private fun VideoPagerScreen(
                         VideoDirectoryDirection.Next
                     }
                     val directory = if (direction == VideoDirectoryDirection.Previous) previousDirectory else nextDirectory
-                    VideoDirectoryPage(
-                        directory = directory,
-                        isSearching = if (direction == VideoDirectoryDirection.Previous) {
-                            !uiState.isPreviousDirectoryKnown
-                        } else {
-                            !uiState.isNextDirectoryKnown
-                        },
-                        direction = direction,
-                        onMove = {
-                            if (directory?.type == VideoDirectoryType.Video) {
-                                viewModel.moveTo(directory)
-                            } else if (directory != null) {
-                                onOpenImageDirectory(directory.path, directory.selectedMediaPath)
-                            }
-                        },
-                    )
+                    val isSearching = if (direction == VideoDirectoryDirection.Previous) {
+                        !uiState.isPreviousDirectoryKnown
+                    } else {
+                        !uiState.isNextDirectoryKnown
+                    }
+                    if (videos.size == 1 && direction == VideoDirectoryDirection.Next &&
+                        (isSearching || directory != null)
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                    } else {
+                        VideoDirectoryPage(
+                            directory = directory,
+                            isSearching = isSearching,
+                            direction = direction,
+                            onMove = { directory?.let(::moveToDirectory) },
+                        )
+                    }
                 }
             }
         }
