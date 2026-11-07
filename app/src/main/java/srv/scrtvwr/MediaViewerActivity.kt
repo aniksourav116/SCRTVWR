@@ -613,6 +613,15 @@ private fun MediaViewerScreen(
                         }
                     },
                     actions = {
+                        selectedItem?.takeIf { canOpenWithOtherApp(it.path) }?.let { item ->
+                            IconButton(onClick = {
+                                onSlideShowStop()
+                                isPseudoSlideShowRunning = false
+                                context.openWithOtherApp(item.path, item.name)
+                            }) {
+                                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = stringResource(R.string.open_with))
+                            }
+                        }
                         Box {
                             IconButton(onClick = { menuExpanded = true }) {
                                 Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_options))
@@ -700,6 +709,8 @@ private fun MediaViewerScreen(
                                         text = { Text(stringResource(R.string.open_with)) },
                                         leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null) },
                                         onClick = {
+                                            onSlideShowStop()
+                                            isPseudoSlideShowRunning = false
                                             context.openWithOtherApp(item.path, item.name)
                                             menuExpanded = false
                                         },

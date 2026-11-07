@@ -988,6 +988,14 @@ private fun BoxScope.VideoControls(
                     )
                 }
             }
+            if (canOpenWithOtherApp(item.path)) {
+                IconButton(onClick = {
+                    player.pause()
+                    context.openWithOtherApp(item.path, item.name)
+                }, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.AutoMirrored.Filled.OpenInNew, stringResource(R.string.open_with), tint = Color.White)
+                }
+            }
             IconButton(
                 onClick = { onOptionsExpandedChange(!optionsExpanded) },
                 modifier = Modifier.size(40.dp),
@@ -1018,7 +1026,7 @@ private fun BoxScope.VideoControls(
                 onMoveToLast = onMoveToLast,
                 onCopyLink = MediaPaths.link(item.path)?.let { link -> { context.copyLink(link) } },
                 onOpenWith = if (canOpenWithOtherApp(item.path)) {
-                    { context.openWithOtherApp(item.path, item.name) }
+                    { player.pause(); context.openWithOtherApp(item.path, item.name) }
                 } else {
                     null
                 },

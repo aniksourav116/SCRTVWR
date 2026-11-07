@@ -2,6 +2,7 @@ package srv.scrtvwr.ui.components
 
 import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
 import android.webkit.MimeTypeMap
@@ -22,19 +23,24 @@ fun Context.openWithOtherApp(path: String, name: String) {
         .getMimeTypeFromExtension(MediaPaths.extension(path))
         ?: "*/*"
 
-    val intent = if (MediaPaths.isRemote(path)) {
-        // Other apps can stream or download a server file from its URL directly.
-        Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(path), mimeType)
-    } else {
-        val uri = FileProvider.getUriForFile(this, FILE_PROVIDER_AUTHORITY, File(path))
-        Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, mimeType)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    }
-
     try {
+        val intent = if (MediaPaths.isRemote(path)) {
+            // Other apps can stream or download a server file from its URL directly.
+            Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(path), mimeType)
+        } else {
+            val uri = FileProvider.getUriForFile(this, FILE_PROVIDER_AUTHORITY, File(path))
+            Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, mimeType)
+                .apply { clipData = ClipData.newRawUri(name, uri) }
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
         startActivity(Intent.createChooser(intent, name))
     } catch (_: ActivityNotFoundException) {
         Toast.makeText(this, getString(R.string.no_app_found_to_open_file), Toast.LENGTH_SHORT).show()
+    } catch (_: IllegalArgumentException) {
+        Toast.makeText(this, getString(R.string.cannot_open_file), Toast.LENGTH_SHORT).show()
+    } catch (_: SecurityException) {
+        Toast.makeText(this, getString(R.string.cannot_open_file), Toast.LENGTH_SHORT).show()
     }
 }

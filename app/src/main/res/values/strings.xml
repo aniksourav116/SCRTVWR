@@ -360,4 +360,5 @@
     <string name="search_results_count">%1$d results</string>
     <string name="search_no_filter_results">No files match these filters.</string>
     <string name="search_skipped_folders">%1$d folders could not be read. Results may be incomplete.</string>
+    <string name="cannot_open_file">Unable to give this file to another app.</string>
 </resources>

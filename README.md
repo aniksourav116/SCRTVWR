@@ -60,6 +60,11 @@ stay inside the open folder, skip hidden folders unless enabled, and do not expa
 HTTP searches visit the server's folder listings and request metadata only for matching files
 when a filter or sort needs it. Files without the required metadata are excluded.
 
+Both viewers have an **Open with** toolbar button as well as their existing menu/tray option.
+It offers installed apps for a local file or remote URL. Individual images inside an archive
+do not have a standalone file to hand to another app. Password-protected URLs may require the
+other app to sign in separately.
+
 ## Verification
 
 From the repository folder, run these when you want to verify changes:
