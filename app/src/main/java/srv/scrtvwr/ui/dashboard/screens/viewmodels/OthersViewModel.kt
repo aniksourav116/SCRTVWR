@@ -2,10 +2,24 @@ package srv.scrtvwr.ui.dashboard.screens.viewmodels
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import srv.scrtvwr.media.MediaPreviewLoader
+import srv.scrtvwr.media.MediaCacheUsage
+import srv.scrtvwr.media.mediaCacheUsage
+import srv.scrtvwr.media.remote.RemoteArchiveCache
+import srv.scrtvwr.preferences.CacheLimits
+import srv.scrtvwr.preferences.MEBIBYTE
+import srv.scrtvwr.R
 import srv.scrtvwr.preferences.DirectoryVideoPlayer
 import srv.scrtvwr.preferences.ScrtvwrPreferences
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
@@ -16,6 +30,8 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
     private val preferences = ScrtvwrPreferences(application)
     private val _uiState = MutableStateFlow(settingsState())
     val uiState = _uiState.asStateFlow()
+    private val cacheOperation = Mutex()
+    private var cacheLimitJob: Job? = null
 
     private fun settingsState(): OthersUiState =
         OthersUiState(
@@ -31,6 +47,7 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
             loadVideoThumbnails = preferences.getLoadVideoThumbnails(),
             serverDetailSorting = preferences.getServerDetailSorting(),
             directoryVideoPlayer = preferences.getDirectoryVideoPlayer(),
+            cacheLimits = preferences.getCacheLimits(),
         )
 
     fun setThemeMode(mode: ThemeMode) {
@@ -42,7 +59,65 @@ class OthersViewModel(application: Application) : AndroidViewModel(application) 
         preferences.resetSettings()
         // Video thumbnails come back on, so their slow-loading check starts over too.
         MediaPreviewLoader.resetVideoFrameLoadWarning()
-        _uiState.value = settingsState()
+        val previous = _uiState.value
+        _uiState.value = settingsState().copy(cacheUsage = previous.cacheUsage, cacheBusy = previous.cacheBusy)
+        setCacheLimits(preferences.getCacheLimits())
+    }
+
+    suspend fun refreshCacheUsage() {
+        val usage = withContext(Dispatchers.IO) { mediaCacheUsage(getApplication<Application>().cacheDir) }
+        _uiState.update { it.copy(cacheUsage = usage) }
+    }
+
+    fun setCacheLimits(limits: CacheLimits) {
+        val bounded = limits.bounded()
+        preferences.saveCacheLimits(bounded)
+        _uiState.update { it.copy(cacheLimits = bounded) }
+        cacheLimitJob?.cancel()
+        cacheLimitJob = viewModelScope.launch {
+            cacheOperation.withLock {
+                _uiState.update { it.copy(cacheBusy = true, cacheMessage = null) }
+                try {
+                    withContext(Dispatchers.IO) {
+                        MediaPreviewLoader.setCacheLimits(bounded)
+                        RemoteArchiveCache.setMaxBytes(bounded.archivesMiB * MEBIBYTE)
+                    }
+                    refreshCacheUsage()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    _uiState.update { it.copy(cacheMessage = getApplication<Application>().getString(R.string.cache_operation_failed)) }
+                } finally {
+                    _uiState.update { it.copy(cacheBusy = false) }
+                }
+            }
+        }
+    }
+
+    fun clearCache() {
+        if (_uiState.value.cacheBusy) return
+        _uiState.update { it.copy(cacheBusy = true, cacheMessage = null) }
+        viewModelScope.launch {
+            cacheOperation.withLock {
+                try {
+                    val cleared = withContext(Dispatchers.IO) {
+                        val previews = MediaPreviewLoader.clearCaches()
+                        val archives = RemoteArchiveCache.clear()
+                        previews && archives
+                    }
+                    refreshCacheUsage()
+                    _uiState.update { it.copy(cacheMessage = getApplication<Application>().getString(
+                        if (cleared) R.string.cache_cleared else R.string.cache_clear_incomplete,
+                    )) }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    _uiState.update { it.copy(cacheMessage = getApplication<Application>().getString(R.string.cache_operation_failed)) }
+                } finally {
+                    _uiState.update { it.copy(cacheBusy = false) }
+                }
+            }
+        }
     }
 
     fun setShowHiddenFiles(enabled: Boolean) {
@@ -117,6 +192,10 @@ val SLIDE_SHOW_STAY_MILLIS_RANGE = 1L..600_000L
 val PRELOAD_DISTANCE_RANGE = 0..20
 
 data class OthersUiState(
+    val cacheLimits: CacheLimits = CacheLimits(),
+    val cacheUsage: MediaCacheUsage? = null,
+    val cacheBusy: Boolean = false,
+    val cacheMessage: String? = null,
     val themeMode: ThemeMode = ThemeMode.System,
     val showHiddenFiles: Boolean = false,
     val showDirectoryFileActions: Boolean = false,

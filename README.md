@@ -47,7 +47,7 @@ Remote images and archives also have no download-size cap, subject to available 
 Images download to a temporary file, decode at the requested resolution, and delete the
 original temporary file after decoding, failure, or cancellation. Small decoded thumbnails
 may remain cached. Archives need a complete local copy for ZIP/RAR random access and use a
-1 GiB cache budget; the archive being opened is retained even if it exceeds that budget.
+1 GiB default cache budget; the archive being opened is retained even if it exceeds that budget.
 The existing 128 MiB limit on each decompressed archive image remains in place.
 
 ## Search and viewer actions
@@ -64,6 +64,18 @@ Both viewers have an **Open with** toolbar button as well as their existing menu
 It offers installed apps for a local file or remote URL. Individual images inside an archive
 do not have a standalone file to hand to another app. Password-protected URLs may require the
 other app to sign in separately.
+
+## Cache controls
+
+Under Settings, **Media cache** shows thumbnails, viewer copies, archives, temporary downloads,
+and available device storage. Usage updates while Settings is visible. The three completed-file
+cache limits are adjustable and saved; defaults are 64 MiB, 512 MiB, and 1024 MiB respectively.
+Older copies are evicted when limits are reduced. The most recent viewer copy or archive is
+retained even when it exceeds its budget, and active downloads may temporarily use more space.
+
+**Clear cache** removes cached previews, viewer copies, and completed remote archives after
+active readers and downloads finish. Original media, bookmarks, history, and server settings
+are preserved. Screens that remain active can create new cached files afterward.
 
 ## Verification
 

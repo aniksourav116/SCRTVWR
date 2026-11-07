@@ -193,6 +193,9 @@ class ScrtvwrPreferences(context: Context) {
             .remove(KEY_HOLD_SLIDE_SHOW_ENABLED)
             .remove(KEY_IMAGE_PRELOAD_DISTANCE)
             .remove(KEY_VIDEO_PRELOAD_DISTANCE)
+            .remove(KEY_THUMBNAIL_CACHE_MIB)
+            .remove(KEY_VIEWER_CACHE_MIB)
+            .remove(KEY_ARCHIVE_CACHE_MIB)
             .apply()
     }
 
@@ -213,6 +216,21 @@ class ScrtvwrPreferences(context: Context) {
     private fun GestureTipsScreen.preferenceKey(): String = when (this) {
         GestureTipsScreen.Viewer -> KEY_GESTURE_TIPS_VIEWER_SEEN
         GestureTipsScreen.Player -> KEY_GESTURE_TIPS_PLAYER_SEEN
+    }
+
+    fun getCacheLimits(): CacheLimits = CacheLimits(
+        thumbnailsMiB = preferences.getLong(KEY_THUMBNAIL_CACHE_MIB, 64L),
+        viewerMiB = preferences.getLong(KEY_VIEWER_CACHE_MIB, 512L),
+        archivesMiB = preferences.getLong(KEY_ARCHIVE_CACHE_MIB, 1024L),
+    ).bounded()
+
+    fun saveCacheLimits(limits: CacheLimits) {
+        val bounded = limits.bounded()
+        preferences.edit()
+            .putLong(KEY_THUMBNAIL_CACHE_MIB, bounded.thumbnailsMiB)
+            .putLong(KEY_VIEWER_CACHE_MIB, bounded.viewerMiB)
+            .putLong(KEY_ARCHIVE_CACHE_MIB, bounded.archivesMiB)
+            .apply()
     }
 
     fun getBookmarkedMedia(): Set<String> =
@@ -417,6 +435,9 @@ class ScrtvwrPreferences(context: Context) {
         }.getOrDefault(emptyList())
 
     private companion object {
+        const val KEY_THUMBNAIL_CACHE_MIB = "thumbnail_cache_mib"
+        const val KEY_VIEWER_CACHE_MIB = "viewer_cache_mib"
+        const val KEY_ARCHIVE_CACHE_MIB = "archive_cache_mib"
         const val PREFERENCES_NAME = "scrtvwr_preferences"
         const val KEY_SLIDE_SHOW_STAY_MILLIS = "slide_show_stay_millis"
         const val KEY_HOLD_SLIDE_SHOW_ENABLED = "hold_slide_show_enabled"

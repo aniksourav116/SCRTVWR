@@ -6,6 +6,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import srv.scrtvwr.media.CacheAccess
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
@@ -28,6 +29,8 @@ data class DownloadProgress(val downloadedBytes: Long, val totalBytes: Long) {
  */
 object RemoteArchiveCache {
     private const val MAX_CACHE_BYTES = 1024L * 1024L * 1024L
+    @Volatile private var maxCacheBytes = MAX_CACHE_BYTES
+    private val access = CacheAccess()
     private const val DIRECTORY_NAME = "remote_archives"
     private const val PARTIAL_SUFFIX = ".part"
     private const val PROGRESS_INTERVAL_MILLIS = 200L
@@ -39,7 +42,8 @@ object RemoteArchiveCache {
     private val downloadLock = Mutex()
     @Volatile private var directory: File? = null
 
-    fun initialize(cacheDirectory: File) {
+    fun initialize(cacheDirectory: File, maxBytes: Long = MAX_CACHE_BYTES) {
+        maxCacheBytes = maxBytes
         val cache = File(cacheDirectory, DIRECTORY_NAME)
         directory = cache
         scope.launch {
@@ -73,6 +77,33 @@ object RemoteArchiveCache {
         }
     }
 
+    /** Keeps a cache clear or a limit change from deleting a copy while it is being read. */
+    suspend fun <T> withFile(
+        archiveUrl: String,
+        download: Boolean = true,
+        onProgress: (DownloadProgress) -> Unit = {},
+        block: suspend (File) -> T,
+    ): T? = access.read {
+        val copy = if (download) file(archiveUrl, onProgress) else cachedFile(archiveUrl)
+        copy?.let { block(it) }
+    }
+
+    suspend fun setMaxBytes(maxBytes: Long) = access.exclusive {
+        downloadLock.withLock {
+            maxCacheBytes = maxBytes.coerceAtLeast(0L)
+            directory?.let { cache -> trim(cache, keep = cache.listFiles()
+                ?.filter { it.isFile && !it.name.endsWith(PARTIAL_SUFFIX) }?.maxByOrNull(File::lastModified)) }
+        }
+    }
+
+    /** Removes completed archives after readers/downloads finish. Reports deletion failures. */
+    suspend fun clear(): Boolean = access.exclusive {
+        downloadLock.withLock {
+            directory?.listFiles()?.filter { it.isFile && !it.name.endsWith(PARTIAL_SUFFIX) }
+                ?.map { it.delete() || !it.exists() }?.all { it } ?: true
+        }
+    }
+
     private suspend fun download(archiveUrl: String, onProgress: (DownloadProgress) -> Unit): File {
         val cache = directory ?: throw IOException("Archive cache is not ready")
         if (!cache.isDirectory && !cache.mkdirs()) throw IOException("Unable to create the archive cache")
@@ -99,7 +130,7 @@ object RemoteArchiveCache {
 
     private fun trim(cache: File, keep: File? = null) {
         val files = cache.listFiles()?.filter { it.isFile && !it.name.endsWith(PARTIAL_SUFFIX) } ?: return
-        filesToEvict(files, MAX_CACHE_BYTES, keep).forEach(File::delete)
+        filesToEvict(files, maxCacheBytes, keep).forEach(File::delete)
     }
 
     /** Cache file name for [archiveUrl]: the URL's SHA-256 in hex, then its lowercase extension. */

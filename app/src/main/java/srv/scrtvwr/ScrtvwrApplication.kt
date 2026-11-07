@@ -6,6 +6,7 @@ import srv.scrtvwr.media.MediaPreviewLoader
 import srv.scrtvwr.media.remote.HttpServerAuth
 import srv.scrtvwr.media.remote.RemoteArchiveCache
 import srv.scrtvwr.preferences.ScrtvwrPreferences
+import srv.scrtvwr.preferences.MEBIBYTE
 import srv.scrtvwr.util.logs.CrashlyticsTree
 import srv.scrtvwr.util.logs.CustomLogger
 import srv.scrtvwr.util.time.TimeUtil
@@ -21,10 +22,12 @@ class ScrtvwrApplication : Application() {
             Timber.plant(CrashlyticsTree())
         }
         ScrtvwrFirebase.initialize(this)
-        MediaPreviewLoader.initialize(cacheDir)
-        RemoteArchiveCache.initialize(cacheDir)
+        val preferences = ScrtvwrPreferences(this)
+        val cacheLimits = preferences.getCacheLimits()
+        MediaPreviewLoader.initialize(cacheDir, cacheLimits)
+        RemoteArchiveCache.initialize(cacheDir, cacheLimits.archivesMiB * MEBIBYTE)
         // Before any screen or player requests a password-protected server.
-        HttpServerAuth.update(ScrtvwrPreferences(this).getHttpServers())
+        HttpServerAuth.update(preferences.getHttpServers())
         Timber.d("SCRTVWR application started")
     }
 }

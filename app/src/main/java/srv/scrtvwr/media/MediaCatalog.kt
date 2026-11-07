@@ -328,7 +328,9 @@ object MediaCatalog {
     ): List<MediaViewerItem> =
         if (MediaPaths.isRemote(path)) {
             // Server files have no local timestamp; the copy's time only says when it was last read.
-            readArchive(RemoteArchiveCache.file(path, onDownloadProgress), archivePath = path, modifiedMillis = 0L)
+            RemoteArchiveCache.withFile(path, onProgress = onDownloadProgress) {
+                readArchive(it, archivePath = path, modifiedMillis = 0L)
+            }.orEmpty()
         } else {
             listArchive(File(path))
         }

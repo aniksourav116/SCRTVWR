@@ -1,6 +1,7 @@
 package srv.scrtvwr.ui.dashboard.screens
 
 import android.widget.Toast
+import android.text.format.Formatter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -38,6 +39,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -57,12 +59,17 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.OthersUiState
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.OthersViewModel
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.PRELOAD_DISTANCE_RANGE
 import srv.scrtvwr.ui.dashboard.screens.viewmodels.SLIDE_SHOW_STAY_MILLIS_RANGE
 import srv.scrtvwr.ui.components.SimpleDropdown
 import srv.scrtvwr.preferences.DirectoryVideoPlayer
+import srv.scrtvwr.preferences.CacheLimits
+import kotlinx.coroutines.delay
 import srv.scrtvwr.ui.media.MediaEdgeDialogStyle
 import srv.scrtvwr.ui.media.SlideShowDirection
 import srv.scrtvwr.ui.theme.SCRTVWRTheme
@@ -73,8 +80,18 @@ import srv.scrtvwr.R
 fun Others(
     modifier: Modifier = Modifier,
     viewModel: OthersViewModel = viewModel(),
+    isVisible: Boolean = true,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(isVisible, lifecycleOwner) {
+        if (isVisible) lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                viewModel.refreshCacheUsage()
+                delay(5_000)
+            }
+        }
+    }
     OthersScreen(
         uiState = uiState,
         onShowHiddenFilesChange = viewModel::setShowHiddenFiles,
@@ -91,6 +108,8 @@ fun Others(
         onShowGestureTipsAgain = viewModel::showGestureTipsAgain,
         onThemeModeChange = viewModel::setThemeMode,
         onResetToDefaults = viewModel::resetToDefaults,
+        onCacheLimitsChange = viewModel::setCacheLimits,
+        onClearCache = viewModel::clearCache,
         modifier = modifier,
     )
 }
@@ -113,6 +132,8 @@ fun OthersScreen(
     onThemeModeChange: (ThemeMode) -> Unit = {},
     onResetToDefaults: () -> Unit = {},
     onDirectoryVideoPlayerChange: (DirectoryVideoPlayer) -> Unit = {},
+    onCacheLimitsChange: (CacheLimits) -> Unit = {},
+    onClearCache: () -> Unit = {},
 ) {
     var resetConfirmationVisible by rememberSaveable { mutableStateOf(false) }
     val shortSlideShowWarning = stringResource(R.string.short_slideshow_warning)
@@ -349,6 +370,69 @@ fun OthersScreen(
                 onValueChange = { value -> onVideoPreloadDistanceChange(value.toInt()) },
                 leadingContent = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
                 warning = { value -> largePreloadWarning.takeIf { value > 10L } },
+            )
+        }
+        item { SettingsSectionHeader(stringResource(R.string.cache_settings)) }
+        item {
+            val context = LocalContext.current
+            val usage = uiState.cacheUsage
+            fun size(bytes: Long): String = Formatter.formatFileSize(context, bytes)
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.cache_usage)) },
+                supportingContent = {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (usage == null) Text(stringResource(R.string.cache_calculating)) else {
+                            Text(stringResource(R.string.cache_total_usage, size(usage.totalBytes), size(usage.availableBytes)))
+                            Text(stringResource(R.string.cache_usage_breakdown, size(usage.thumbnailsBytes),
+                                size(usage.viewerBytes), size(usage.archivesBytes), size(usage.temporaryBytes)))
+                        }
+                        Text(stringResource(R.string.cache_limits_summary))
+                        if (uiState.cacheBusy) {
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                            Text(stringResource(R.string.cache_waiting))
+                        }
+                        uiState.cacheMessage?.let { Text(it) }
+                        TextButton(onClick = onClearCache, enabled = !uiState.cacheBusy) {
+                            Text(stringResource(R.string.cache_clear))
+                        }
+                    }
+                },
+            )
+        }
+        item {
+            NumericPreferenceListItem(
+                headline = stringResource(R.string.cache_thumbnail_limit),
+                supporting = stringResource(R.string.cache_thumbnail_summary),
+                value = uiState.cacheLimits.thumbnailsMiB,
+                range = 16L..4096L,
+                stepDown = { it - 16 }, stepUp = { it + 16 },
+                onValueChange = { onCacheLimitsChange(uiState.cacheLimits.copy(thumbnailsMiB = it)) },
+                leadingContent = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
+                suffix = "MiB",
+            )
+        }
+        item {
+            NumericPreferenceListItem(
+                headline = stringResource(R.string.cache_viewer_limit),
+                supporting = stringResource(R.string.cache_viewer_summary),
+                value = uiState.cacheLimits.viewerMiB,
+                range = 16L..8192L,
+                stepDown = { it - 64 }, stepUp = { it + 64 },
+                onValueChange = { onCacheLimitsChange(uiState.cacheLimits.copy(viewerMiB = it)) },
+                leadingContent = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
+                suffix = "MiB",
+            )
+        }
+        item {
+            NumericPreferenceListItem(
+                headline = stringResource(R.string.cache_archive_limit),
+                supporting = stringResource(R.string.cache_archive_summary),
+                value = uiState.cacheLimits.archivesMiB,
+                range = 64L..16384L,
+                stepDown = { it - 128 }, stepUp = { it + 128 },
+                onValueChange = { onCacheLimitsChange(uiState.cacheLimits.copy(archivesMiB = it)) },
+                leadingContent = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
+                suffix = "MiB",
             )
         }
         item {

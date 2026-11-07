@@ -361,4 +361,21 @@
     <string name="search_no_filter_results">No files match these filters.</string>
     <string name="search_skipped_folders">%1$d folders could not be read. Results may be incomplete.</string>
     <string name="cannot_open_file">Unable to give this file to another app.</string>
+    <string name="cache_settings">Media cache</string>
+    <string name="cache_usage">Storage usage</string>
+    <string name="cache_calculating">Calculating…</string>
+    <string name="cache_total_usage">%1$s cached · %2$s available on device</string>
+    <string name="cache_usage_breakdown">Thumbnails: %1$s\nViewer copies: %2$s\nArchives: %3$s\nTemporary downloads: %4$s</string>
+    <string name="cache_limits_summary">Limits apply to completed files. The most recent viewer copy or archive is kept even if it exceeds its limit. Active downloads may use extra space.</string>
+    <string name="cache_waiting">Updating cache… waiting for active reads and downloads to finish.</string>
+    <string name="cache_clear">Clear cache</string>
+    <string name="cache_cleared">Media cache cleared. Active screens may cache files again.</string>
+    <string name="cache_clear_incomplete">Some cached files could not be removed. Try clearing again.</string>
+    <string name="cache_operation_failed">Unable to update the cache. Try again.</string>
+    <string name="cache_thumbnail_limit">Thumbnail cache limit</string>
+    <string name="cache_thumbnail_summary">Small previews saved on this device.</string>
+    <string name="cache_viewer_limit">Viewer cache limit</string>
+    <string name="cache_viewer_summary">Downloaded images and video previews. Videos themselves are streamed.</string>
+    <string name="cache_archive_limit">Archive cache limit</string>
+    <string name="cache_archive_summary">Downloaded ZIP, RAR, CBZ, and CBR files.</string>
 </resources>

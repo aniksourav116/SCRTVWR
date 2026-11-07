@@ -198,6 +198,34 @@ class RemoteMediaStoreTest {
         assertFalse(image == frame)
     }
 
+    @Test
+    fun reducingLimitEvictsOlderCopiesAndKeepsTheMostRecentOversizedFile() = runBlocking {
+        val store = store()
+        val older = store.file(url, IMAGE) { it.writeText("123456") }
+        older.setLastModified(1_000_000L)
+        val other = "http://host:8000/Photos/b.jpg"
+        val newest = store.file(other, IMAGE) { it.writeText("abcdef") }
+
+        store.setMaxBytes(4)
+
+        assertFalse(older.exists())
+        assertFalse(store.contains(url, IMAGE))
+        assertTrue(newest.exists())
+        assertTrue(store.contains(other, IMAGE))
+    }
+
+    @Test
+    fun clearRemovesCompletedCopiesAndUpdatesTheirAvailability() = runBlocking {
+        val store = store()
+        store.file(url, IMAGE) { it.writeText("image") }
+        store.file(url, FRAME) { it.writeText("frame") }
+
+        assertTrue(store.clear())
+
+        assertTrue(store.names.value.isEmpty())
+        assertTrue(copies.listFiles().orEmpty().isEmpty())
+    }
+
     private val copies: File
         get() = File(temporaryFolder.root, "copies")
 

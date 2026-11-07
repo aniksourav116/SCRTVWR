@@ -166,7 +166,7 @@ fun ScrtvwrApp(viewModel: DashboardViewModel = viewModel()) {
                     title = stringResource(AppDestination.OTHERS.topBarLabel()),
                     showBackButton = false,
                 ) { modifier ->
-                    Others(modifier)
+                    Others(modifier = modifier, isVisible = visibleDestination == AppDestination.OTHERS)
                 }
             }
         }

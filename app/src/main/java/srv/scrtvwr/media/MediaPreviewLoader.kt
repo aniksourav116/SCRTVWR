@@ -31,6 +31,8 @@ import srv.scrtvwr.media.remote.HttpDirectoryClient
 import srv.scrtvwr.media.remote.HttpRangeReader
 import srv.scrtvwr.media.remote.RemoteArchiveCache
 import srv.scrtvwr.media.remote.RemoteMediaStore
+import srv.scrtvwr.preferences.CacheLimits
+import srv.scrtvwr.preferences.MEBIBYTE
 import java.io.File
 import java.io.FilterInputStream
 import java.io.IOException
@@ -49,6 +51,9 @@ object MediaPreviewLoader {
     private const val MAX_ARCHIVE_ENTRY_BYTES = 128L * 1024L * 1024L
     private const val MAX_CACHE_KIB = 48 * 1024
     private const val MAX_DISK_CACHE_BYTES = 64L * 1024L * 1024L
+    @Volatile private var diskCacheLimitBytes = MAX_DISK_CACHE_BYTES
+    @Volatile private var viewerCacheLimitBytes = 512L * MEBIBYTE
+    private val cacheAccess = CacheAccess()
     private const val MAX_DISK_CACHE_DIMENSION = 256
     private const val DISK_WRITES_PER_TRIM = 32
     private const val HEX_DIGITS = "0123456789abcdef"
@@ -68,7 +73,8 @@ object MediaPreviewLoader {
      * How many bytes of copies a slide show may fetch ahead: well under half the store, since the
      * copies of pages already shown are used more recently than the farthest ones still ahead.
      */
-    const val VIEWER_PREFETCH_BUDGET_BYTES = MAX_VIEWER_STORE_BYTES * 2 / 5
+    val VIEWER_PREFETCH_BUDGET_BYTES: Long
+        get() = viewerCacheLimitBytes * 2 / 5
     private val viewerStore = RemoteMediaStore(MAX_VIEWER_STORE_BYTES)
     private val directoryThumbnailSemaphore = Semaphore(2)
     private val comicBookCoverSemaphore = Semaphore(2)
@@ -150,13 +156,13 @@ object MediaPreviewLoader {
      * Returns the bytes downloaded, or null when this call downloaded nothing: the copy was there
      * already, or another load was fetching it. Throws what the download threw.
      */
-    suspend fun prefetchImage(url: String): Long? {
+    suspend fun prefetchImage(url: String): Long? = cacheAccess.read {
         var downloadedBytes: Long? = null
         viewerStore.file(url, VIEWER_IMAGE_COPY) { target ->
             downloadImageCopy(url, target)
             downloadedBytes = target.length()
         }
-        return downloadedBytes
+        downloadedBytes
     }
 
     /**
@@ -166,7 +172,7 @@ object MediaPreviewLoader {
      * reading it, or the video cannot give one. Throws when storing the frame failed.
      */
     suspend fun prefetchVideoFrame(url: String, modified: Long, maxDimension: Int): Long? =
-        withContext(Dispatchers.IO) {
+        cacheAccess.read { withContext(Dispatchers.IO) {
             val key = "video:$url:$modified:$maxDimension"
             if (cache.get(key) != null || !HttpRangeReader.supportsRanges(url) || unreadableRemoteVideos.get(key) != null) {
                 return@withContext null
@@ -190,7 +196,7 @@ object MediaPreviewLoader {
                 return@withContext null
             }
             storedBytes
-        }
+        } }
 
     private fun viewerFrameCopy(maxDimension: Int): String = "frame-$maxDimension"
 
@@ -363,9 +369,9 @@ object MediaPreviewLoader {
     suspend fun loadComicBookCover(path: String, modified: Long, maxDimension: Int): PreviewResult =
         loadCached("cover:$path:$modified:$maxDimension", maxDimension) {
             comicBookCoverSemaphore.withPermit {
-                val file = archiveFile(path, download = false) ?: return@withPermit PreviewResult()
                 val pages = try {
-                    MediaCatalog.listArchive(file)
+                    withArchiveFile(path, download = false) { MediaCatalog.listArchive(it) }
+                        ?: return@withPermit PreviewResult()
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
@@ -381,9 +387,9 @@ object MediaPreviewLoader {
         key: String,
         maxDimension: Int,
         loader: suspend () -> PreviewResult,
-    ): PreviewResult {
-        cache.get(key)?.let { return PreviewResult(bitmap = it) }
-        return withContext(Dispatchers.IO) {
+    ): PreviewResult = cacheAccess.read {
+        cache.get(key)?.let { return@read PreviewResult(bitmap = it) }
+        withContext(Dispatchers.IO) {
             coroutineContext.ensureActive()
             cache.get(key)?.let { return@withContext PreviewResult(bitmap = it) }
             if (maxDimension <= MAX_DISK_CACHE_DIMENSION) {
@@ -434,7 +440,7 @@ object MediaPreviewLoader {
         }
         if (diskWritesSinceTrim.incrementAndGet() >= DISK_WRITES_PER_TRIM) {
             diskWritesSinceTrim.set(0)
-            diskCacheScope.launch { trimDiskCache() }
+            diskCacheScope.launch { cacheAccess.read { trimDiskCache() } }
         }
     }
 
@@ -488,7 +494,7 @@ object MediaPreviewLoader {
         var retainedBytes = 0L
         files.forEach { file ->
             retainedBytes += file.length()
-            if (retainedBytes > MAX_DISK_CACHE_BYTES) file.delete()
+            if (retainedBytes > diskCacheLimitBytes) file.delete()
         }
     }
 
@@ -588,34 +594,35 @@ object MediaPreviewLoader {
         maxDimension: Int,
         downloadArchive: Boolean,
     ): PreviewResult {
-        val file = try {
-            archiveFile(archivePath, downloadArchive) ?: return PreviewResult()
+        return try {
+            withArchiveFile(archivePath, downloadArchive) { file ->
+                runCatching {
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    openArchiveEntry(file, entryName) { input -> BitmapFactory.decodeStream(input, null, bounds) }
+                    require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Unsupported or damaged archive image" }
+                    val options = BitmapFactory.Options().apply { inSampleSize = bounds.sampleSize(maxDimension) }
+                    openArchiveEntry(file, entryName) { input ->
+                        BitmapFactory.decodeStream(input, null, options)
+                    } ?: error("Image decoder returned no bitmap")
+                }.fold(
+                    onSuccess = { PreviewResult(bitmap = it) },
+                    onFailure = { PreviewResult(error = it.readableMessage("Unable to read archive image")) },
+                )
+            } ?: PreviewResult()
         } catch (error: IOException) {
-            return PreviewResult(error = error.readableMessage("Unable to download archive"))
+            PreviewResult(error = error.readableMessage("Unable to download archive"))
         }
-        return runCatching {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            openArchiveEntry(file, entryName) { input -> BitmapFactory.decodeStream(input, null, bounds) }
-            require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Unsupported or damaged archive image" }
-            val options = BitmapFactory.Options().apply { inSampleSize = bounds.sampleSize(maxDimension) }
-            openArchiveEntry(file, entryName) { input ->
-                BitmapFactory.decodeStream(input, null, options)
-            } ?: error("Image decoder returned no bitmap")
-        }.fold(
-            onSuccess = { PreviewResult(bitmap = it) },
-            onFailure = { PreviewResult(error = it.readableMessage("Unable to read archive image")) },
-        )
     }
 
     /**
      * Readable copy of the archive at [archivePath]: the file itself when local, else the cached
      * download, fetched now only when [download] is true.
      */
-    private suspend fun archiveFile(archivePath: String, download: Boolean): File? = when {
-        !MediaPaths.isRemote(archivePath) -> File(archivePath)
-        download -> RemoteArchiveCache.file(archivePath)
-        else -> RemoteArchiveCache.cachedFile(archivePath)
-    }
+    private suspend fun <T> withArchiveFile(
+        archivePath: String, download: Boolean, block: suspend (File) -> T,
+    ): T? = if (MediaPaths.isRemote(archivePath)) {
+        RemoteArchiveCache.withFile(archivePath, download = download, block = block)
+    } else block(File(archivePath))
 
     /** Opens [entryName] in [file], a local archive or the cached copy of a server archive. */
     private fun <T> openArchiveEntry(file: File, entryName: String, block: (InputStream) -> T): T {
@@ -686,7 +693,27 @@ object MediaPreviewLoader {
         }
     }
 
-    fun initialize(cacheDirectory: File) {
+    suspend fun setCacheLimits(limits: CacheLimits) = cacheAccess.exclusive {
+        diskCacheLimitBytes = limits.thumbnailsMiB * MEBIBYTE
+        viewerCacheLimitBytes = limits.viewerMiB * MEBIBYTE
+        viewerStore.setMaxBytes(viewerCacheLimitBytes)
+        trimDiskCache()
+    }
+
+    suspend fun clearCaches(): Boolean = cacheAccess.exclusive {
+        cache.evictAll()
+        unreadableRemoteVideos.evictAll()
+        val thumbnailsCleared = diskCacheDirectory?.listFiles()?.filter(File::isFile)
+            ?.map { it.delete() || !it.exists() }?.all { it } ?: true
+        val copiesCleared = viewerStore.clear()
+        _forgottenPreviews.update { it + 1 }
+        thumbnailsCleared && copiesCleared
+    }
+
+    fun initialize(cacheDirectory: File, limits: CacheLimits = CacheLimits()) {
+        diskCacheLimitBytes = limits.thumbnailsMiB * MEBIBYTE
+        viewerCacheLimitBytes = limits.viewerMiB * MEBIBYTE
+        viewerStore.setMaxBytes(viewerCacheLimitBytes)
         // Each process owns its temporary image files. Remove leftovers before any loads start.
         val downloads = File(cacheDirectory, "remote_images")
         downloads.listFiles()?.filter { it.name.endsWith(".part") }?.forEach(File::delete)
@@ -702,7 +729,7 @@ object MediaPreviewLoader {
         diskCacheDirectory = directory
         diskCacheScope.launch {
             directory.mkdirs()
-            trimDiskCache()
+            cacheAccess.read { trimDiskCache() }
             cacheDirectory.listFiles()
                 ?.filter { it.name.startsWith("$VIEWER_STORE_DIRECTORY-old-") }
                 ?.forEach(File::deleteRecursively)

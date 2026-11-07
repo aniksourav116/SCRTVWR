@@ -24,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap
  * for that fetch, and fetches it itself if that one fails or is cancelled. Finished copies stay
  * until the store holds more than [maxBytes], least recently used dropped first.
  */
-internal class RemoteMediaStore(private val maxBytes: Long) {
+internal class RemoteMediaStore(@Volatile private var maxBytes: Long) {
     @Volatile private var directory: File? = null
     @Volatile private var partialDirectory: File? = null
     private val running = ConcurrentHashMap<String, CompletableDeferred<File>>()
@@ -172,7 +172,20 @@ internal class RemoteMediaStore(private val maxBytes: Long) {
         if (dropped.isNotEmpty()) _names.update { it - dropped }
     }
 
-    private fun trim(keep: File) {
+    fun setMaxBytes(bytes: Long) {
+        maxBytes = bytes.coerceAtLeast(0L)
+        trim(directory?.listFiles()?.filter(File::isFile)?.maxByOrNull(File::lastModified))
+    }
+
+    /** Called while the preview loader has suspended new readers and waited for existing ones. */
+    fun clear(): Boolean {
+        val files = directory?.listFiles()?.filter(File::isFile).orEmpty()
+        val dropped = files.filter { it.delete() || !it.exists() }.mapTo(HashSet(), File::getName)
+        _names.update { it - dropped }
+        return files.all { it.name in dropped }
+    }
+
+    private fun trim(keep: File?) {
         val files = directory?.listFiles()?.filter(File::isFile) ?: return
         val dropped = RemoteArchiveCache.filesToEvict(files, maxBytes, keep)
             .filter(File::delete)
