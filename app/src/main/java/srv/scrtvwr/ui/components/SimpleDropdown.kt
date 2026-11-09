@@ -23,7 +23,7 @@ fun <T> SimpleDropdown(
     selected: T?,
     onSelected: (T) -> Unit,
     modifier: Modifier = Modifier,
-    itemLabel: (T) -> String = { it.toString() },
+    itemLabel: @Composable (T) -> String = { it.toString() },
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -33,7 +33,7 @@ fun <T> SimpleDropdown(
         modifier = modifier,
     ) {
         OutlinedTextField(
-            value = selected?.let(itemLabel).orEmpty(),
+            value = selected?.let { itemLabel(it) }.orEmpty(),
             onValueChange = {},
             readOnly = true,
             label = { Text(label) },
